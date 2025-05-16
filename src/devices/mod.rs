@@ -45,9 +45,11 @@ pub struct DeviceState {
 impl Display for DeviceState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let unknown = "Unknown".to_string();
-        write!(f, "Name:                     {}
+        write!(
+            f,
+            "Name:                     {}
 Battery level:            {}
-Charging status:           {}
+Charging status:          {}
 Muted:                    {}
 Mic connected:            {}
 Automatic shutdown after: {}
@@ -57,24 +59,24 @@ Side tone on:             {}
 Side tone volume:         {}
 Voice prompt on:          {}
 Connected:                {}",
-           self.device_name.clone().unwrap_or("Unknown".to_string()),
-           self.battery_level
-               .map_or(unknown.clone(), |l| format!("{l}%")),
-           self.charging.map_or(unknown.clone(), |c| c.to_string()),
-           self.muted.map_or(unknown.clone(), |m| m.to_string()),
-           self.mic_connected
-               .map_or(unknown.clone(), |m| m.to_string()),
-           self.automatic_shutdown_after
-               .map_or(unknown.clone(), |a| format!("{} min", a.as_secs() / 60)),
-           self.pairing_info.map_or(unknown.clone(), |p| p.to_string()),
-           self.product_color
-               .map_or(unknown.clone(), |c| c.to_string()),
-           self.side_tone_on.map_or(unknown.clone(), |s| s.to_string()),
-           self.side_tone_volume
-               .map_or(unknown.clone(), |s| s.to_string()),
-           self.voice_prompt_on
-               .map_or(unknown.clone(), |v| v.to_string()),
-           self.connected.map_or(unknown.clone(), |c| c.to_string()),
+            self.device_name.clone().unwrap_or("Unknown".to_string()),
+            self.battery_level
+                .map_or(unknown.clone(), |l| format!("{l}%")),
+            self.charging.map_or(unknown.clone(), |c| c.to_string()),
+            self.muted.map_or(unknown.clone(), |m| m.to_string()),
+            self.mic_connected
+                .map_or(unknown.clone(), |m| m.to_string()),
+            self.automatic_shutdown_after
+                .map_or(unknown.clone(), |a| format!("{} min", a.as_secs() / 60)),
+            self.pairing_info.map_or(unknown.clone(), |p| p.to_string()),
+            self.product_color
+                .map_or(unknown.clone(), |c| c.to_string()),
+            self.side_tone_on.map_or(unknown.clone(), |s| s.to_string()),
+            self.side_tone_volume
+                .map_or(unknown.clone(), |s| s.to_string()),
+            self.voice_prompt_on
+                .map_or(unknown.clone(), |v| v.to_string()),
+            self.connected.map_or(unknown.clone(), |c| c.to_string()),
         )
     }
 }
@@ -88,7 +90,11 @@ impl DeviceState {
                 if product_ids.contains(&info.product_id())
                     && vendor_ids.contains(&info.vendor_id())
                 {
-                    Some((hid_api.open(info.vendor_id(), info.product_id()), info.product_id(), info.vendor_id()))
+                    Some((
+                        hid_api.open(info.vendor_id(), info.product_id()),
+                        info.product_id(),
+                        info.vendor_id(),
+                    ))
                 } else {
                     None
                 }
@@ -117,7 +123,8 @@ impl DeviceState {
 
     pub fn to_string_no_padding(&self) -> String {
         let unknown = "Unknown".to_string();
-        format!("Battery level: {}
+        format!(
+            "Battery level: {}
 Charging status: {}
 Muted: {}
 Mic connected: {}
