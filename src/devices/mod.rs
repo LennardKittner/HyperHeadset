@@ -300,7 +300,8 @@ pub trait Device {
         self.get_event_from_device_response(&buf[0..res])
     }
 
-    fn refresh_state(&mut self) -> Result<(), DeviceError> {
+    /// Refreshes the state by querying all available information
+    fn active_refresh_state(&mut self) -> Result<(), DeviceError> {
         let packets = vec![
             self.get_wireless_connected_status_packet(),
             self.get_charging_packet(),
@@ -332,5 +333,21 @@ pub trait Device {
         } else {
             Err(DeviceError::NoResponse())
         }
+    }
+
+    /// Refreshes the state by listening for events
+    /// Only the battery level is actively queried because it is not communicated by the device on its own
+    fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
+        if let Some(event) = self.wait_for_updates(Duration::from_secs(1)) {
+            self.get_device_state_mut().update_self_with_event(&event);
+        }
+        if let Some(batter_packet) = self.get_battery_packet() {
+            self.get_device_state().hid_device.write(&batter_packet)?;
+            if let Some(event) = self.wait_for_updates(Duration::from_secs(1)) {
+                self.get_device_state_mut().update_self_with_event(&event);
+            }
+        }
+
+        Ok(())
     }
 }

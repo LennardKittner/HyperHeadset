@@ -1,5 +1,5 @@
-use std::time::Duration;
 use clap::{Arg, Command};
+use std::time::Duration;
 
 mod status_tray;
 use hyper_headset::devices::connect_compatible_device;
@@ -14,11 +14,10 @@ fn main() {
             Arg::new("refresh_interval")
                 .long("refresh_interval")
                 .required(false)
-                .help(
-                    "Set the refresh interval (in seconds)",
-                )
+                .help("Set the refresh interval (in seconds)")
                 .value_parser(clap::value_parser!(u64)),
-        ).get_matches();
+        )
+        .get_matches();
     let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
     let refresh_interval = Duration::from_secs(refresh_interval);
     let tray_handler = TrayHandler::new(StatusTray::new());
@@ -32,9 +31,16 @@ fn main() {
         };
 
         // Run loop
+        let mut run_counter = 0;
         loop {
             std::thread::sleep(refresh_interval);
-            match device.refresh_state() {
+            // with the default refresh_interval the state is only actively queried every 3min
+            // quiting the device to frequently can lead to instability
+            match if run_counter % 60 == 0 {
+                device.active_refresh_state()
+            } else {
+                device.passive_refresh_state()
+            } {
                 Ok(()) => (),
                 Err(error) => {
                     eprintln!("{error}");
@@ -43,7 +49,8 @@ fn main() {
                     break; // try to reconnect
                 }
             };
-            tray_handler.update(device.get_device_state())
+            tray_handler.update(device.get_device_state());
+            run_counter += 1;
         }
     }
 }

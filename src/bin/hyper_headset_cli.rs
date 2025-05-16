@@ -110,14 +110,11 @@ fn main() {
 
     std::thread::sleep(Duration::from_secs_f64(0.5));
 
-    if let Err(error) = device.refresh_state() {
+    if let Err(error) = device.active_refresh_state() {
         eprintln!("{error}");
         std::process::exit(1);
     };
-    println!(
-        "{}",
-        device.get_device_state()
-    );
+    println!("{}", device.get_device_state());
 }
 
 #[test]
