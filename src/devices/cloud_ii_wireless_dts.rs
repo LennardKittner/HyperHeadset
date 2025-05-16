@@ -200,7 +200,9 @@ impl Device for CloudIIWirelessDTS {
             (_, GET_AUTO_SHUTDOWN_CMD_ID, time, _) => Some(DeviceEvent::AutomaticShutdownAfter(
                 Duration::from_secs(time as u64 * 60),
             )),
-            (_, GET_MUTE_CMD_ID, status, _) => Some(DeviceEvent::Muted(status == 1)),
+            (_, SET_MUTE_CMD_ID, status, _) | (_, GET_MUTE_CMD_ID, status, _) => {
+                Some(DeviceEvent::Muted(status == 1))
+            }
             (_, GET_PAIRING_CMD_ID, status, _) => Some(DeviceEvent::PairingInfo(status)),
             (_, GET_SIDE_TONE_ON_CMD_ID, status, _) => Some(DeviceEvent::SideToneOn(status == 1)),
             (_, GET_SIDE_TONE_VOLUME_CMD_ID, status, _) => {
@@ -213,7 +215,10 @@ impl Device for CloudIIWirelessDTS {
             (GET_PRODUCT_COLOR_CMD_ID, status, _, _) => {
                 Some(DeviceEvent::ProductColor(Color::from(status)))
             }
-            _ => None,
+            _ => {
+                println!("Unknown device event: {:?}", response);
+                None
+            }
         }
     }
 
