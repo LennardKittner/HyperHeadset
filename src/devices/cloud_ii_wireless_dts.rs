@@ -2,7 +2,7 @@ use crate::devices::{ChargingStatus, Color, Device, DeviceError, DeviceEvent, De
 use std::time::Duration;
 
 const HP: u16 = 0x03F0;
-const HYPERX: u16 = 0x0696;
+const HYPERX: u16 = 0x0951;
 const VENDOR_IDS: [u16; 2] = [HP, HYPERX];
 // Possible Cloud II Wireless product IDs
 const PRODUCT_IDS: [u16; 4] = [0x1718, 0x018B, 0x0D93, 0x0696];
