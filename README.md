@@ -70,6 +70,9 @@ Once created, replug the wireless dongle.
 
 ## Building
 
+This project uses git submodules, so before building you have to initialize them via:
+`git submodule update --init --recursive`
+
 To only build the CLI app on MacOS, use:
 `cargo build --release --bin hyper_headset_cli`
 
