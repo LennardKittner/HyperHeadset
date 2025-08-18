@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use clap::{Arg, Command};
-use hyper_headset::devices::{cloud_ii_wireless_dts::CloudIIWirelessDTS, Device};
+use hyper_headset::devices::connect_compatible_device;
 
 fn main() {
     let matches = Command::new(env!("CARGO_PKG_NAME"))
@@ -47,7 +47,7 @@ fn main() {
         )
         .get_matches();
 
-    let mut device = match CloudIIWirelessDTS::new() {
+    let mut device = match connect_compatible_device() {
         Ok(device) => device,
         Err(error) => {
             eprintln!("{error}");
