@@ -1,14 +1,17 @@
+pub mod cloud_ii_wireless;
 pub mod cloud_ii_wireless_dts;
 
-use crate::devices::cloud_ii_wireless_dts::CloudIIWirelessDTS;
+use crate::devices::{
+    cloud_ii_wireless::CloudIIWireless, cloud_ii_wireless_dts::CloudIIWirelessDTS,
+};
 use hidapi::{HidApi, HidDevice, HidError};
 use std::{fmt::Display, time::Duration};
 use thistermination::TerminationFull;
 
-// Possible vendor IDs [HP]
-const VENDOR_IDS: [u16; 1] = [0x03F0];
+// Possible vendor IDs [HyperX, HP]
+const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
 // Possible Cloud II Wireless product IDs
-const PRODUCT_IDS: [u16; 4] = [0x1718, 0x018B, 0x0D93, 0x0696];
+const PRODUCT_IDS: [u16; 5] = [0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92];
 
 pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     let state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
@@ -17,9 +20,20 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
         .get_product_string()?
         .ok_or(DeviceError::NoDeviceFound())?;
     println!("Connecting to {}", name);
-    match name.as_str() {
-        "HyperX Cloud II Wireless" => Ok(Box::new(CloudIIWirelessDTS::new_from_state(state))),
-        _ => Err(DeviceError::NoDeviceFound()),
+    match (state.vendor_id, state.product_id) {
+        (v, p)
+            if cloud_ii_wireless::VENDOR_IDS.contains(&v)
+                && cloud_ii_wireless::PRODUCT_IDS.contains(&p) =>
+        {
+            Ok(Box::new(CloudIIWireless::new_from_state(state)))
+        }
+        (v, p)
+            if cloud_ii_wireless_dts::VENDOR_IDS.contains(&v)
+                && cloud_ii_wireless_dts::PRODUCT_IDS.contains(&p) =>
+        {
+            Ok(Box::new(CloudIIWirelessDTS::new_from_state(state)))
+        }
+        (_, _) => Err(DeviceError::NoDeviceFound()),
     }
 }
 
@@ -292,6 +306,7 @@ pub trait Device {
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<DeviceEvent>;
     fn get_device_state(&self) -> &DeviceState;
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
+    fn prepare_write(&mut self) {}
     fn wait_for_updates(&mut self, duration: Duration) -> Option<DeviceEvent> {
         let mut buf = [0u8; 8];
         let res = self
@@ -325,6 +340,7 @@ pub trait Device {
 
         let mut responded = false;
         for packet in packets.into_iter().flatten() {
+            self.prepare_write();
             self.get_device_state().hid_device.write(&packet)?;
             if let Some(event) = self.wait_for_updates(Duration::from_secs(1)) {
                 self.get_device_state_mut().update_self_with_event(&event);
