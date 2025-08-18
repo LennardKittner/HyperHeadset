@@ -2,28 +2,13 @@ use crate::devices::{ChargingStatus, Color, Device, DeviceError, DeviceEvent, De
 use std::time::Duration;
 
 const HP: u16 = 0x03F0;
-const HYPERX: u16 = 0x0951;
-const VENDOR_IDS: [u16; 2] = [HP, HYPERX];
+pub const VENDOR_IDS: [u16; 1] = [HP];
 // Possible Cloud II Wireless product IDs
-const PRODUCT_IDS: [u16; 4] = [0x1718, 0x018B, 0x0D93, 0x0696];
+pub const PRODUCT_IDS: [u16; 4] = [0x1718, 0x018B, 0x0D93, 0x0696];
 
-const BASE_PACKET_HP: [u8; 20] = {
+const BASE_PACKET: [u8; 20] = {
     let mut packet = [0; 20];
     (packet[0], packet[1], packet[2]) = (0x06, 0xff, 0xbb);
-    packet
-};
-
-const BASE_PACKET_HYPERX: [u8; 62] = {
-    let mut packet = [0; 62];
-    packet[0] = 0x06;
-    packet[2] = 0x02;
-    packet[4] = 0x9A;
-    packet[7] = 0x68;
-    packet[8] = 0x4A;
-    packet[9] = 0x8E;
-    packet[10] = 0x0A;
-    packet[14] = 0xBB;
-    packet[15] = 0x01;
     packet
 };
 
@@ -54,77 +39,66 @@ const GET_WIRELESS_STATUS_CMD_ID: u8 = 1;
 
 pub struct CloudIIWirelessDTS {
     state: DeviceState,
-    base_packet: &'static [u8],
 }
 
 impl CloudIIWirelessDTS {
     pub fn new_from_state(state: DeviceState) -> Self {
-        let base_packet = if state.vendor_id == HP {
-            BASE_PACKET_HP.as_ref()
-        } else {
-            BASE_PACKET_HYPERX.as_ref()
-        };
-        CloudIIWirelessDTS { state, base_packet }
+        CloudIIWirelessDTS { state }
     }
 
     pub fn new() -> Result<Self, DeviceError> {
         let state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
-        let base_packet = if state.vendor_id == HP {
-            BASE_PACKET_HP.as_ref()
-        } else {
-            BASE_PACKET_HYPERX.as_ref()
-        };
-        Ok(CloudIIWirelessDTS { state, base_packet })
+        Ok(CloudIIWirelessDTS { state })
     }
 }
 
 impl Device for CloudIIWirelessDTS {
     fn get_charging_packet(&self) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = GET_CHARGING_CMD_ID;
         Some(tmp)
     }
 
     fn get_battery_packet(&self) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = GET_BATTERY_CMD_ID;
         Some(tmp)
     }
 
     fn set_automatic_shut_down_packet(&self, shutdown_after: Duration) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = SET_AUTO_SHUTDOWN_CMD_ID;
         tmp[4] = (shutdown_after.as_secs() / 60) as u8;
         Some(tmp)
     }
 
     fn get_automatic_shut_down_packet(&self) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = GET_AUTO_SHUTDOWN_CMD_ID;
         Some(tmp)
     }
 
     fn get_mute_packet(&self) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = GET_MUTE_CMD_ID;
         Some(tmp)
     }
 
     fn set_mute_packet(&self, mute: bool) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = SET_MUTE_CMD_ID;
         tmp[4] = mute as u8;
         Some(tmp)
     }
 
     fn get_mic_connected_packet(&self) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = GET_MIC_CONNECTED_CMD_ID;
         Some(tmp)
     }
 
     fn get_pairing_info_packet(&self) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = GET_PAIRING_CMD_ID;
         Some(tmp)
     }
@@ -138,26 +112,26 @@ impl Device for CloudIIWirelessDTS {
     }
 
     fn get_side_tone_packet(&self) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = GET_SIDE_TONE_ON_CMD_ID;
         Some(tmp)
     }
 
     fn set_side_tone_packet(&self, side_tone_on: bool) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = SET_SIDE_TONE_ON_CMD_ID;
         tmp[4] = side_tone_on as u8;
         Some(tmp)
     }
 
     fn get_side_tone_volume_packet(&self) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = GET_SIDE_TONE_VOLUME_CMD_ID;
         Some(tmp)
     }
 
     fn set_side_tone_volume_packet(&self, volume: u8) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = SET_SIDE_TONE_VOLUME_CMD_ID;
         tmp[4] = volume;
         Some(tmp)
@@ -180,7 +154,7 @@ impl Device for CloudIIWirelessDTS {
     }
 
     fn get_wireless_connected_status_packet(&self) -> Option<Vec<u8>> {
-        let mut tmp = self.base_packet.to_vec();
+        let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = GET_WIRELESS_STATUS_CMD_ID;
         Some(tmp)
     }
