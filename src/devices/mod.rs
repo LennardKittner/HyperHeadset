@@ -52,6 +52,7 @@ pub struct DeviceState {
     pub product_color: Option<Color>,
     pub side_tone_on: Option<bool>,
     pub side_tone_volume: Option<u8>,
+    pub surround_sound: Option<bool>,
     pub voice_prompt_on: Option<bool>,
     pub connected: Option<bool>,
 }
@@ -71,6 +72,7 @@ Pairing info:             {}
 Product color:            {}
 Side tone on:             {}
 Side tone volume:         {}
+Surround sound:           {}
 Voice prompt on:          {}
 Connected:                {}",
             self.device_name.clone().unwrap_or("Unknown".to_string()),
@@ -87,6 +89,8 @@ Connected:                {}",
                 .map_or(unknown.clone(), |c| c.to_string()),
             self.side_tone_on.map_or(unknown.clone(), |s| s.to_string()),
             self.side_tone_volume
+                .map_or(unknown.clone(), |s| s.to_string()),
+            self.surround_sound
                 .map_or(unknown.clone(), |s| s.to_string()),
             self.voice_prompt_on
                 .map_or(unknown.clone(), |v| v.to_string()),
@@ -124,6 +128,7 @@ impl DeviceState {
             charging: None,
             battery_level: None,
             muted: None,
+            surround_sound: None,
             mic_connected: None,
             automatic_shutdown_after: None,
             pairing_info: None,
@@ -147,6 +152,7 @@ Pairing info: {}
 Product color: {}
 Side tone on: {}
 Side tone volume: {}
+Surround sound: {}
 Voice prompt on: {}
 Connected: {}",
             self.battery_level
@@ -162,6 +168,8 @@ Connected: {}",
                 .map_or(unknown.clone(), |c| c.to_string()),
             self.side_tone_on.map_or(unknown.clone(), |s| s.to_string()),
             self.side_tone_volume
+                .map_or(unknown.clone(), |s| s.to_string()),
+            self.surround_sound
                 .map_or(unknown.clone(), |s| s.to_string()),
             self.voice_prompt_on
                 .map_or(unknown.clone(), |v| v.to_string()),
@@ -182,6 +190,7 @@ Connected: {}",
             DeviceEvent::ProductColor(color) => self.product_color = Some(*color),
             DeviceEvent::SideToneOn(side) => self.side_tone_on = Some(*side),
             DeviceEvent::SideToneVolume(volume) => self.side_tone_volume = Some(*volume),
+            DeviceEvent::SurroundSound(status) => self.surround_sound = Some(*status),
             DeviceEvent::VoicePrompt(on) => self.voice_prompt_on = Some(*on),
             DeviceEvent::WirelessConnected(connected) => self.connected = Some(*connected),
         };
@@ -191,7 +200,15 @@ Connected: {}",
         self.charging = None;
         self.battery_level = None;
         self.muted = None;
+        self.surround_sound = None;
         self.mic_connected = None;
+        self.automatic_shutdown_after = None;
+        self.pairing_info = None;
+        self.product_color = None;
+        self.side_tone_on = None;
+        self.side_tone_volume = None;
+        self.voice_prompt_on = None;
+        self.connected = None;
     }
 }
 
@@ -222,6 +239,7 @@ pub enum DeviceEvent {
     SideToneVolume(u8),
     VoicePrompt(bool),
     WirelessConnected(bool),
+    SurroundSound(bool),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -293,6 +311,8 @@ pub trait Device {
     fn get_automatic_shut_down_packet(&self) -> Option<Vec<u8>>;
     fn get_mute_packet(&self) -> Option<Vec<u8>>;
     fn set_mute_packet(&self, mute: bool) -> Option<Vec<u8>>;
+    fn get_surround_sound_packet(&self) -> Option<Vec<u8>>;
+    fn set_surround_sound_packet(&self, surround_sound: bool) -> Option<Vec<u8>>;
     fn get_mic_connected_packet(&self) -> Option<Vec<u8>>;
     fn get_pairing_info_packet(&self) -> Option<Vec<u8>>;
     fn get_product_color_packet(&self) -> Option<Vec<u8>>;
@@ -303,11 +323,11 @@ pub trait Device {
     fn get_voice_prompt_packet(&self) -> Option<Vec<u8>>;
     fn set_voice_prompt_packet(&self, enable: bool) -> Option<Vec<u8>>;
     fn get_wireless_connected_status_packet(&self) -> Option<Vec<u8>>;
-    fn get_event_from_device_response(&self, response: &[u8]) -> Option<DeviceEvent>;
+    fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
     fn get_device_state(&self) -> &DeviceState;
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
     fn prepare_write(&mut self) {}
-    fn wait_for_updates(&mut self, duration: Duration) -> Option<DeviceEvent> {
+    fn wait_for_updates(&mut self, duration: Duration) -> Option<Vec<DeviceEvent>> {
         let mut buf = [0u8; 8];
         let res = self
             .get_device_state()
@@ -330,6 +350,7 @@ pub trait Device {
             self.get_battery_packet(),
             self.get_automatic_shut_down_packet(),
             self.get_mute_packet(),
+            self.get_surround_sound_packet(),
             self.get_mic_connected_packet(),
             self.get_pairing_info_packet(),
             self.get_product_color_packet(),
@@ -342,8 +363,10 @@ pub trait Device {
         for packet in packets.into_iter().flatten() {
             self.prepare_write();
             self.get_device_state().hid_device.write(&packet)?;
-            if let Some(event) = self.wait_for_updates(Duration::from_secs(1)) {
-                self.get_device_state_mut().update_self_with_event(&event);
+            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+                for event in events {
+                    self.get_device_state_mut().update_self_with_event(&event);
+                }
                 responded = true;
             }
             if !self.get_device_state().connected.map_or(true, |c| c) {
@@ -361,13 +384,17 @@ pub trait Device {
     /// Refreshes the state by listening for events
     /// Only the battery level is actively queried because it is not communicated by the device on its own
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
-        if let Some(event) = self.wait_for_updates(Duration::from_secs(1)) {
-            self.get_device_state_mut().update_self_with_event(&event);
+        if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+            for event in events {
+                self.get_device_state_mut().update_self_with_event(&event);
+            }
         }
         if let Some(batter_packet) = self.get_battery_packet() {
             self.get_device_state().hid_device.write(&batter_packet)?;
-            if let Some(event) = self.wait_for_updates(Duration::from_secs(1)) {
-                self.get_device_state_mut().update_self_with_event(&event);
+            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+                for event in events {
+                    self.get_device_state_mut().update_self_with_event(&event);
+                }
             }
         }
 

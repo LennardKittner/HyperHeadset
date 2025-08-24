@@ -21,7 +21,7 @@ fn main() {
             Arg::new("mute")
                 .long("mute")
                 .required(false)
-                .help("Mute or un mute the headset.")
+                .help("Mute or unmute the headset.")
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -43,6 +43,13 @@ fn main() {
                 .long("enable_voice_prompt")
                 .required(false)
                 .help("Enable voice prompt. This may not be supported on your device.")
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("surround_sound")
+                .long("surround_sound")
+                .required(false)
+                .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
                 .value_parser(clap::value_parser!(bool)),
         )
         .get_matches();
@@ -108,6 +115,16 @@ fn main() {
         }
     }
 
+    if let Some(surround_sound) = matches.get_one::<bool>("surround_sound") {
+        if let Some(packet) = device.set_surround_sound_packet(*surround_sound) {
+            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+                println!("Failed to set surround sound with error: {:?}", err)
+            }
+        } else {
+            println!("Can't change surround sound on this device")
+        }
+    }
+
     std::thread::sleep(Duration::from_secs_f64(0.5));
 
     if let Err(error) = device.active_refresh_state() {
@@ -115,12 +132,4 @@ fn main() {
         std::process::exit(1);
     };
     println!("{}", device.get_device_state());
-}
-
-#[test]
-fn test_basic_device_access() {
-    let _ = match CloudIIWirelessDTS::new() {
-        Ok(device) => device,
-        Err(_) => return,
-    };
 }

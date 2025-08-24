@@ -159,35 +159,51 @@ impl Device for CloudIIWirelessDTS {
         Some(tmp)
     }
 
-    fn get_event_from_device_response(&self, response: &[u8]) -> Option<DeviceEvent> {
+    fn get_surround_sound_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn set_surround_sound_packet(&self, _surround_sound: bool) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
         if response.len() < 7 {
             return None;
         }
         match (response[2], response[3], response[4], response[7]) {
             (_, GET_CHARGING_CMD_ID, status, _) => {
-                Some(DeviceEvent::Charging(ChargingStatus::from(status)))
+                Some(vec![DeviceEvent::Charging(ChargingStatus::from(status))])
             }
             (_, GET_MIC_CONNECTED_CMD_ID, status, _) => {
-                Some(DeviceEvent::MicConnected(status == 1))
+                Some(vec![DeviceEvent::MicConnected(status == 1)])
             }
-            (_, GET_BATTERY_CMD_ID, _, level) => Some(DeviceEvent::BatterLevel(level)),
-            (_, GET_AUTO_SHUTDOWN_CMD_ID, time, _) => Some(DeviceEvent::AutomaticShutdownAfter(
-                Duration::from_secs(time as u64 * 60),
-            )),
+            (_, GET_BATTERY_CMD_ID, _, level) => Some(vec![DeviceEvent::BatterLevel(level)]),
+            (_, GET_AUTO_SHUTDOWN_CMD_ID, time, _) => {
+                Some(vec![DeviceEvent::AutomaticShutdownAfter(
+                    Duration::from_secs(time as u64 * 60),
+                )])
+            }
             (_, SET_MUTE_CMD_ID, status, _) | (_, GET_MUTE_CMD_ID, status, _) => {
-                Some(DeviceEvent::Muted(status == 1))
+                Some(vec![DeviceEvent::Muted(status == 1)])
             }
-            (_, GET_PAIRING_CMD_ID, status, _) => Some(DeviceEvent::PairingInfo(status)),
-            (_, GET_SIDE_TONE_ON_CMD_ID, status, _) => Some(DeviceEvent::SideToneOn(status == 1)),
+            (_, GET_PAIRING_CMD_ID, status, _) => Some(vec![DeviceEvent::PairingInfo(status)]),
+            (_, GET_SIDE_TONE_ON_CMD_ID, status, _) => {
+                Some(vec![DeviceEvent::SideToneOn(status == 1)])
+            }
             (_, GET_SIDE_TONE_VOLUME_CMD_ID, status, _) => {
-                Some(DeviceEvent::SideToneVolume(status))
+                Some(vec![DeviceEvent::SideToneVolume(status)])
             }
             (_, GET_WIRELESS_STATUS_CMD_ID, status, _) => {
-                Some(DeviceEvent::WirelessConnected(status == 1 || status == 4))
+                Some(vec![DeviceEvent::WirelessConnected(
+                    status == 1 || status == 4,
+                )])
             }
-            (GET_VOICE_PROMPT_CMD_ID, status, _, _) => Some(DeviceEvent::VoicePrompt(status == 1)),
+            (GET_VOICE_PROMPT_CMD_ID, status, _, _) => {
+                Some(vec![DeviceEvent::VoicePrompt(status == 1)])
+            }
             (GET_PRODUCT_COLOR_CMD_ID, status, _, _) => {
-                Some(DeviceEvent::ProductColor(Color::from(status)))
+                Some(vec![DeviceEvent::ProductColor(Color::from(status))])
             }
             _ => {
                 println!("Unknown device event: {:?}", response);

@@ -35,7 +35,7 @@ fn main() {
         loop {
             std::thread::sleep(refresh_interval);
             // with the default refresh_interval the state is only actively queried every 3min
-            // quiting the device to frequently can lead to instability
+            // querying the device to frequently can lead to instability
             match if run_counter % 60 == 0 {
                 device.active_refresh_state()
             } else {
