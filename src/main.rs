@@ -25,7 +25,7 @@ fn main() {
         let mut device = loop {
             match connect_compatible_device() {
                 Ok(d) => break d,
-                Err(e) => println!("Connecting failed with error: {e}"),
+                Err(e) => eprintln!("Connecting failed with error: {e}"),
             }
             std::thread::sleep(Duration::from_secs(1));
         };
