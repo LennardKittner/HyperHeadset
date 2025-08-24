@@ -150,9 +150,13 @@ fn test_device(device_info: &DeviceInfo) {
     );
     let hidapi = HidApi::new().unwrap();
     let device = device_info.open_device(&hidapi).unwrap();
+
     for packet in PACKETS {
         let mut response_buffer = [0u8; 20];
+        let mut input_report_buffer = [0u8; 64];
+        input_report_buffer[0] = 6;
         println!("  packet: {:?}", packet);
+        device.get_input_report(&mut input_report_buffer).unwrap();
         let _ = device.write(packet).map_err(|err| println!("{err}"));
         match device.read_timeout(&mut response_buffer, 1000) {
             Err(err) => println!("{err}"),
