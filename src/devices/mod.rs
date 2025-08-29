@@ -13,6 +13,8 @@ const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
 // Possible Cloud II Wireless product IDs
 const PRODUCT_IDS: [u16; 5] = [0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92];
 
+const RESPONSE_BUFFER_SIZE: usize = 256;
+
 pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     let state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
     let name = state
@@ -328,7 +330,7 @@ pub trait Device {
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
     fn prepare_write(&mut self) {}
     fn wait_for_updates(&mut self, duration: Duration) -> Option<Vec<DeviceEvent>> {
-        let mut buf = [0u8; 8];
+        let mut buf = [0u8; RESPONSE_BUFFER_SIZE];
         let res = self
             .get_device_state()
             .hid_device
