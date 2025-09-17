@@ -341,7 +341,7 @@ pub trait Device {
             return None;
         }
 
-        self.get_event_from_device_response(&buf[0..res])
+        self.get_event_from_device_response(&buf)
     }
 
     /// Refreshes the state by querying all available information
@@ -364,6 +364,7 @@ pub trait Device {
         let mut responded = false;
         for packet in packets.into_iter().flatten() {
             self.prepare_write();
+            println!("writing Packet {packet:?}");
             self.get_device_state().hid_device.write(&packet)?;
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
@@ -374,6 +375,8 @@ pub trait Device {
             if !self.get_device_state().connected.map_or(true, |c| c) {
                 break;
             }
+            std::thread::sleep(Duration::from_secs_f64(2.));
+            println!("waiting 2s before sending the next packet ...");
         }
 
         if responded {

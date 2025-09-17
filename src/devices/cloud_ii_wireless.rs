@@ -155,20 +155,28 @@ impl Device for CloudIIWireless {
         }
         println!("Received packet: {:?}", response);
         match (response[3], response[7], response[12], response[14]) {
-            (GET_BATTERY_CMD_ID, level, _, _) => Some(vec![DeviceEvent::BatterLevel(level)]),
+            (GET_BATTERY_CMD_ID, level, _, _) => {
+                println!("Battery Level {level}");
+                Some(vec![DeviceEvent::BatterLevel(level)])
+            }
             (GET_CHARGING_CMD_ID, status, _, _) => {
+                println!("Charging {status} {:?}", ChargingStatus::from(status));
                 Some(vec![DeviceEvent::Charging(ChargingStatus::from(status))])
             }
             (GET_AUTO_SHUTDOWN_CMD_ID, shutdown, _, _) => {
+                println!("Shutdown time {shutdown}");
                 Some(vec![DeviceEvent::AutomaticShutdownAfter(
                     Duration::from_secs(shutdown as u64 * 60),
                 )])
             }
-            (GET_MUTE_CMD_ID, _, surround, other) => Some(vec![
-                DeviceEvent::SideToneOn((other & 16) != 0),
-                DeviceEvent::Muted((other & 2) != 0),
-                DeviceEvent::SurroundSound((surround & 2) != 0),
-            ]),
+            (GET_MUTE_CMD_ID, _, surround, other) => {
+                println!("More info {} {}", surround, other);
+                Some(vec![
+                    DeviceEvent::SideToneOn((other & 16) != 0),
+                    DeviceEvent::Muted((other & 2) != 0),
+                    DeviceEvent::SurroundSound((surround & 2) != 0),
+                ])
+            }
             _ => {
                 println!("Unknown device event: {:?}", response);
                 None
@@ -185,6 +193,7 @@ impl Device for CloudIIWireless {
     }
 
     fn prepare_write(&mut self) {
+        println!("Setting input report");
         let mut input_report_buffer = [0u8; 64];
         input_report_buffer[0] = 6;
         self.state

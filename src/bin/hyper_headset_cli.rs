@@ -62,6 +62,13 @@ fn main() {
         }
     };
 
+    println!("State before doing anything");
+    if let Err(error) = device.active_refresh_state() {
+        eprintln!("{error}");
+        std::process::exit(1);
+    };
+    println!("{}", device.get_device_state());
+
     if let Some(delay) = matches.get_one::<u8>("automatic_shutdown") {
         let delay = *delay as u64;
         if let Some(packet) =
@@ -127,6 +134,7 @@ fn main() {
 
     std::thread::sleep(Duration::from_secs_f64(0.5));
 
+    println!("State after potentially setting some stuff");
     if let Err(error) = device.active_refresh_state() {
         eprintln!("{error}");
         std::process::exit(1);
