@@ -1,5 +1,5 @@
 use crate::devices::{ChargingStatus, Device, DeviceError, DeviceEvent, DeviceState};
-use std::time::Duration;
+use std::{time::Duration, u8};
 
 const HYPERX: u16 = 0x0951;
 pub const VENDOR_IDS: [u16; 1] = [HYPERX];
@@ -154,26 +154,32 @@ impl Device for CloudIIWireless {
             return None;
         }
         println!("Received packet: {:?}", response);
-        match (response[3], response[7], response[12], response[14]) {
-            (GET_BATTERY_CMD_ID, level, _, _) => {
+        match (
+            response[3],
+            response[4],
+            response[7],
+            response[12],
+            response[14],
+        ) {
+            (GET_BATTERY_CMD_ID, _, level, _, _) => {
                 println!("Battery Level {level}");
                 Some(vec![DeviceEvent::BatterLevel(level)])
             }
-            (GET_CHARGING_CMD_ID, status, _, _) => {
+            (GET_CHARGING_CMD_ID, status, _, _, _) => {
                 println!("Charging {status} {:?}", ChargingStatus::from(status));
                 Some(vec![DeviceEvent::Charging(ChargingStatus::from(status))])
             }
-            (GET_AUTO_SHUTDOWN_CMD_ID, shutdown, _, _) => {
+            (GET_AUTO_SHUTDOWN_CMD_ID, shutdown, _, _, _) => {
                 println!("Shutdown time {shutdown}");
                 Some(vec![DeviceEvent::AutomaticShutdownAfter(
                     Duration::from_secs(shutdown as u64 * 60),
                 )])
             }
-            (GET_MUTE_CMD_ID, _, surround, other) => {
+            (GET_MUTE_CMD_ID, muted, _, surround, other) => {
                 println!("More info {} {}", surround, other);
                 Some(vec![
                     DeviceEvent::SideToneOn((other & 16) != 0),
-                    DeviceEvent::Muted((other & 2) != 0),
+                    DeviceEvent::Muted((muted & 4) != 0),
                     DeviceEvent::SurroundSound((surround & 2) != 0),
                 ])
             }
