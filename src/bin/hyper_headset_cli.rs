@@ -70,16 +70,23 @@ fn main() {
     println!("{}", device.get_device_state());
 
     if let Some(delay) = matches.get_one::<u8>("automatic_shutdown") {
+        println!("entering automatic_shutdown packet");
         let delay = *delay as u64;
         if let Some(packet) =
             device.set_automatic_shut_down_packet(Duration::from_secs(delay * 60u64))
         {
+            println!("sending automatic_shutdown packet");
             if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                 println!("Failed to set automatic shutdown with error: {:?}", err)
+            }
+            if let Some(events) = device.wait_for_updates(Duration::from_secs(1)) {
+                println!("{:?}", events);
             }
         } else {
             println!("Automatic shutdown can't be enabled on this device")
         }
+    } else {
+        println!("not sending automatic_shutdown packet");
     }
 
     if let Some(mute) = matches.get_one::<bool>("mute") {
@@ -93,13 +100,21 @@ fn main() {
     }
 
     if let Some(enable) = matches.get_one::<bool>("enable_side_tone") {
+        println!("entering enable_side_tone packet");
         if let Some(packet) = device.set_side_tone_packet(*enable) {
+            println!("sending enable_side_tone packet");
             if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                 println!("Failed to enable side tone with error: {:?}", err)
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            if let Some(events) = device.wait_for_updates(Duration::from_secs(1)) {
+                println!("{:?}", events);
             }
         } else {
             println!("Can't enable side tone on this device")
         }
+    } else {
+        println!("not sending enable_side_tone packet");
     }
 
     if let Some(volume) = matches.get_one::<u8>("side_tone_volume") {
