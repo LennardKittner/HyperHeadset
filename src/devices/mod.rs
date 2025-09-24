@@ -392,13 +392,13 @@ pub trait Device {
     /// Refreshes the state by listening for events
     /// Only the battery level is actively queried because it is not communicated by the device on its own
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
-        println!("passive refresh");
-        if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
-            println!("{:?}", events);
-            for event in events {
-                self.get_device_state_mut().update_self_with_event(&event);
-            }
-        }
+        // println!("passive refresh");
+        // if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+        //     println!("{:?}", events);
+        //     for event in events {
+        //         self.get_device_state_mut().update_self_with_event(&event);
+        //     }
+        // }
         println!("passive refresh get battery level");
         if let Some(batter_packet) = self.get_battery_packet() {
             self.get_device_state().hid_device.write(&batter_packet)?;
