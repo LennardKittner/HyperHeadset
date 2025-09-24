@@ -14,6 +14,7 @@ const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
 const PRODUCT_IDS: [u16; 5] = [0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92];
 
 const RESPONSE_BUFFER_SIZE: usize = 256;
+const RESPONSE_DELAY: Duration = Duration::from_millis(50);
 
 pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     let state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
@@ -366,7 +367,9 @@ pub trait Device {
             self.prepare_write();
             println!("writing Packet {packet:?}");
             self.get_device_state().hid_device.write(&packet)?;
+            std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+                println!("{:?}", events);
                 for event in events {
                     self.get_device_state_mut().update_self_with_event(&event);
                 }
@@ -389,13 +392,17 @@ pub trait Device {
     /// Refreshes the state by listening for events
     /// Only the battery level is actively queried because it is not communicated by the device on its own
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
+        println!("passive refresh");
         if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+            println!("{:?}", events);
             for event in events {
                 self.get_device_state_mut().update_self_with_event(&event);
             }
         }
+        println!("passive refresh get battery level");
         if let Some(batter_packet) = self.get_battery_packet() {
             self.get_device_state().hid_device.write(&batter_packet)?;
+            std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
                     self.get_device_state_mut().update_self_with_event(&event);
