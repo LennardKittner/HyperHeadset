@@ -142,7 +142,14 @@ impl Device for CloudIIWireless {
     }
 
     fn get_surround_sound_packet(&self) -> Option<Vec<u8>> {
-        None
+        let mut tmp = [0u8; 62];
+        tmp[0] = 6;
+        tmp[2] = 0;
+        tmp[4] = u8::MAX;
+        tmp[7] = 104;
+        tmp[8] = 74;
+        tmp[9] = 142;
+        Some(tmp.to_vec())
     }
 
     fn set_surround_sound_packet(&self, _surround_sound: bool) -> Option<Vec<u8>> {
