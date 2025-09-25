@@ -401,6 +401,7 @@ pub trait Device {
         // }
         println!("passive refresh get battery level");
         if let Some(batter_packet) = self.get_battery_packet() {
+            self.prepare_write();
             self.get_device_state().hid_device.write(&batter_packet)?;
             std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
