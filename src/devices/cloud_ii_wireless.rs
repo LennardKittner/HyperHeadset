@@ -165,33 +165,38 @@ impl Device for CloudIIWireless {
         }
         println!("Received packet: {:?}", response);
         match (
+            response[0],
             response[3],
             response[4],
             response[7],
             response[12],
             response[14],
         ) {
-            (GET_BATTERY_CMD_ID, _, level, _, _) => {
+            (_, GET_BATTERY_CMD_ID, _, level, _, _) => {
                 println!("Battery Level {level}");
                 Some(vec![DeviceEvent::BatterLevel(level)])
             }
-            (GET_CHARGING_CMD_ID, status, _, _, _) => {
+            (11, GET_CHARGING_CMD_ID, status, _, _, _) => {
                 println!("Charging {status} {:?}", ChargingStatus::from(status));
                 Some(vec![DeviceEvent::Charging(ChargingStatus::from(status))])
             }
-            (GET_AUTO_SHUTDOWN_CMD_ID, shutdown, _, _, _) => {
+            (_, GET_AUTO_SHUTDOWN_CMD_ID, shutdown, _, _, _) => {
                 println!("Shutdown time {shutdown}");
                 Some(vec![DeviceEvent::AutomaticShutdownAfter(
                     Duration::from_secs(shutdown as u64 * 60),
                 )])
             }
-            (GET_MUTE_CMD_ID, muted, _, surround, other) => {
+            (_, GET_MUTE_CMD_ID, muted, _, surround, other) => {
                 println!("More info {} {}", surround, other);
                 Some(vec![
                     DeviceEvent::SideToneOn((other & 16) != 0),
                     DeviceEvent::Muted((muted & 4) != 0),
                     DeviceEvent::SurroundSound((surround & 2) != 0),
                 ])
+            }
+            (10, surround, _, _, _, _) => {
+                println!("Surround sound {}", surround);
+                Some(vec![DeviceEvent::SurroundSound((surround & 3) == 0)])
             }
             _ => {
                 println!("Unknown device event: {:?}", response);
