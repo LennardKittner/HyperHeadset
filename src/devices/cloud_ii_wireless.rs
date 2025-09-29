@@ -222,4 +222,107 @@ impl Device for CloudIIWireless {
             .get_input_report(&mut input_report_buffer)
             .unwrap();
     }
+
+    fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
+        println!("Writing special sequence");
+        let mut packet = [0u8; 62];
+        packet[0] = 6;
+        packet[2] = 2;
+        packet[4] = 154;
+        packet[7] = 104;
+        packet[8] = 74;
+        packet[9] = 142;
+        packet[10] = 10;
+        packet[14] = 187;
+        packet[15] = 1;
+        self.prepare_write();
+        println!("Writing {:?}", packet);
+        self.state.hid_device.write(&packet)?;
+        std::thread::sleep(Duration::from_millis(200));
+        if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+            println!("{:?}", events);
+            for event in events {
+                self.get_device_state_mut().update_self_with_event(&event);
+            }
+        }
+        let mut packet = [0u8; 62];
+        packet[0] = 6;
+        packet[2] = 0;
+        packet[4] = u8::MAX;
+        packet[7] = 104;
+        packet[8] = 74;
+        packet[9] = 142;
+        self.prepare_write();
+        println!("Writing {:?}", packet);
+        self.state.hid_device.write(&packet)?;
+        std::thread::sleep(Duration::from_millis(200));
+        if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+            println!("{:?}", events);
+            for event in events {
+                self.get_device_state_mut().update_self_with_event(&event);
+            }
+        }
+        let mut packet = [0u8; 62];
+        packet[0] = 6;
+        packet[2] = 2;
+        packet[4] = 154;
+        packet[7] = 104;
+        packet[8] = 74;
+        packet[9] = 142;
+        packet[10] = 10;
+        packet[14] = 187;
+        packet[15] = 17;
+        self.prepare_write();
+        println!("Writing {:?}", packet);
+        self.state.hid_device.write(&packet)?;
+        std::thread::sleep(Duration::from_millis(200));
+        if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+            println!("{:?}", events);
+            for event in events {
+                self.get_device_state_mut().update_self_with_event(&event);
+            }
+        }
+        let mut packet = [0u8; 62];
+        packet[0] = 6;
+        packet[2] = 2;
+        packet[4] = 154;
+        packet[7] = 104;
+        packet[8] = 74;
+        packet[9] = 142;
+        packet[10] = 10;
+        packet[14] = 187;
+        packet[15] = 29;
+        self.prepare_write();
+        println!("Writing {:?}", packet);
+        self.state.hid_device.write(&packet)?;
+        std::thread::sleep(Duration::from_millis(200));
+        if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+            println!("{:?}", events);
+            for event in events {
+                self.get_device_state_mut().update_self_with_event(&event);
+            }
+        }
+        let mut packet = [0u8; 62];
+        packet[0] = 6;
+        packet[2] = 2;
+        packet[4] = 154;
+        packet[7] = 104;
+        packet[8] = 74;
+        packet[9] = 142;
+        packet[10] = 10;
+        packet[14] = 187;
+        packet[15] = 9;
+        self.prepare_write();
+        println!("Writing {:?}", packet);
+        self.state.hid_device.write(&packet)?;
+        std::thread::sleep(Duration::from_millis(200));
+        if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+            println!("{:?}", events);
+            for event in events {
+                self.get_device_state_mut().update_self_with_event(&event);
+            }
+        }
+
+        Ok(())
+    }
 }

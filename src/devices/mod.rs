@@ -330,6 +330,9 @@ pub trait Device {
     fn get_device_state(&self) -> &DeviceState;
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
     fn prepare_write(&mut self) {}
+    fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
+        Ok(())
+    }
     fn wait_for_updates(&mut self, duration: Duration) -> Option<Vec<DeviceEvent>> {
         let mut buf = [0u8; RESPONSE_BUFFER_SIZE];
         let res = self
@@ -361,6 +364,8 @@ pub trait Device {
             self.get_side_tone_volume_packet(),
             self.get_voice_prompt_packet(),
         ];
+
+        self.execute_headset_specific_functionality()?;
 
         let mut responded = false;
         for packet in packets.into_iter().flatten() {
