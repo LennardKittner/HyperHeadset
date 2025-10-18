@@ -383,8 +383,6 @@ pub trait Device {
             if !self.get_device_state().connected.map_or(true, |c| c) {
                 break;
             }
-            std::thread::sleep(Duration::from_secs_f64(2.));
-            println!("waiting 2s before sending the next packet ...");
         }
 
         if responded {
