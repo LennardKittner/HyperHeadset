@@ -30,22 +30,15 @@ const BASE_PACKET: [u8; 62] = {
 // I am unsure about all the other command ids
 
 const GET_CHARGING_CMD_ID: u8 = 3;
-// const GET_MIC_CONNECTED_CMD_ID: u8 = 8;
 const GET_BATTERY_CMD_ID: u8 = 2;
 const GET_AUTO_SHUTDOWN_CMD_ID: u8 = 26;
 const SET_AUTO_SHUTDOWN_CMD_ID: u8 = 24;
 // includes also some other information such as side tone and surround sound
 const GET_MUTE_CMD_ID: u8 = 1;
-// const SET_MUTE_CMD_ID: u8 = 32;
-// const GET_PAIRING_CMD_ID: u8 = 9;
-// const GET_PRODUCT_COLOR_CMD_ID: u8 = 14;
-// const GET_SIDE_TONE_ON_CMD_ID: u8 = 6;
+const MUTE_RESPONSE_ID: u8 = 8;
+const FIRMWARE_VERSION_RESPONSE_ID: u8 = 17;
+const CONNECTION_STATUS_RESPONSE_ID: u8 = 1;
 const SET_SIDE_TONE_ON_CMD_ID: u8 = 25;
-// const GET_SIDE_TONE_VOLUME_CMD_ID: u8 = 11;
-// const SET_SIDE_TONE_VOLUME_CMD_ID: u8 = 35;
-// const GET_VOICE_PROMPT_CMD_ID: u8 = 9;
-// const SET_VOICE_PROMPT_CMD_ID: u8 = 19;
-// const GET_WIRELESS_STATUS_CMD_ID: u8 = 1;
 
 pub struct CloudIIWireless {
     state: DeviceState,
@@ -172,7 +165,15 @@ impl Device for CloudIIWireless {
             response[12],
             response[14],
         ) {
-            (_, GET_BATTERY_CMD_ID, _, level, _, _) => {
+            (11, CONNECTION_STATUS_RESPONSE_ID, status, _, _, _) => {
+                let flag = status == 1 || status == 4;
+                if status == 2 {
+                    println!("pairing");
+                }
+                println!("Connected {flag}");
+                Some(vec![DeviceEvent::WirelessConnected(flag)])
+            }
+            (11, GET_BATTERY_CMD_ID, _, level, _, _) => {
                 println!("Battery Level {level}");
                 Some(vec![DeviceEvent::BatterLevel(level)])
             }
@@ -180,23 +181,27 @@ impl Device for CloudIIWireless {
                 println!("Charging {status} {:?}", ChargingStatus::from(status));
                 Some(vec![DeviceEvent::Charging(ChargingStatus::from(status))])
             }
-            (_, GET_AUTO_SHUTDOWN_CMD_ID, shutdown, _, _, _) => {
+            (11, MUTE_RESPONSE_ID, status, _, _, _) => {
+                println!("Muted {status} {:?}", ChargingStatus::from(status));
+                Some(vec![DeviceEvent::Muted(status == 1)])
+            }
+            (11, FIRMWARE_VERSION_RESPONSE_ID, ..) => {
+                print!("Firmware version update");
+                None
+            }
+            (11, SET_SIDE_TONE_ON_CMD_ID, status, ..) => {
+                print!("Side tone on {status}");
+                Some(vec![DeviceEvent::SideToneOn(status != 1)])
+            }
+            (11, GET_AUTO_SHUTDOWN_CMD_ID, shutdown, _, _, _) => {
                 println!("Shutdown time {shutdown}");
                 Some(vec![DeviceEvent::AutomaticShutdownAfter(
                     Duration::from_secs(shutdown as u64 * 60),
                 )])
             }
-            (_, GET_MUTE_CMD_ID, muted, _, surround, other) => {
-                println!("More info {} {}", surround, other);
-                Some(vec![
-                    DeviceEvent::SideToneOn((other & 16) != 0),
-                    DeviceEvent::Muted((muted & 4) != 0),
-                    DeviceEvent::SurroundSound((surround & 2) != 0),
-                ])
-            }
             (10, surround, _, _, _, _) => {
                 println!("Surround sound {}", surround);
-                Some(vec![DeviceEvent::SurroundSound((surround & 3) == 0)])
+                Some(vec![DeviceEvent::SurroundSound((surround & 2) == 2)])
             }
             _ => {
                 println!("Unknown device event: {:?}", response);
