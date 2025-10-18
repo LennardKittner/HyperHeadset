@@ -171,6 +171,9 @@ impl Device for CloudIIWirelessDTS {
         if response.len() < 7 {
             return None;
         }
+        if response[0] != 6 || response[1] != 255 || response[2] != 187 {
+            return None;
+        }
         match (response[2], response[3], response[4], response[7]) {
             (_, GET_CHARGING_CMD_ID, status, _) => {
                 Some(vec![DeviceEvent::Charging(ChargingStatus::from(status))])
@@ -188,7 +191,7 @@ impl Device for CloudIIWirelessDTS {
                 Some(vec![DeviceEvent::Muted(status == 1)])
             }
             (_, GET_PAIRING_CMD_ID, status, _) => Some(vec![DeviceEvent::PairingInfo(status)]),
-            (_, GET_SIDE_TONE_ON_CMD_ID, status, _) => {
+            (_, SET_SIDE_TONE_ON_CMD_ID, status, _) => {
                 Some(vec![DeviceEvent::SideToneOn(status == 1)])
             }
             (_, GET_SIDE_TONE_VOLUME_CMD_ID, status, _) => {
