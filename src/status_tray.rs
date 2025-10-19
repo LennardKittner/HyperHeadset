@@ -23,7 +23,7 @@ impl TrayHandler {
                 device_state.device_name.clone(),
             ),
             Some(true) => (
-                device_state.to_string_no_padding(),
+                device_state.to_string_with_padding(0),
                 device_state.device_name.clone(),
             ),
         };

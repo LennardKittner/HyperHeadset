@@ -71,45 +71,7 @@ pub struct DeviceState {
 
 impl Display for DeviceState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let unknown = "Unknown".to_string();
-        write!(
-            f,
-            "Name:                     {}
-Battery level:            {}
-Charging status:          {}
-Muted:                    {}
-Mic connected:            {}
-Automatic shutdown after: {}
-Pairing info:             {}
-Product color:            {}
-Side tone on:             {}
-Side tone volume:         {}
-Surround sound:           {}
-Voice prompt on:          {}
-Connected:                {}
-Silent:                   {}",
-            self.device_name.clone().unwrap_or("Unknown".to_string()),
-            self.battery_level
-                .map_or(unknown.clone(), |l| format!("{l}%")),
-            self.charging.map_or(unknown.clone(), |c| c.to_string()),
-            self.muted.map_or(unknown.clone(), |m| m.to_string()),
-            self.mic_connected
-                .map_or(unknown.clone(), |m| m.to_string()),
-            self.automatic_shutdown_after
-                .map_or(unknown.clone(), |a| format!("{} min", a.as_secs() / 60)),
-            self.pairing_info.map_or(unknown.clone(), |p| p.to_string()),
-            self.product_color
-                .map_or(unknown.clone(), |c| c.to_string()),
-            self.side_tone_on.map_or(unknown.clone(), |s| s.to_string()),
-            self.side_tone_volume
-                .map_or(unknown.clone(), |s| s.to_string()),
-            self.surround_sound
-                .map_or(unknown.clone(), |s| s.to_string()),
-            self.voice_prompt_on
-                .map_or(unknown.clone(), |v| v.to_string()),
-            self.connected.map_or(unknown.clone(), |c| c.to_string()),
-            self.silent.map_or(unknown.clone(), |s| s.to_string()),
-        )
+        write!(f, "{}", self.to_string_with_padding(25))
     }
 }
 
@@ -155,43 +117,65 @@ impl DeviceState {
         })
     }
 
-    pub fn to_string_no_padding(&self) -> String {
-        let unknown = "Unknown".to_string();
-        format!(
-            "Battery level: {}
-Charging status: {}
-Muted: {}
-Mic connected: {}
-Automatic shutdown after: {}
-Pairing info: {}
-Product color: {}
-Side tone on: {}
-Side tone volume: {}
-Surround sound: {}
-Voice prompt on: {}
-Connected: {}
-Silent: {}",
-            self.battery_level
-                .map_or(unknown.clone(), |l| format!("{l}%")),
-            self.charging.map_or(unknown.clone(), |c| c.to_string()),
-            self.muted.map_or(unknown.clone(), |m| m.to_string()),
-            self.mic_connected
-                .map_or(unknown.clone(), |m| m.to_string()),
-            self.automatic_shutdown_after
-                .map_or(unknown.clone(), |a| format!("{} min", a.as_secs() / 60)),
-            self.pairing_info.map_or(unknown.clone(), |p| p.to_string()),
-            self.product_color
-                .map_or(unknown.clone(), |c| c.to_string()),
-            self.side_tone_on.map_or(unknown.clone(), |s| s.to_string()),
-            self.side_tone_volume
-                .map_or(unknown.clone(), |s| s.to_string()),
-            self.surround_sound
-                .map_or(unknown.clone(), |s| s.to_string()),
-            self.voice_prompt_on
-                .map_or(unknown.clone(), |v| v.to_string()),
-            self.connected.map_or(unknown.clone(), |c| c.to_string()),
-            self.silent.map_or(unknown.clone(), |s| s.to_string()),
-        )
+    pub fn to_string_with_padding(&self, padding: usize) -> String {
+        let data = [
+            (
+                "Battery level:",
+                self.battery_level.map(|l| l.to_string()),
+                "%",
+            ),
+            ("Charging status:", self.charging.map(|c| c.to_string()), ""),
+            ("Muted:", self.muted.map(|c| c.to_string()), ""),
+            (
+                "Mic connected:",
+                self.mic_connected.map(|c| c.to_string()),
+                "",
+            ),
+            (
+                "Automatic shutdown after:",
+                self.automatic_shutdown_after
+                    .map(|c| (c.as_secs() / 60).to_string()),
+                "min",
+            ),
+            (
+                "pairing info:",
+                self.pairing_info.map(|c| c.to_string()),
+                "",
+            ),
+            (
+                "product color:",
+                self.product_color.map(|c| c.to_string()),
+                "",
+            ),
+            ("Side tone:", self.side_tone_on.map(|c| c.to_string()), ""),
+            (
+                "Side tone volume:",
+                self.side_tone_volume.map(|c| c.to_string()),
+                "",
+            ),
+            (
+                "Surround sound:",
+                self.surround_sound.map(|c| c.to_string()),
+                "",
+            ),
+            (
+                "Voice prompt:",
+                self.voice_prompt_on.map(|c| c.to_string()),
+                "",
+            ),
+            ("Connected:", self.connected.map(|c| c.to_string()), ""),
+            ("Playback muted:", self.silent.map(|c| c.to_string()), ""),
+        ];
+        data.iter()
+            .filter_map(|(prefix, data, suffix)| {
+                if let Some(data) = data {
+                    Some(format!("{:<padding$} {}{}", prefix, data, suffix))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<String>>()
+            .join("\n")
     }
 
     fn update_self_with_event(&mut self, event: &DeviceEvent) {
