@@ -93,13 +93,15 @@ fn main() {
             println!("sending automatic_shutdown packet");
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                println!("Failed to set automatic shutdown with error: {:?}", err)
+                eprintln!("Failed to set automatic shutdown with error: {:?}", err);
+                std::process::exit(1);
             }
             if let Some(events) = device.wait_for_updates(Duration::from_secs(1)) {
                 println!("{:?}", events);
             }
         } else {
-            println!("Automatic shutdown can't be enabled on this device")
+            eprintln!("ERROR: Automatic shutdown is not supported on this device");
+            std::process::exit(1);
         }
     } else {
         println!("not sending automatic_shutdown packet");
@@ -109,10 +111,12 @@ fn main() {
         if let Some(packet) = device.set_mute_packet(*mute) {
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                println!("Failed to mute with error: {:?}", err)
+                eprintln!("Failed to mute with error: {:?}", err);
+                std::process::exit(1);
             }
         } else {
-            println!("Can't mute this device")
+            eprintln!("ERROR: Microphone mute control is not supported on this device (hardware button only)");
+            std::process::exit(1);
         }
     }
 
@@ -122,14 +126,16 @@ fn main() {
             println!("sending enable_side_tone packet");
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                println!("Failed to enable side tone with error: {:?}", err)
+                eprintln!("Failed to enable side tone with error: {:?}", err);
+                std::process::exit(1);
             }
             std::thread::sleep(Duration::from_millis(50));
             if let Some(events) = device.wait_for_updates(Duration::from_secs(1)) {
                 println!("{:?}", events);
             }
         } else {
-            println!("Can't enable side tone on this device")
+            eprintln!("ERROR: Side tone control is not supported on this device");
+            std::process::exit(1);
         }
     } else {
         println!("not sending enable_side_tone packet");
@@ -139,10 +145,12 @@ fn main() {
         if let Some(packet) = device.set_side_tone_volume_packet(*volume) {
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                println!("Failed to set side tone volume with error: {:?}", err)
+                eprintln!("Failed to set side tone volume with error: {:?}", err);
+                std::process::exit(1);
             }
         } else {
-            println!("Can't set side tone volume on this device")
+            eprintln!("ERROR: Side tone volume control is not supported on this device");
+            std::process::exit(1);
         }
     }
 
@@ -150,10 +158,12 @@ fn main() {
         if let Some(packet) = device.set_voice_prompt_packet(*enable) {
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                println!("Failed to enable voice prompt with error: {:?}", err)
+                eprintln!("Failed to enable voice prompt with error: {:?}", err);
+                std::process::exit(1);
             }
         } else {
-            println!("Can't enable voice prompt on this device")
+            eprintln!("ERROR: Voice prompt control is not supported on this device");
+            std::process::exit(1);
         }
     }
 
@@ -161,10 +171,13 @@ fn main() {
         if let Some(packet) = device.set_surround_sound_packet(*surround_sound) {
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                println!("Failed to set surround sound with error: {:?}", err)
+                eprintln!("Failed to set surround sound with error: {:?}", err);
+                std::process::exit(1);
             }
         } else {
-            println!("Can't change surround sound on this device")
+            eprintln!("ERROR: Surround sound control is not supported on this device");
+            eprintln!("       Use the physical headset button or Windows audio settings to toggle surround sound.");
+            std::process::exit(1);
         }
     }
 
@@ -172,10 +185,12 @@ fn main() {
         if let Some(packet) = device.set_silent_mode_packet(*mute_playback) {
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                println!("Failed to mute playback with error: {:?}", err)
+                eprintln!("Failed to mute playback with error: {:?}", err);
+                std::process::exit(1);
             }
         } else {
-            println!("Can't mute playback on this device")
+            eprintln!("ERROR: Playback mute control is not supported on this device");
+            std::process::exit(1);
         }
     }
 
