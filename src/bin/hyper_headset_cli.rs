@@ -4,63 +4,6 @@ use clap::{Arg, Command};
 use hyper_headset::devices::connect_compatible_device;
 
 fn main() {
-    let matches = Command::new(env!("CARGO_PKG_NAME"))
-        .version(env!("CARGO_PKG_VERSION"))
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .about("A CLI application for monitoring and managing HyperX headsets.")
-        .arg(
-            Arg::new("automatic_shutdown")
-                .long("automatic_shutdown")
-                .required(false)
-                .help(
-                    "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
-                )
-                .value_parser(clap::value_parser!(u8)),
-        )
-        .arg(
-            Arg::new("mute")
-                .long("mute")
-                .required(false)
-                .help("Mute or unmute the headset.")
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("enable_side_tone")
-                .long("enable_side_tone")
-                .required(false)
-                .help("Enable or disable side tone.")
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("side_tone_volume")
-                .long("side_tone_volume")
-                .required(false)
-                .help("Set the side tone volume.")
-                .value_parser(clap::value_parser!(u8)),
-        )
-        .arg(
-            Arg::new("enable_voice_prompt")
-                .long("enable_voice_prompt")
-                .required(false)
-                .help("Enable voice prompt. This may not be supported on your device.")
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("surround_sound")
-                .long("surround_sound")
-                .required(false)
-                .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("mute_playback")
-                .long("mute_playback")
-                .required(false)
-                .help("Mute or unmute playback.")
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .get_matches();
-
     let mut device = match connect_compatible_device() {
         Ok(device) => device,
         Err(error) => {
@@ -68,6 +11,71 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    let matches = Command::new(env!("CARGO_PKG_NAME"))
+        .version(env!("CARGO_PKG_VERSION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about("A CLI application for monitoring and managing HyperX headsets.")
+        .after_help("Help only lists commands supported by this headset.")
+        .arg(
+            Arg::new("automatic_shutdown")
+                .long("automatic_shutdown")
+                .required(false)
+                .help(
+                    "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
+                )
+                    .hide(device.set_automatic_shut_down_packet(Duration::from_secs(0)).is_none())
+                .value_parser(clap::value_parser!(u8)),
+        )
+        .arg(
+            Arg::new("mute")
+                .long("mute")
+                .required(false)
+                .help("Mute or unmute the headset.")
+                .hide(device.set_mute_packet(false).is_none())
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("enable_side_tone")
+                .long("enable_side_tone")
+                .required(false)
+                .help("Enable or disable side tone.")
+                .hide(device.set_side_tone_packet(false).is_none())
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("side_tone_volume")
+                .long("side_tone_volume")
+                .required(false)
+                .help("Set the side tone volume.")
+                .hide(device.set_side_tone_volume_packet(0).is_none())
+                .value_parser(clap::value_parser!(u8)),
+        )
+        .arg(
+            Arg::new("enable_voice_prompt")
+                .long("enable_voice_prompt")
+                .required(false)
+                .help("Enable voice prompt. This may not be supported on your device.")
+                .hide(device.set_voice_prompt_packet(false).is_none())
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("surround_sound")
+                .long("surround_sound")
+                .required(false)
+                .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
+                .hide(device.set_surround_sound_packet(false).is_none())
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("mute_playback")
+                .long("mute_playback")
+                .required(false)
+                .help("Mute or unmute playback.")
+                .hide(device.set_silent_mode_packet(false).is_none())
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .get_matches();
 
     println!("State before doing anything");
     if let Err(error) = device.active_refresh_state() {
