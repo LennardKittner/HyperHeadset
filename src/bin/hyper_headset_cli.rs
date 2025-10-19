@@ -52,6 +52,13 @@ fn main() {
                 .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
                 .value_parser(clap::value_parser!(bool)),
         )
+        .arg(
+            Arg::new("mute_playback")
+                .long("mute_playback")
+                .required(false)
+                .help("Mute or unmute playback.")
+                .value_parser(clap::value_parser!(bool)),
+        )
         .get_matches();
 
     let mut device = match connect_compatible_device() {
@@ -150,6 +157,17 @@ fn main() {
             }
         } else {
             println!("Can't change surround sound on this device")
+        }
+    }
+
+    if let Some(mute_playback) = matches.get_one::<bool>("mute_playback") {
+        if let Some(packet) = device.set_silent_mode_packet(*mute_playback) {
+            device.prepare_write();
+            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+                println!("Failed to mute playback with error: {:?}", err)
+            }
+        } else {
+            println!("Can't mute playback on this device")
         }
     }
 
