@@ -87,3 +87,21 @@ Connected:                true
 - CLI flags for unsupported features are hidden in the help menu
 - CLI exits with error code 1 when attempting to use unsupported features
 - Tray UI shows read-only markers based on device capabilities
+
+## Protocol Notes
+
+### Undocumented Commands
+
+**Command 4 (Cloud II Wireless)**: An undocumented HID command that occasionally appears as an asynchronous notification from the headset. This command is **not handled** by the official HyperX NGenuity2 software, which simply logs it to debug traces.
+
+- **Appearance**: Sporadic, trigger conditions unknown
+- **Official behavior**: Ignored by NGenuity2
+- **HyperHeadset behavior**: Logged for debugging purposes
+- **Investigation findings**:
+  - Does NOT trigger on charging cable connect/disconnect
+  - Does NOT trigger on battery level changes
+  - Not related to any user-controllable feature
+  - May be firmware artifact from Cloud Flight S (which uses cmd 4 for button presses)
+  - Cloud II Wireless and Cloud II Wireless DTS both ignore this command
+
+This is documented for transparency but can be safely ignored during normal operation.

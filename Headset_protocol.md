@@ -53,6 +53,7 @@ Byte    Value   Description
 | 1      | 0x01 | Get Connection Status  | Query wireless connection status      |
 | 2      | 0x02 | Get Battery Level      | Query current battery percentage      |
 | 3      | 0x03 | Get Charging Status    | Query charging state                  |
+| 4      | 0x04 | Unknown/Unused         | Undocumented notification (ignored)   |
 | 8      | 0x08 | Mute Status (Response) | Microphone mute status (in responses) |
 | 9      | 0x09 | Initialization         | Sent during device initialization     |
 | 17     | 0x11 | Get Firmware Version   | Query firmware version (4 bytes)      |
@@ -96,6 +97,27 @@ Response: [0B 00 BB 03 <status> ...]
   - `0x01` = Charging (wired)
   - `0x02` = Fully charged
   - `0x03` = Charge error
+
+#### Command 4 - Undocumented/Unused Notification
+
+```
+Response: [0B 00 BB 04 <data> ...]
+```
+
+- **Purpose:** Unknown - Not handled by official HyperX NGenuity2 software
+- **Note:** This command appears sporadically as an asynchronous notification from the headset
+- **Not user-initiated:** This is an unsolicited notification from the device, not sent by the host
+- **Official behavior:** The official NGenuity2 software logs but does not process this command
+- **Implementation:** HyperHeadset logs the data when received for debugging purposes
+- **Trigger conditions:** Unknown - does NOT trigger on charging cable connect/disconnect or battery level changes
+- **Data format:** Unknown - bytes [4-8] are logged for analysis
+- **Recommendation:** Safe to ignore - likely a spurious firmware notification or leftover from other headset models
+
+**Investigation notes:**
+
+- Command 4 exists in Cloud Flight S firmware for button press handling, but Cloud II Wireless has no such buttons
+- Neither Cloud II Wireless nor Cloud II Wireless DTS firmware handles this command
+- May be a firmware artifact or unused notification channel
 
 #### Set Auto Power Off (Cmd 24)
 

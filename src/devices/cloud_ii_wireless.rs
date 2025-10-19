@@ -228,6 +228,15 @@ impl Device for CloudIIWireless {
                             Duration::from_secs(minutes as u64 * 60),
                         )])
                     }
+                    4 => {
+                        // Command 4: Charge limit or battery management
+                        // This may be sent asynchronously when charging state changes
+                        println!(
+                            "Charge limit/battery management response (cmd 4): data={:?}",
+                            &response[4..8]
+                        );
+                        None
+                    }
                     9 | 29 => {
                         // Commands 9 and 29 are seen during initialization but purpose unclear
                         println!("Initialization response (cmd {})", response[3]);
