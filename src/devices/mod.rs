@@ -1,8 +1,10 @@
 pub mod cloud_ii_wireless;
 pub mod cloud_ii_wireless_dts;
+pub mod cloud_iii_wireless;
 
 use crate::devices::{
     cloud_ii_wireless::CloudIIWireless, cloud_ii_wireless_dts::CloudIIWirelessDTS,
+    cloud_iii_wireless::CloudIIIWireless,
 };
 use hidapi::{HidApi, HidDevice, HidError};
 use std::{fmt::Display, time::Duration};
@@ -10,8 +12,8 @@ use thistermination::TerminationFull;
 
 // Possible vendor IDs [HyperX, HP]
 const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
-// Possible Cloud II Wireless product IDs
-const PRODUCT_IDS: [u16; 5] = [0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92];
+// All supported product IDs
+const PRODUCT_IDS: [u16; 6] = [0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92, 0x05B7];
 
 const RESPONSE_BUFFER_SIZE: usize = 256;
 const RESPONSE_DELAY: Duration = Duration::from_millis(50);
@@ -36,6 +38,12 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
         {
             Ok(Box::new(CloudIIWirelessDTS::new_from_state(state)))
         }
+        (v, p)
+            if cloud_iii_wireless::VENDOR_IDS.contains(&v)
+                && cloud_iii_wireless::PRODUCT_IDS.contains(&p) =>
+        {
+            Ok(Box::new(CloudIIIWireless::new_from_state(state)))
+        }
         (_, _) => Err(DeviceError::NoDeviceFound()),
     }
 }
@@ -58,6 +66,7 @@ pub struct DeviceState {
     pub surround_sound: Option<bool>,
     pub voice_prompt_on: Option<bool>,
     pub connected: Option<bool>,
+    pub silent: Option<bool>,
 }
 
 impl Display for DeviceState {
@@ -77,7 +86,8 @@ Side tone on:             {}
 Side tone volume:         {}
 Surround sound:           {}
 Voice prompt on:          {}
-Connected:                {}",
+Connected:                {}
+Silent:                   {}",
             self.device_name.clone().unwrap_or("Unknown".to_string()),
             self.battery_level
                 .map_or(unknown.clone(), |l| format!("{l}%")),
@@ -98,6 +108,7 @@ Connected:                {}",
             self.voice_prompt_on
                 .map_or(unknown.clone(), |v| v.to_string()),
             self.connected.map_or(unknown.clone(), |c| c.to_string()),
+            self.silent.map_or(unknown.clone(), |s| s.to_string()),
         )
     }
 }
@@ -140,6 +151,7 @@ impl DeviceState {
             side_tone_volume: None,
             voice_prompt_on: None,
             connected: None,
+            silent: None,
         })
     }
 
@@ -157,7 +169,8 @@ Side tone on: {}
 Side tone volume: {}
 Surround sound: {}
 Voice prompt on: {}
-Connected: {}",
+Connected: {}
+Silent: {}",
             self.battery_level
                 .map_or(unknown.clone(), |l| format!("{l}%")),
             self.charging.map_or(unknown.clone(), |c| c.to_string()),
@@ -177,6 +190,7 @@ Connected: {}",
             self.voice_prompt_on
                 .map_or(unknown.clone(), |v| v.to_string()),
             self.connected.map_or(unknown.clone(), |c| c.to_string()),
+            self.silent.map_or(unknown.clone(), |s| s.to_string()),
         )
     }
 
@@ -196,6 +210,10 @@ Connected: {}",
             DeviceEvent::SurroundSound(status) => self.surround_sound = Some(*status),
             DeviceEvent::VoicePrompt(on) => self.voice_prompt_on = Some(*on),
             DeviceEvent::WirelessConnected(connected) => self.connected = Some(*connected),
+            DeviceEvent::Silent(silent) => self.silent = Some(*silent),
+            DeviceEvent::RequireSIRKReset(reset) => {
+                println!("requested SIRK reset {reset}")
+            }
         };
     }
 
@@ -212,6 +230,7 @@ Connected: {}",
         self.side_tone_volume = None;
         self.voice_prompt_on = None;
         self.connected = None;
+        self.silent = None;
     }
 }
 
@@ -243,11 +262,14 @@ pub enum DeviceEvent {
     VoicePrompt(bool),
     WirelessConnected(bool),
     SurroundSound(bool),
+    Silent(bool),
+    RequireSIRKReset(bool),
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum Color {
-    Red,
+    BlackBlack,
+    BlackRed,
     UnknownColor(u8),
 }
 
@@ -257,7 +279,8 @@ impl Display for Color {
             f,
             "{}",
             match self {
-                Color::Red => "Red".to_string(),
+                Color::BlackBlack => "Black".to_string(),
+                Color::BlackRed => "Red".to_string(),
                 Color::UnknownColor(n) => format!("Unknown color {}", n),
             }
         )
@@ -267,7 +290,8 @@ impl Display for Color {
 impl From<u8> for Color {
     fn from(color: u8) -> Self {
         match color {
-            0 => Color::Red,
+            0 => Color::BlackBlack,
+            2 => Color::BlackRed,
             _ => Color::UnknownColor(color),
         }
     }
@@ -326,6 +350,10 @@ pub trait Device {
     fn get_voice_prompt_packet(&self) -> Option<Vec<u8>>;
     fn set_voice_prompt_packet(&self, enable: bool) -> Option<Vec<u8>>;
     fn get_wireless_connected_status_packet(&self) -> Option<Vec<u8>>;
+    fn get_sirk_packet(&self) -> Option<Vec<u8>>;
+    fn reset_sirk_packet(&self) -> Option<Vec<u8>>;
+    fn get_silent_mode_packet(&self) -> Option<Vec<u8>>;
+    fn set_silent_mode_packet(&self, silence: bool) -> Option<Vec<u8>>;
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
     fn get_device_state(&self) -> &DeviceState;
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
@@ -363,6 +391,8 @@ pub trait Device {
             self.get_side_tone_packet(),
             self.get_side_tone_volume_packet(),
             self.get_voice_prompt_packet(),
+            self.get_sirk_packet(),
+            self.get_silent_mode_packet(),
         ];
 
         self.execute_headset_specific_functionality()?;
@@ -380,7 +410,7 @@ pub trait Device {
                 }
                 responded = true;
             }
-            if !self.get_device_state().connected.map_or(true, |c| c) {
+            if !self.get_device_state().connected.is_none_or(|c| c) {
                 break;
             }
         }

@@ -44,8 +44,6 @@ fn main() {
                 Ok(()) => (),
                 Err(error) => {
                     eprintln!("{error}");
-                    //TODO: only set to none on headsets where connection can be detected
-                    // device.get_device_state_mut().connected = None;
                     tray_handler.update(device.get_device_state());
                     break; // try to reconnect
                 }

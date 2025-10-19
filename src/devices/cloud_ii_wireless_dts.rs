@@ -91,6 +91,14 @@ impl Device for CloudIIWirelessDTS {
         Some(tmp)
     }
 
+    fn get_surround_sound_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn set_surround_sound_packet(&self, _surround_sound: bool) -> Option<Vec<u8>> {
+        None
+    }
+
     fn get_mic_connected_packet(&self) -> Option<Vec<u8>> {
         let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = GET_MIC_CONNECTED_CMD_ID;
@@ -159,11 +167,19 @@ impl Device for CloudIIWirelessDTS {
         Some(tmp)
     }
 
-    fn get_surround_sound_packet(&self) -> Option<Vec<u8>> {
+    fn get_sirk_packet(&self) -> Option<Vec<u8>> {
         None
     }
 
-    fn set_surround_sound_packet(&self, _surround_sound: bool) -> Option<Vec<u8>> {
+    fn reset_sirk_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn get_silent_mode_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn set_silent_mode_packet(&self, _silence: bool) -> Option<Vec<u8>> {
         None
     }
 

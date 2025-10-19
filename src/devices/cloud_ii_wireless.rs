@@ -1,5 +1,5 @@
 use crate::devices::{ChargingStatus, Device, DeviceError, DeviceEvent, DeviceState};
-use std::{time::Duration, u8};
+use std::time::Duration;
 
 const HYPERX: u16 = 0x0951;
 pub const VENDOR_IDS: [u16; 1] = [HYPERX];
@@ -26,8 +26,6 @@ const BASE_PACKET: [u8; 62] = {
     tmp[15] = 0x01;
     tmp
 };
-
-// I am unsure about all the other command ids
 
 const GET_CHARGING_CMD_ID: u8 = 3;
 const GET_BATTERY_CMD_ID: u8 = 2;
@@ -94,6 +92,21 @@ impl Device for CloudIIWireless {
         None
     }
 
+    fn get_surround_sound_packet(&self) -> Option<Vec<u8>> {
+        let mut tmp = [0u8; 62];
+        tmp[0] = 6;
+        tmp[2] = 0;
+        tmp[4] = u8::MAX;
+        tmp[7] = 104;
+        tmp[8] = 74;
+        tmp[9] = 142;
+        Some(tmp.to_vec())
+    }
+
+    fn set_surround_sound_packet(&self, _surround_sound: bool) -> Option<Vec<u8>> {
+        None
+    }
+
     fn get_mic_connected_packet(&self) -> Option<Vec<u8>> {
         None
     }
@@ -137,18 +150,19 @@ impl Device for CloudIIWireless {
         None
     }
 
-    fn get_surround_sound_packet(&self) -> Option<Vec<u8>> {
-        let mut tmp = [0u8; 62];
-        tmp[0] = 6;
-        tmp[2] = 0;
-        tmp[4] = u8::MAX;
-        tmp[7] = 104;
-        tmp[8] = 74;
-        tmp[9] = 142;
-        Some(tmp.to_vec())
+    fn get_sirk_packet(&self) -> Option<Vec<u8>> {
+        None
     }
 
-    fn set_surround_sound_packet(&self, _surround_sound: bool) -> Option<Vec<u8>> {
+    fn reset_sirk_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn get_silent_mode_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn set_silent_mode_packet(&self, _silence: bool) -> Option<Vec<u8>> {
         None
     }
 

@@ -1,5 +1,3 @@
-use std::u8;
-
 use hidapi::{DeviceInfo, HidApi};
 
 const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
