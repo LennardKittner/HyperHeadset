@@ -141,6 +141,20 @@ Response: [0B 00 BB 11 <v1> <v2> <v3> <v4> ...]
   - byte[7] = revision number
 - **Note:** This response is typically only logged, not emitted as a DeviceEvent
 
+#### Get Microphone Mute Status (Cmd 1)
+
+```
+Send:     [06 00 02 00 9A 00 00 68 4A 8E 0A 00 00 00 BB 01 00 ...]
+Response: [0B 00 BB 01 <status> ...]
+```
+
+- **byte[4]** = connection/mute status
+  - `0x01` = Connected
+  - `0x02` = Pairing mode
+  - `0x04` = Connected (alternative)
+- **Note:** This command ID (1) serves dual purpose - it returns connection status
+- **Limitation:** Mute cannot be SET via HID command (hardware button only)
+
 #### Microphone Mute Status (Cmd 8)
 
 ```
@@ -150,7 +164,8 @@ Response: [0B 00 BB 08 <status> ...]
 - **byte[4]** = mute status
   - `0x01` = Microphone muted
   - `0x00` = Microphone unmuted
-- **Note:** This appears as a response when the hardware mute button is toggled on the headset
+- **Note:** This appears as an unsolicited response when the hardware mute button is toggled on the headset
+- **Limitation:** This is a READ-ONLY event; you cannot programmatically mute the microphone
 
 #### Initialization Commands (Cmd 9, 29)
 
@@ -172,9 +187,29 @@ Send:     [06 00 00 00 FF 00 00 68 4A 8E 00 00 00 00 00 00 ...]
 Response: [0A 00 <dsp_status> 03 ...]
 ```
 
-- **Report ID:** 0x0A (10 decimal)
+- **Report ID:** 0x0A (10 decimal) - different from standard responses
+- **Packet structure:** Simplified format (not using BASE_PACKET template)
 - **byte[2] & 0x02** = Surround sound enabled if bit 1 is set
 - Example: `0x02` = surround OFF, `0x03` = surround ON
+- **Limitation:** On Cloud II Wireless (non-DTS), surround sound can only be READ, not SET via HID
+  - Surround sound control is handled through Windows DTS Audio Processing Object (APO)
+  - The physical headset button or Windows audio settings control this feature
+  - The HID protocol only allows monitoring the current state
+
+### Feature Control Capabilities
+
+The Cloud II Wireless (non-DTS) has the following control capabilities:
+
+| Feature              | Read Status | Set/Control | Notes                                   |
+| -------------------- | ----------- | ----------- | --------------------------------------- |
+| Battery Level        | ✅ Yes      | ❌ No       | Read-only                               |
+| Charging Status      | ✅ Yes      | ❌ No       | Read-only                               |
+| Connection Status    | ✅ Yes      | ❌ No       | Read-only                               |
+| Auto Power Off       | ✅ Yes      | ✅ Yes      | Full control via commands 24/26         |
+| Sidetone             | ✅ Yes      | ✅ Yes      | Full control via command 25             |
+| Microphone Mute      | ✅ Yes      | ❌ No       | Hardware button only (commands 1/8)     |
+| Surround Sound (7.1) | ✅ Yes      | ❌ No       | Controlled via Windows DTS APO, not HID |
+| Firmware Version     | ✅ Yes      | ❌ No       | Read-only (command 17)                  |
 
 ### Response Packet Format
 
@@ -486,7 +521,12 @@ The DSP mode is model-specific and varies significantly:
 
 ### Cloud II Wireless Non-DTS
 
-Uses a special packet structure and bit flags for enabling 7.1 surround sound.
+- **Reading Status:** Uses a special packet structure with Report ID 0x0A
+- **Enabling/Disabling:** NOT supported via HID commands
+  - Surround sound is controlled through Windows DTS Audio Processing Object (APO)
+  - Users must use the physical button on the headset or Windows audio settings
+  - The HID protocol only allows reading the current state
+- Uses bit flags in the DSP status byte to indicate 7.1 surround sound state
 
 ### Cloud II Wireless DTS
 
@@ -518,7 +558,11 @@ May use different approaches or not support surround sound at all.
 
 7. **Firmware Version:** Command 17 returns firmware version information but does not typically generate user-facing events—it's primarily for logging and diagnostics.
 
-8. **Microphone Mute:** Hardware mute button on headset generates unsolicited responses with command ID 8. This allows the application to detect physical button presses.
+8. **Microphone Mute:** Hardware mute button on headset generates unsolicited responses with command ID 8. This allows the application to detect physical button presses. **Cannot be controlled programmatically** - mute is hardware-only.
+
+9. **Surround Sound Control:** Cloud II Wireless (non-DTS) can only READ surround sound status via HID. Enabling/disabling is controlled through Windows DTS APO system, not HID commands. Use the physical headset button or Windows audio settings to toggle surround sound.
+
+10. **Limited Write Commands:** Only Auto Power Off (Cmd 24) and Sidetone (Cmd 25) can be SET via HID. All other features are read-only or hardware-controlled.
 
 ---
 
