@@ -84,7 +84,7 @@ pub struct DeviceState {
 
 impl Display for DeviceState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string_with_padding(25))
+        write!(f, "{}", self.to_string_with_readonly_info(25))
     }
 }
 
