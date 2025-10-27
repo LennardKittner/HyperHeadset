@@ -138,97 +138,8 @@ impl DeviceState {
         })
     }
 
-    pub fn to_string_with_padding(&self, padding: usize) -> String {
-        let data = [
-            (
-                "Battery level:",
-                self.battery_level.map(|l| l.to_string()),
-                "%",
-                false, // read-only flag (not applicable for read-only fields)
-            ),
-            (
-                "Charging status:",
-                self.charging.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            ("Muted:", self.muted.map(|c| c.to_string()), "", false),
-            (
-                "Mic connected:",
-                self.mic_connected.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            (
-                "Automatic shutdown after:",
-                self.automatic_shutdown_after
-                    .map(|c| (c.as_secs() / 60).to_string()),
-                "min",
-                false,
-            ),
-            (
-                "pairing info:",
-                self.pairing_info.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            (
-                "product color:",
-                self.product_color.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            (
-                "Side tone:",
-                self.side_tone_on.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            (
-                "Side tone volume:",
-                self.side_tone_volume.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            (
-                "Surround sound:",
-                self.surround_sound.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            (
-                "Voice prompt:",
-                self.voice_prompt_on.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            (
-                "Connected:",
-                self.connected.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            (
-                "Playback muted:",
-                self.silent.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-        ];
-        data.iter()
-            .filter_map(|(prefix, data, suffix, _)| {
-                if let Some(data) = data {
-                    Some(format!("{:<padding$} {}{}", prefix, data, suffix))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<String>>()
-            .join("\n")
-    }
-
-    pub fn to_string_with_readonly_info(&self, padding: usize) -> String {
-        let data = [
+    fn get_display_data(&self) -> Vec<(&str, Option<String>, &str, bool)> {
+        vec![
             (
                 "Battery level:",
                 self.battery_level.map(|l| l.to_string()),
@@ -308,8 +219,26 @@ impl DeviceState {
                 "",
                 !self.can_set_silent_mode,
             ),
-        ];
-        data.iter()
+        ]
+    }
+
+    pub fn to_string_with_padding(&self, padding: usize) -> String {
+        self.get_display_data()
+            .iter()
+            .filter_map(|(prefix, data, suffix, _)| {
+                if let Some(data) = data {
+                    Some(format!("{:<padding$} {}{}", prefix, data, suffix))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+
+    pub fn to_string_with_readonly_info(&self, padding: usize) -> String {
+        self.get_display_data()
+            .iter()
             .filter_map(|(prefix, data, suffix, readonly)| {
                 if let Some(data) = data {
                     let readonly_marker = if *readonly { " (read-only)" } else { "" };
