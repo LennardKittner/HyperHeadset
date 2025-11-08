@@ -171,54 +171,95 @@ impl Device for CloudIIWireless {
             return None;
         }
         println!("Received packet: {:?}", response);
-        match (
-            response[0],
-            response[3],
-            response[4],
-            response[7],
-            response[12],
-            response[14],
-        ) {
-            (11, CONNECTION_STATUS_RESPONSE_ID, status, _, _, _) => {
-                let flag = status == 1 || status == 4;
-                if status == 2 {
-                    println!("pairing");
+
+        // Most responses are Report ID 11 (0x0B) with structure: [11, 0, 187, cmd_id, ...]
+        // Some responses are Report ID 10 (0x0A) for DSP/surround status
+        match response[0] {
+            11 if response[2] == 187 => {
+                // Standard response format: [11, 0, 187, cmd_id, data...]
+                match response[3] {
+                    CONNECTION_STATUS_RESPONSE_ID => {
+                        let status = response[4];
+                        let connected = status == 1 || status == 4;
+                        if status == 2 {
+                            println!("Pairing mode");
+                        }
+                        println!("Connected: {}", connected);
+                        Some(vec![DeviceEvent::WirelessConnected(connected)])
+                    }
+                    GET_BATTERY_CMD_ID => {
+                        // Battery level is at byte 7, not byte 4
+                        let level = response[7];
+                        println!("Battery Level: {}%", level);
+                        Some(vec![DeviceEvent::BatterLevel(level)])
+                    }
+                    GET_CHARGING_CMD_ID => {
+                        let status = response[4];
+                        println!(
+                            "Charging status: {} ({:?})",
+                            status,
+                            ChargingStatus::from(status)
+                        );
+                        Some(vec![DeviceEvent::Charging(ChargingStatus::from(status))])
+                    }
+                    MUTE_RESPONSE_ID => {
+                        let muted = response[4] == 1;
+                        println!("Microphone muted: {}", muted);
+                        Some(vec![DeviceEvent::Muted(muted)])
+                    }
+                    FIRMWARE_VERSION_RESPONSE_ID => {
+                        println!(
+                            "Firmware version: {}.{}.{}.{}",
+                            response[4], response[5], response[6], response[7]
+                        );
+                        None
+                    }
+                    SET_SIDE_TONE_ON_CMD_ID => {
+                        // Response format: [11, 0, 187, 25, status, ...]
+                        // where status: 1 = enabled, 0 = disabled
+                        let enabled = response[4] == 1;
+                        println!("Sidetone enabled: {}", enabled);
+                        Some(vec![DeviceEvent::SideToneOn(enabled)])
+                    }
+                    GET_AUTO_SHUTDOWN_CMD_ID => {
+                        let minutes = response[4];
+                        println!("Auto shutdown after: {} minutes", minutes);
+                        Some(vec![DeviceEvent::AutomaticShutdownAfter(
+                            Duration::from_secs(minutes as u64 * 60),
+                        )])
+                    }
+                    4 => {
+                        // Command 4: Charge limit or battery management
+                        // This may be sent asynchronously when charging state changes
+                        println!(
+                            "Charge limit/battery management response (cmd 4): data={:?}",
+                            &response[4..8]
+                        );
+                        None
+                    }
+                    9 | 29 => {
+                        // Commands 9 and 29 are seen during initialization but purpose unclear
+                        println!("Initialization response (cmd {})", response[3]);
+                        None
+                    }
+                    _ => {
+                        println!("Unknown command response: cmd_id={}", response[3]);
+                        None
+                    }
                 }
-                println!("Connected {flag}");
-                Some(vec![DeviceEvent::WirelessConnected(flag)])
             }
-            (11, GET_BATTERY_CMD_ID, _, level, _, _) => {
-                println!("Battery Level {level}");
-                Some(vec![DeviceEvent::BatterLevel(level)])
-            }
-            (11, GET_CHARGING_CMD_ID, status, _, _, _) => {
-                println!("Charging {status} {:?}", ChargingStatus::from(status));
-                Some(vec![DeviceEvent::Charging(ChargingStatus::from(status))])
-            }
-            (11, MUTE_RESPONSE_ID, status, _, _, _) => {
-                println!("Muted {status} {:?}", ChargingStatus::from(status));
-                Some(vec![DeviceEvent::Muted(status == 1)])
-            }
-            (11, FIRMWARE_VERSION_RESPONSE_ID, ..) => {
-                print!("Firmware version update");
-                None
-            }
-            (11, SET_SIDE_TONE_ON_CMD_ID, status, ..) => {
-                print!("Side tone on {status}");
-                Some(vec![DeviceEvent::SideToneOn(status != 1)])
-            }
-            (11, GET_AUTO_SHUTDOWN_CMD_ID, shutdown, _, _, _) => {
-                println!("Shutdown time {shutdown}");
-                Some(vec![DeviceEvent::AutomaticShutdownAfter(
-                    Duration::from_secs(shutdown as u64 * 60),
-                )])
-            }
-            (10, surround, _, _, _, _) => {
-                println!("Surround sound {}", surround);
-                Some(vec![DeviceEvent::SurroundSound((surround & 2) == 2)])
+            10 => {
+                // DSP/Surround sound status response: [10, 0, dsp_status, ...]
+                let dsp_status = response[2];
+                let surround_enabled = (dsp_status & 2) == 2;
+                println!(
+                    "Surround sound enabled: {} (dsp_status=0x{:02X})",
+                    surround_enabled, dsp_status
+                );
+                Some(vec![DeviceEvent::SurroundSound(surround_enabled)])
             }
             _ => {
-                println!("Unknown device event: {:?}", response);
+                println!("Unknown response format: report_id={}", response[0]);
                 None
             }
         }

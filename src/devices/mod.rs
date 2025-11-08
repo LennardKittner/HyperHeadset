@@ -25,27 +25,32 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
         .get_product_string()?
         .ok_or(DeviceError::NoDeviceFound())?;
     println!("Connecting to {}", name);
-    match (state.vendor_id, state.product_id) {
+    let mut device: Box<dyn Device> = match (state.vendor_id, state.product_id) {
         (v, p)
             if cloud_ii_wireless::VENDOR_IDS.contains(&v)
                 && cloud_ii_wireless::PRODUCT_IDS.contains(&p) =>
         {
-            Ok(Box::new(CloudIIWireless::new_from_state(state)))
+            Box::new(CloudIIWireless::new_from_state(state))
         }
         (v, p)
             if cloud_ii_wireless_dts::VENDOR_IDS.contains(&v)
                 && cloud_ii_wireless_dts::PRODUCT_IDS.contains(&p) =>
         {
-            Ok(Box::new(CloudIIWirelessDTS::new_from_state(state)))
+            Box::new(CloudIIWirelessDTS::new_from_state(state))
         }
         (v, p)
             if cloud_iii_wireless::VENDOR_IDS.contains(&v)
                 && cloud_iii_wireless::PRODUCT_IDS.contains(&p) =>
         {
-            Ok(Box::new(CloudIIIWireless::new_from_state(state)))
+            Box::new(CloudIIIWireless::new_from_state(state))
         }
-        (_, _) => Err(DeviceError::NoDeviceFound()),
-    }
+        (_, _) => return Err(DeviceError::NoDeviceFound()),
+    };
+
+    // Initialize capability flags
+    device.init_capabilities();
+
+    Ok(device)
 }
 
 #[derive(Debug)]
@@ -67,11 +72,19 @@ pub struct DeviceState {
     pub voice_prompt_on: Option<bool>,
     pub connected: Option<bool>,
     pub silent: Option<bool>,
+    // Capability flags - set once during device initialization
+    pub can_set_mute: bool,
+    pub can_set_surround_sound: bool,
+    pub can_set_side_tone: bool,
+    pub can_set_automatic_shutdown: bool,
+    pub can_set_side_tone_volume: bool,
+    pub can_set_voice_prompt: bool,
+    pub can_set_silent_mode: bool,
 }
 
 impl Display for DeviceState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string_with_padding(25))
+        write!(f, "{}", self.to_string_with_readonly_info(25))
     }
 }
 
@@ -114,62 +127,125 @@ impl DeviceState {
             voice_prompt_on: None,
             connected: None,
             silent: None,
+            // Capability flags - will be set by init_capabilities()
+            can_set_mute: false,
+            can_set_surround_sound: false,
+            can_set_side_tone: false,
+            can_set_automatic_shutdown: false,
+            can_set_side_tone_volume: false,
+            can_set_voice_prompt: false,
+            can_set_silent_mode: false,
         })
     }
 
-    pub fn to_string_with_padding(&self, padding: usize) -> String {
-        let data = [
+    fn get_display_data(&self) -> Vec<(&str, Option<String>, &str, bool)> {
+        vec![
             (
                 "Battery level:",
                 self.battery_level.map(|l| l.to_string()),
                 "%",
+                false,
             ),
-            ("Charging status:", self.charging.map(|c| c.to_string()), ""),
-            ("Muted:", self.muted.map(|c| c.to_string()), ""),
+            (
+                "Charging status:",
+                self.charging.map(|c| c.to_string()),
+                "",
+                false,
+            ),
+            (
+                "Muted:",
+                self.muted.map(|c| c.to_string()),
+                "",
+                !self.can_set_mute,
+            ),
             (
                 "Mic connected:",
                 self.mic_connected.map(|c| c.to_string()),
                 "",
+                false,
             ),
             (
                 "Automatic shutdown after:",
                 self.automatic_shutdown_after
                     .map(|c| (c.as_secs() / 60).to_string()),
                 "min",
+                !self.can_set_automatic_shutdown,
             ),
             (
                 "pairing info:",
                 self.pairing_info.map(|c| c.to_string()),
                 "",
+                false,
             ),
             (
                 "product color:",
                 self.product_color.map(|c| c.to_string()),
                 "",
+                false,
             ),
-            ("Side tone:", self.side_tone_on.map(|c| c.to_string()), ""),
+            (
+                "Side tone:",
+                self.side_tone_on.map(|c| c.to_string()),
+                "",
+                !self.can_set_side_tone,
+            ),
             (
                 "Side tone volume:",
                 self.side_tone_volume.map(|c| c.to_string()),
                 "",
+                !self.can_set_side_tone_volume,
             ),
             (
                 "Surround sound:",
                 self.surround_sound.map(|c| c.to_string()),
                 "",
+                !self.can_set_surround_sound,
             ),
             (
                 "Voice prompt:",
                 self.voice_prompt_on.map(|c| c.to_string()),
                 "",
+                !self.can_set_voice_prompt,
             ),
-            ("Connected:", self.connected.map(|c| c.to_string()), ""),
-            ("Playback muted:", self.silent.map(|c| c.to_string()), ""),
-        ];
-        data.iter()
-            .filter_map(|(prefix, data, suffix)| {
+            (
+                "Connected:",
+                self.connected.map(|c| c.to_string()),
+                "",
+                false,
+            ),
+            (
+                "Playback muted:",
+                self.silent.map(|c| c.to_string()),
+                "",
+                !self.can_set_silent_mode,
+            ),
+        ]
+    }
+
+    pub fn to_string_with_padding(&self, padding: usize) -> String {
+        self.get_display_data()
+            .iter()
+            .filter_map(|(prefix, data, suffix, _)| {
                 if let Some(data) = data {
                     Some(format!("{:<padding$} {}{}", prefix, data, suffix))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+
+    pub fn to_string_with_readonly_info(&self, padding: usize) -> String {
+        self.get_display_data()
+            .iter()
+            .filter_map(|(prefix, data, suffix, readonly)| {
+                if let Some(data) = data {
+                    let readonly_marker = if *readonly { " (read-only)" } else { "" };
+                    Some(format!(
+                        "{:<padding$} {}{}{}",
+                        prefix, data, suffix, readonly_marker
+                    ))
                 } else {
                     None
                 }
@@ -342,6 +418,53 @@ pub trait Device {
     fn get_device_state(&self) -> &DeviceState;
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
     fn prepare_write(&mut self) {}
+
+    // Helper methods to check if features are writable
+    fn can_set_mute(&self) -> bool {
+        self.set_mute_packet(false).is_some()
+    }
+    fn can_set_surround_sound(&self) -> bool {
+        self.set_surround_sound_packet(false).is_some()
+    }
+    fn can_set_side_tone(&self) -> bool {
+        self.set_side_tone_packet(false).is_some()
+    }
+    fn can_set_automatic_shutdown(&self) -> bool {
+        self.set_automatic_shut_down_packet(Duration::from_secs(0))
+            .is_some()
+    }
+    fn can_set_side_tone_volume(&self) -> bool {
+        self.set_side_tone_volume_packet(0).is_some()
+    }
+    fn can_set_voice_prompt(&self) -> bool {
+        self.set_voice_prompt_packet(false).is_some()
+    }
+    fn can_set_silent_mode(&self) -> bool {
+        self.set_silent_mode_packet(false).is_some()
+    }
+
+    // Initialize capability flags in device state
+    fn init_capabilities(&mut self) {
+        // Collect capabilities first to avoid borrowing conflicts
+        let can_set_mute = self.can_set_mute();
+        let can_set_surround_sound = self.can_set_surround_sound();
+        let can_set_side_tone = self.can_set_side_tone();
+        let can_set_automatic_shutdown = self.can_set_automatic_shutdown();
+        let can_set_side_tone_volume = self.can_set_side_tone_volume();
+        let can_set_voice_prompt = self.can_set_voice_prompt();
+        let can_set_silent_mode = self.can_set_silent_mode();
+
+        // Now set them in device state
+        let state = self.get_device_state_mut();
+        state.can_set_mute = can_set_mute;
+        state.can_set_surround_sound = can_set_surround_sound;
+        state.can_set_side_tone = can_set_side_tone;
+        state.can_set_automatic_shutdown = can_set_automatic_shutdown;
+        state.can_set_side_tone_volume = can_set_side_tone_volume;
+        state.can_set_voice_prompt = can_set_voice_prompt;
+        state.can_set_silent_mode = can_set_silent_mode;
+    }
+
     fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
         Ok(())
     }
