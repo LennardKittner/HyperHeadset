@@ -10,9 +10,11 @@ The CLI application is compatible with both Linux and MacOS operating systems.
 However, the tray application is only functional on Linux. 
 Although it was only tested on Manjaro and Kubuntu with KDE, it should also work on other distribution and desktop environments.
 
-Currently, only the HyperX Cloud II Wireless and HyperX Cloud Stinger 2 Wireless are supported.
-Please note that the HyperX Cloud II Wireless comes in two versions: one produced before HP acquired HyperX and one after.
-The application has only been tested on the HyperX Cloud II Wireless with the HP vendorID.
+*Supported Headsets*:
+- HyperX Cloud II Wireless HP vendorID
+- HyperX Cloud II Wireless HyperX vendorID
+- HyperX Cloud Stinger 2 Wireless 
+- HyperX Cloud III Wireless (Experimental)
 
 It should be possible to add support for other HyperX headsets.
 
@@ -59,11 +61,13 @@ SUBSYSTEMS=="usb", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="0696", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="1718", ATTRS{idVendor}=="0951", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="05b7", ATTRS{idVendor}=="03f0", MODE="0666"
 
 KERNEL=="hidraw*", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="0696", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="1718", ATTRS{idVendor}=="0951", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="05b7", ATTRS{idVendor}=="03f0", MODE="0666"
 ```
 
 Once created, replug the wireless dongle.
