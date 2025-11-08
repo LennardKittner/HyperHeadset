@@ -24,7 +24,7 @@ fn main() {
                 .help(
                     "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
                 )
-                    .hide(device.set_automatic_shut_down_packet(Duration::from_secs(0)).is_none())
+                    .hide(!device.can_set_automatic_shutdown())
                 .value_parser(clap::value_parser!(u8)),
         )
         .arg(
@@ -32,7 +32,7 @@ fn main() {
                 .long("mute")
                 .required(false)
                 .help("Mute or unmute the headset.")
-                .hide(device.set_mute_packet(false).is_none())
+                .hide(!device.can_set_mute())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -40,7 +40,7 @@ fn main() {
                 .long("enable_side_tone")
                 .required(false)
                 .help("Enable or disable side tone.")
-                .hide(device.set_side_tone_packet(false).is_none())
+                .hide(!device.can_set_side_tone())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -48,7 +48,7 @@ fn main() {
                 .long("side_tone_volume")
                 .required(false)
                 .help("Set the side tone volume.")
-                .hide(device.set_side_tone_volume_packet(0).is_none())
+                .hide(!device.can_set_side_tone_volume())
                 .value_parser(clap::value_parser!(u8)),
         )
         .arg(
@@ -56,7 +56,7 @@ fn main() {
                 .long("enable_voice_prompt")
                 .required(false)
                 .help("Enable voice prompt. This may not be supported on your device.")
-                .hide(device.set_voice_prompt_packet(false).is_none())
+                .hide(!device.can_set_voice_prompt())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -64,7 +64,7 @@ fn main() {
                 .long("surround_sound")
                 .required(false)
                 .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
-                .hide(device.set_surround_sound_packet(false).is_none())
+                .hide(!device.can_set_surround_sound())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -72,7 +72,7 @@ fn main() {
                 .long("mute_playback")
                 .required(false)
                 .help("Mute or unmute playback.")
-                .hide(device.set_silent_mode_packet(false).is_none())
+                .hide(!device.can_set_silent_mode())
                 .value_parser(clap::value_parser!(bool)),
         )
         .get_matches();
