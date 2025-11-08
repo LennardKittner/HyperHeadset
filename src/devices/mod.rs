@@ -226,11 +226,7 @@ impl DeviceState {
         self.get_display_data()
             .iter()
             .filter_map(|(prefix, data, suffix, _)| {
-                if let Some(data) = data {
-                    Some(format!("{:<padding$} {}{}", prefix, data, suffix))
-                } else {
-                    None
-                }
+                data.as_ref().map(|data| format!("{:<padding$} {}{}", prefix, data, suffix))
             })
             .collect::<Vec<String>>()
             .join("\n")

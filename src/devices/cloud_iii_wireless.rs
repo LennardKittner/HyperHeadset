@@ -210,8 +210,8 @@ impl Device for CloudIIIWireless {
             (GET_SILENT_MODE_CMD_ID, silent, ..) => Some(vec![DeviceEvent::Silent(silent == 1)]),
             (GET_SIRK_CMD_ID, ..) => {
                 let mut flag = false;
-                for i in 2..18 {
-                    if response[i] != 0 {
+                for item in response.iter().take(18).skip(2) {
+                    if item != &0u8 {
                         flag = true;
                         break;
                     }
