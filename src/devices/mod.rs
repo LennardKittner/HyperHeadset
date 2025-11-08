@@ -226,7 +226,8 @@ impl DeviceState {
         self.get_display_data()
             .iter()
             .filter_map(|(prefix, data, suffix, _)| {
-                data.as_ref().map(|data| format!("{:<padding$} {}{}", prefix, data, suffix))
+                data.as_ref()
+                    .map(|data| format!("{:<padding$} {}{}", prefix, data, suffix))
             })
             .collect::<Vec<String>>()
             .join("\n")
@@ -414,6 +415,8 @@ pub trait Device {
     fn get_device_state(&self) -> &DeviceState;
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
     fn prepare_write(&mut self) {}
+    /// whether the app should periodically listen for packets from the headsets
+    fn allow_passive_refresh(&mut self) -> bool;
 
     // Helper methods to check if features are writable
     fn can_set_mute(&self) -> bool {
@@ -526,14 +529,13 @@ pub trait Device {
     /// Refreshes the state by listening for events
     /// Only the battery level is actively queried because it is not communicated by the device on its own
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
-        //TODO: only if the headset allows it
-        // println!("passive refresh");
-        // if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
-        //     println!("{:?}", events);
-        //     for event in events {
-        //         self.get_device_state_mut().update_self_with_event(&event);
-        //     }
-        // }
+        if self.allow_passive_refresh() {
+            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+                for event in events {
+                    self.get_device_state_mut().update_self_with_event(&event);
+                }
+            }
+        }
         if let Some(batter_packet) = self.get_battery_packet() {
             self.prepare_write();
             self.get_device_state().hid_device.write(&batter_packet)?;

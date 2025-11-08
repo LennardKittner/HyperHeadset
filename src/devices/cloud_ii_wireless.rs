@@ -267,6 +267,10 @@ impl Device for CloudIIWireless {
             .unwrap();
     }
 
+    fn allow_passive_refresh(&mut self) -> bool {
+        false
+    }
+
     fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
         //TODO: I think this unmutes the headset
         // println!("Writing special sequence");

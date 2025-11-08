@@ -231,6 +231,10 @@ impl Device for CloudIIWirelessDTS {
         }
     }
 
+    fn allow_passive_refresh(&mut self) -> bool {
+        true
+    }
+
     fn get_device_state(&self) -> &DeviceState {
         &self.state
     }
