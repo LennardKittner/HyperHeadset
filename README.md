@@ -90,7 +90,6 @@ You can also download a compiled version from [releases](https://github.com/Lenn
 ## Usage
 
 ```
-hyper_headset_cli --help
 A CLI application for monitoring and managing HyperX headsets.
 
 Usage: hyper_headset_cli [OPTIONS]
@@ -100,17 +99,23 @@ Options:
           Set the delay in minutes after which the headset will automatically shutdown.
           0 will disable automatic shutdown.
       --mute <mute>
-          Mute or un mute the headset. [possible values: true, false]
+          Mute or unmute the headset. [possible values: true, false]
       --enable_side_tone <enable_side_tone>
           Enable or disable side tone. [possible values: true, false]
       --side_tone_volume <side_tone_volume>
           Set the side tone volume.
       --enable_voice_prompt <enable_voice_prompt>
           Enable voice prompt. This may not be supported on your device. [possible values: true, false]
+      --surround_sound <surround_sound>
+          Enables surround sound. This may be on by default and cannot be changed on your device. [possible values: true, false]
+      --mute_playback <mute_playback>
+          Mute or unmute playback. [possible values: true, false]
   -h, --help
           Print help
   -V, --version
           Print version
+
+Help only lists commands supported by this headset.
 ```
 `hyper_headset_cli` without any arguments will print all available headset information.
 
