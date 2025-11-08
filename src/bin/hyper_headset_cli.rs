@@ -77,34 +77,20 @@ fn main() {
         )
         .get_matches();
 
-    println!("State before doing anything");
-    if let Err(error) = device.active_refresh_state() {
-        eprintln!("{error}");
-        std::process::exit(1);
-    };
-    println!("{}", device.get_device_state());
-
     if let Some(delay) = matches.get_one::<u8>("automatic_shutdown") {
-        println!("entering automatic_shutdown packet");
         let delay = *delay as u64;
         if let Some(packet) =
             device.set_automatic_shut_down_packet(Duration::from_secs(delay * 60u64))
         {
-            println!("sending automatic_shutdown packet");
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                 eprintln!("Failed to set automatic shutdown with error: {:?}", err);
                 std::process::exit(1);
             }
-            if let Some(events) = device.wait_for_updates(Duration::from_secs(1)) {
-                println!("{:?}", events);
-            }
         } else {
             eprintln!("ERROR: Automatic shutdown is not supported on this device");
             std::process::exit(1);
         }
-    } else {
-        println!("not sending automatic_shutdown packet");
     }
 
     if let Some(mute) = matches.get_one::<bool>("mute") {
@@ -121,24 +107,16 @@ fn main() {
     }
 
     if let Some(enable) = matches.get_one::<bool>("enable_side_tone") {
-        println!("entering enable_side_tone packet");
         if let Some(packet) = device.set_side_tone_packet(*enable) {
-            println!("sending enable_side_tone packet");
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                 eprintln!("Failed to enable side tone with error: {:?}", err);
                 std::process::exit(1);
             }
-            std::thread::sleep(Duration::from_millis(50));
-            if let Some(events) = device.wait_for_updates(Duration::from_secs(1)) {
-                println!("{:?}", events);
-            }
         } else {
             eprintln!("ERROR: Side tone control is not supported on this device");
             std::process::exit(1);
         }
-    } else {
-        println!("not sending enable_side_tone packet");
     }
 
     if let Some(volume) = matches.get_one::<u8>("side_tone_volume") {
@@ -196,7 +174,6 @@ fn main() {
 
     std::thread::sleep(Duration::from_secs_f64(0.5));
 
-    println!("State after potentially setting some stuff");
     if let Err(error) = device.active_refresh_state() {
         eprintln!("{error}");
         std::process::exit(1);
