@@ -10,7 +10,7 @@ The CLI application is compatible with both Linux and MacOS operating systems.
 However, the tray application is only functional on Linux. 
 Although it was only tested on Manjaro and Kubuntu with KDE, it should also work on other distribution and desktop environments.
 
-*Supported Headsets*:
+**Supported Headsets**:
 - HyperX Cloud II Wireless HP vendorID
 - HyperX Cloud II Wireless HyperX vendorID
 - HyperX Cloud Stinger 2 Wireless 
