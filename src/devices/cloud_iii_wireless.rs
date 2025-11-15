@@ -1,4 +1,7 @@
-use crate::devices::{ChargingStatus, Color, Device, DeviceError, DeviceEvent, DeviceState};
+use crate::{
+    debug_println,
+    devices::{ChargingStatus, Color, Device, DeviceError, DeviceEvent, DeviceState},
+};
 use std::{time::Duration, vec};
 
 const HP: u16 = 0x03F0;
@@ -177,6 +180,7 @@ impl Device for CloudIIIWireless {
     }
 
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
+        debug_println!("Read packet: {response:?}");
         if response[0] != 102 {
             return None;
         }
@@ -218,7 +222,10 @@ impl Device for CloudIIIWireless {
                 }
                 Some(vec![DeviceEvent::RequireSIRKReset(flag)])
             }
-            _ => None,
+            _ => {
+                debug_println!("Unknown device event: {:?}", response);
+                None
+            }
         }
     }
 

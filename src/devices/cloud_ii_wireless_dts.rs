@@ -1,4 +1,7 @@
-use crate::devices::{ChargingStatus, Color, Device, DeviceError, DeviceEvent, DeviceState};
+use crate::{
+    debug_println,
+    devices::{ChargingStatus, Color, Device, DeviceError, DeviceEvent, DeviceState},
+};
 use std::time::Duration;
 
 const HP: u16 = 0x03F0;
@@ -184,6 +187,7 @@ impl Device for CloudIIWirelessDTS {
     }
 
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
+        debug_println!("Read packet: {:?}", response);
         if response.len() < 7 {
             return None;
         }
@@ -225,7 +229,7 @@ impl Device for CloudIIWirelessDTS {
                 Some(vec![DeviceEvent::ProductColor(Color::from(status))])
             }
             _ => {
-                println!("Unknown device event: {:?}", response);
+                debug_println!("Unknown device event: {:?}", response);
                 None
             }
         }

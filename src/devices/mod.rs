@@ -2,9 +2,12 @@ pub mod cloud_ii_wireless;
 pub mod cloud_ii_wireless_dts;
 pub mod cloud_iii_wireless;
 
-use crate::devices::{
-    cloud_ii_wireless::CloudIIWireless, cloud_ii_wireless_dts::CloudIIWirelessDTS,
-    cloud_iii_wireless::CloudIIIWireless,
+use crate::{
+    debug_println,
+    devices::{
+        cloud_ii_wireless::CloudIIWireless, cloud_ii_wireless_dts::CloudIIWirelessDTS,
+        cloud_iii_wireless::CloudIIIWireless,
+    },
 };
 use hidapi::{HidApi, HidDevice, HidError};
 use std::{fmt::Display, time::Duration};
@@ -506,6 +509,7 @@ pub trait Device {
         let mut responded = false;
         for packet in packets.into_iter().flatten() {
             self.prepare_write();
+            debug_println!("Write packet: {packet:?}");
             self.get_device_state().hid_device.write(&packet)?;
             std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {

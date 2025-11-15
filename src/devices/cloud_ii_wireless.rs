@@ -1,4 +1,7 @@
-use crate::devices::{ChargingStatus, Device, DeviceError, DeviceEvent, DeviceState};
+use crate::{
+    debug_println,
+    devices::{ChargingStatus, Device, DeviceError, DeviceEvent, DeviceState},
+};
 use std::time::Duration;
 
 const HYPERX: u16 = 0x0951;
@@ -167,6 +170,7 @@ impl Device for CloudIIWireless {
     }
 
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
+        debug_println!("Read packet: {:?}", response);
         if response.len() < 7 {
             return None;
         }
@@ -181,7 +185,7 @@ impl Device for CloudIIWireless {
                         let status = response[4];
                         let connected = status == 1 || status == 4;
                         if status == 2 {
-                            println!("Pairing mode");
+                            debug_println!("Pairing mode");
                         }
                         Some(vec![DeviceEvent::WirelessConnected(connected)])
                     }
@@ -199,9 +203,12 @@ impl Device for CloudIIWireless {
                         Some(vec![DeviceEvent::Muted(muted)])
                     }
                     FIRMWARE_VERSION_RESPONSE_ID => {
-                        println!(
+                        debug_println!(
                             "Firmware version: {}.{}.{}.{}",
-                            response[4], response[5], response[6], response[7]
+                            response[4],
+                            response[5],
+                            response[6],
+                            response[7]
                         );
                         None
                     }
@@ -220,7 +227,7 @@ impl Device for CloudIIWireless {
                     4 => {
                         // Command 4: Charge limit or battery management
                         // This may be sent asynchronously when charging state changes
-                        println!(
+                        debug_println!(
                             "Charge limit/battery management response (cmd 4): data={:?}",
                             &response[4..8]
                         );
@@ -228,11 +235,11 @@ impl Device for CloudIIWireless {
                     }
                     9 | 29 => {
                         // Commands 9 and 29 are seen during initialization but purpose unclear
-                        println!("Initialization response (cmd {})", response[3]);
+                        debug_println!("Initialization response (cmd {})", response[3]);
                         None
                     }
                     _ => {
-                        println!("Unknown command response: cmd_id={}", response[3]);
+                        debug_println!("Unknown command response: cmd_id={}", response[3]);
                         None
                     }
                 }
@@ -244,7 +251,7 @@ impl Device for CloudIIWireless {
                 Some(vec![DeviceEvent::SurroundSound(surround_enabled)])
             }
             _ => {
-                println!("Unknown response format: report_id={}", response[0]);
+                debug_println!("Unknown response format: report_id={}", response[0]);
                 None
             }
         }
