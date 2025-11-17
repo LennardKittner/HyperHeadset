@@ -175,13 +175,13 @@ impl DeviceState {
                 !self.can_set_automatic_shutdown,
             ),
             (
-                "pairing info:",
+                "Pairing info:",
                 self.pairing_info.map(|c| c.to_string()),
                 "",
                 false,
             ),
             (
-                "product color:",
+                "Product color:",
                 self.product_color.map(|c| c.to_string()),
                 "",
                 false,
