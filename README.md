@@ -13,8 +13,8 @@ Although it was only tested on Manjaro and Kubuntu with KDE, it should also work
 **Supported Headsets**:
 - HyperX Cloud II Wireless HP vendorID
 - HyperX Cloud II Wireless HyperX vendorID
+- HyperX Cloud III Wireless
 - HyperX Cloud Stinger 2 Wireless 
-- HyperX Cloud III Wireless (Experimental)
 
 It should be possible to add support for other HyperX headsets.
 
