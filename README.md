@@ -6,15 +6,16 @@ A CLI and tray application for monitoring and managing HyperX headsets.
 This project is not affiliated with, endorsed by, or associated with HyperX or its parent company in any way. All trademarks and brand names belong to their respective owners.
 
 ## Compatibility
-The CLI application is compatible with both Linux and MacOS operating systems. 
-However, the tray application is only functional on Linux. 
+The CLI application is compatible with both Linux and MacOS operating systems.
+However, the tray application is only functional on Linux.
 Although it was only tested on Manjaro and Kubuntu with KDE, it should also work on other distribution and desktop environments.
 
 **Supported Headsets**:
 - HyperX Cloud II Wireless HP vendorID
 - HyperX Cloud II Wireless HyperX vendorID
 - HyperX Cloud III Wireless
-- HyperX Cloud Stinger 2 Wireless 
+- HyperX Cloud Stinger 2 Wireless
+- HyperX Cloud Flight S
 
 It should be possible to add support for other HyperX headsets.
 
@@ -62,12 +63,14 @@ SUBSYSTEMS=="usb", ATTRS{idProduct}=="0696", ATTRS{idVendor}=="03f0", MODE="0666
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="1718", ATTRS{idVendor}=="0951", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="05b7", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="16ea", ATTRS{idVendor}=="0951", MODE="0666"
 
 KERNEL=="hidraw*", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="0696", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="1718", ATTRS{idVendor}=="0951", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="05b7", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="16ea", ATTRS{idVendor}=="0951", MODE="0666"
 ```
 
 Once created, replug the wireless dongle.
@@ -132,7 +135,7 @@ Options:
 ```
 
 `hyper_headset` without any arguments will start the tray application with a 3s refresh interval.
-Once it's open, hover over the headset icon in the system tray or right-click to view details such as the battery level. 
+Once it's open, hover over the headset icon in the system tray or right-click to view details such as the battery level.
 You can also exit via the right-clock menu.
 
 ## Contributing / TODOs
