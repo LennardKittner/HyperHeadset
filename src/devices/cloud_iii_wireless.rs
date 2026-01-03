@@ -6,7 +6,7 @@ use std::{time::Duration, vec};
 
 const HP: u16 = 0x03F0;
 pub const VENDOR_IDS: [u16; 1] = [HP];
-pub const PRODUCT_IDS: [u16; 1] = [0x05B7];
+pub const PRODUCT_IDS: [u16; 2] = [0x05B7, 0x0c9d]; // Possible Cloud III Wireless product IDs
 
 const BASE_PACKET: [u8; 62] = {
     let mut packet = [0; 62];
