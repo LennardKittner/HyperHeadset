@@ -1,4 +1,5 @@
 use hidapi::{DeviceInfo, HidApi};
+use hyper_headset::devices::write_hid_report;
 
 const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
 // Possible Cloud II Wireless product IDs
@@ -155,7 +156,7 @@ fn test_device(device_info: &DeviceInfo) {
         input_report_buffer[0] = 6;
         println!("  packet: {:?}", packet);
         device.get_input_report(&mut input_report_buffer).unwrap();
-        let _ = device.write(packet).map_err(|err| println!("{err}"));
+        let _ = write_hid_report(&device, packet).map_err(|err| println!("{err}"));
         match device.read_timeout(&mut response_buffer, 1000) {
             Err(err) => println!("{err}"),
             Ok(len) => {

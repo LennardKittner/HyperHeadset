@@ -1,10 +1,16 @@
+#[cfg(target_os = "linux")]
 use clap::{Arg, Command};
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
+#[cfg(target_os = "linux")]
 mod status_tray;
+#[cfg(target_os = "linux")]
 use hyper_headset::devices::connect_compatible_device;
+#[cfg(target_os = "linux")]
 use status_tray::{StatusTray, TrayHandler};
 
+#[cfg(target_os = "linux")]
 fn main() {
     let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
@@ -52,4 +58,11 @@ fn main() {
             run_counter += 1;
         }
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!(
+        "HyperHeadset tray app is currently only supported on Linux."
+    );
 }
