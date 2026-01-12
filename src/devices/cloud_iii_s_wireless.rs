@@ -18,6 +18,13 @@ const MIC_HEADER: u8 = 0x05;
 const MIC_ON_CMD: u8 = 0x00;
 const MIC_OFF_CMD: u8 = 0x02;
 
+// Auto-shutdown control (via SET_REPORT, report ID 0x0c)
+// Packet structure: 0c 02 03 00 00 4a XX 00... (64 bytes total)
+// XX values: 00=disabled, 02=10min, 04=20min, 07=30min
+const AUTO_SHUTDOWN_REPORT_ID: u8 = 0x0c;
+const AUTO_SHUTDOWN_CMD: [u8; 5] = [0x02, 0x03, 0x00, 0x00, 0x4a];
+const AUTO_SHUTDOWN_PACKET_SIZE: usize = 64;
+
 // Button report header (incoming from headset)
 const CONSUMER_CONTROL_HEADER: u8 = 0x0f;
 // Consumer control button values
@@ -29,6 +36,17 @@ fn make_mic_packet(mute: bool) -> Vec<u8> {
     let mut packet = vec![0u8; PACKET_SIZE];
     packet[0] = MIC_HEADER;
     packet[1] = if mute { MIC_OFF_CMD } else { MIC_ON_CMD };
+    packet
+}
+
+fn make_auto_shutdown_packet(minutes: u64) -> Vec<u8> {
+    let mut packet = vec![0u8; AUTO_SHUTDOWN_PACKET_SIZE];
+    packet[0] = AUTO_SHUTDOWN_REPORT_ID;
+    packet[1..6].copy_from_slice(&AUTO_SHUTDOWN_CMD);
+    // Value is 16-bit big-endian seconds
+    let seconds = (minutes * 60) as u16;
+    packet[6] = (seconds >> 8) as u8;   // High byte
+    packet[7] = (seconds & 0xFF) as u8; // Low byte
     packet
 }
 
@@ -58,9 +76,10 @@ impl Device for CloudIIISWireless {
         None
     }
 
-    // Cloud III S: Auto shutdown not discovered yet
-    fn set_automatic_shut_down_packet(&self, _shutdown_after: Duration) -> Option<Vec<u8>> {
-        None
+    // Cloud III S: Auto shutdown via SET_REPORT (report ID 0x0c)
+    fn set_automatic_shut_down_packet(&self, shutdown_after: Duration) -> Option<Vec<u8>> {
+        let minutes = shutdown_after.as_secs() / 60;
+        Some(make_auto_shutdown_packet(minutes))
     }
 
     fn get_automatic_shut_down_packet(&self) -> Option<Vec<u8>> {
