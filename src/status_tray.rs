@@ -58,7 +58,6 @@ impl Tray for StatusTray {
     fn tool_tip(&self) -> ToolTip {
         let description = self
             .message
-            .clone()
             .lines()
             .filter(|l| !l.contains("Unknown"))
             .collect::<Vec<&str>>()

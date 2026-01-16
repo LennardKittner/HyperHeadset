@@ -16,7 +16,7 @@ use thistermination::TerminationFull;
 // Possible vendor IDs [HyperX, HP]
 const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
 // All supported product IDs
-const PRODUCT_IDS: [u16; 7] = [0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92, 0x05B7, 0x16EA];
+const PRODUCT_IDS: [u16; 8] = [0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92, 0x05B7, 0x16EA, 0x0c9d];
 
 const RESPONSE_BUFFER_SIZE: usize = 256;
 const RESPONSE_DELAY: Duration = Duration::from_millis(50);
