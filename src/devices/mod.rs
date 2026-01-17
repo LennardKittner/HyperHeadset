@@ -90,6 +90,7 @@ pub struct DeviceState {
     pub can_set_side_tone_volume: bool,
     pub can_set_voice_prompt: bool,
     pub can_set_silent_mode: bool,
+    pub can_set_equalizer: bool,
 }
 
 impl Display for DeviceState {
@@ -145,6 +146,7 @@ impl DeviceState {
             can_set_side_tone_volume: false,
             can_set_voice_prompt: false,
             can_set_silent_mode: false,
+            can_set_equalizer: false,
         })
     }
 
@@ -421,6 +423,11 @@ pub trait Device {
     fn reset_sirk_packet(&self) -> Option<Vec<u8>>;
     fn get_silent_mode_packet(&self) -> Option<Vec<u8>>;
     fn set_silent_mode_packet(&self, silence: bool) -> Option<Vec<u8>>;
+    /// Set equalizer band (0-9) to dB value (-12.0 to +12.0)
+    /// Bands: 0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz
+    fn set_equalizer_band_packet(&self, _band_index: u8, _db_value: f32) -> Option<Vec<u8>> {
+        None
+    }
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
     fn get_device_state(&self) -> &DeviceState;
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
@@ -451,6 +458,9 @@ pub trait Device {
     fn can_set_silent_mode(&self) -> bool {
         self.set_silent_mode_packet(false).is_some()
     }
+    fn can_set_equalizer(&self) -> bool {
+        self.set_equalizer_band_packet(0, 0.0).is_some()
+    }
 
     // Initialize capability flags in device state
     fn init_capabilities(&mut self) {
@@ -462,6 +472,7 @@ pub trait Device {
         let can_set_side_tone_volume = self.can_set_side_tone_volume();
         let can_set_voice_prompt = self.can_set_voice_prompt();
         let can_set_silent_mode = self.can_set_silent_mode();
+        let can_set_equalizer = self.can_set_equalizer();
 
         // Now set them in device state
         let state = self.get_device_state_mut();
@@ -472,6 +483,7 @@ pub trait Device {
         state.can_set_side_tone_volume = can_set_side_tone_volume;
         state.can_set_voice_prompt = can_set_voice_prompt;
         state.can_set_silent_mode = can_set_silent_mode;
+        state.can_set_equalizer = can_set_equalizer;
     }
 
     fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {

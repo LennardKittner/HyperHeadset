@@ -25,6 +25,14 @@ const AUTO_SHUTDOWN_REPORT_ID: u8 = 0x0c;
 const AUTO_SHUTDOWN_CMD: [u8; 5] = [0x02, 0x03, 0x00, 0x00, 0x4a];
 const AUTO_SHUTDOWN_PACKET_SIZE: usize = 64;
 
+// Equalizer control (via SET_REPORT, report ID 0x0c)
+// Packet structure: 0c 02 03 00 00 5f [band] [value_hi] [value_lo] 00... (64 bytes total)
+// band: 0-9 (32Hz, 64Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, 16kHz)
+// value: signed 16-bit big-endian, dB * 100 (e.g., +6.0dB = 600, -3.5dB = -350)
+const EQ_REPORT_ID: u8 = 0x0c;
+const EQ_CMD: [u8; 5] = [0x02, 0x03, 0x00, 0x00, 0x5f];
+const EQ_PACKET_SIZE: usize = 64;
+
 // Button report header (incoming from headset)
 const CONSUMER_CONTROL_HEADER: u8 = 0x0f;
 // Consumer control button values
@@ -47,6 +55,19 @@ fn make_auto_shutdown_packet(minutes: u64) -> Vec<u8> {
     let seconds = (minutes * 60) as u16;
     packet[6] = (seconds >> 8) as u8;   // High byte
     packet[7] = (seconds & 0xFF) as u8; // Low byte
+    packet
+}
+
+fn make_equalizer_band_packet(band_index: u8, db_value: f32) -> Vec<u8> {
+    let mut packet = vec![0u8; EQ_PACKET_SIZE];
+    packet[0] = EQ_REPORT_ID;
+    packet[1..6].copy_from_slice(&EQ_CMD);
+    packet[6] = band_index;
+    // Convert dB to device units (dB * 100), clamp to ±12dB range
+    let value_int = (db_value * 100.0).clamp(-1200.0, 1200.0) as i16;
+    let value_bytes = value_int.to_be_bytes();
+    packet[7] = value_bytes[0]; // High byte
+    packet[8] = value_bytes[1]; // Low byte
     packet
 }
 
@@ -160,6 +181,14 @@ impl Device for CloudIIISWireless {
 
     fn set_silent_mode_packet(&self, _silence: bool) -> Option<Vec<u8>> {
         None
+    }
+
+    // Cloud III S: Equalizer control - CONFIRMED WORKING
+    fn set_equalizer_band_packet(&self, band_index: u8, db_value: f32) -> Option<Vec<u8>> {
+        if band_index > 9 {
+            return None;
+        }
+        Some(make_equalizer_band_packet(band_index, db_value))
     }
 
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
