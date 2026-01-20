@@ -6,8 +6,8 @@ use std::time::Duration;
 
 const HYPERX: u16 = 0x0951;
 pub const VENDOR_IDS: [u16; 1] = [HYPERX];
-// Possible Cloud II Wireless product IDs
-pub const PRODUCT_IDS: [u16; 3] = [0x1718, 0x018B, 0x0b92];
+// Possible Cloud II Wireless product IDs (and Cloud Flight S)
+pub const PRODUCT_IDS: [u16; 4] = [0x1718, 0x018B, 0x0b92, 0x16EA];
 
 const BASE_PACKET: [u8; 62] = {
     let mut tmp = [0u8; 62];
@@ -266,12 +266,15 @@ impl Device for CloudIIWireless {
     }
 
     fn prepare_write(&mut self) {
+        // Attempt to read input report before writing
+        // This may not work for all devices (e.g., Cloud Flight S),
+        // so we ignore the error
         let mut input_report_buffer = [0u8; 64];
         input_report_buffer[0] = 6;
-        self.state
+        let _ = self
+            .state
             .hid_device
-            .get_input_report(&mut input_report_buffer)
-            .unwrap();
+            .get_input_report(&mut input_report_buffer);
     }
 
     fn allow_passive_refresh(&mut self) -> bool {

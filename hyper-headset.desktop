@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=HyperHeadset
+Comment=Monitor and manage HyperX headsets
+Exec=/usr/local/bin/hyper_headset
+Icon=audio-card
+Terminal=false
+Categories=AudioVideo;Audio;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
