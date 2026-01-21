@@ -17,13 +17,16 @@ use thistermination::TerminationFull;
 // Possible vendor IDs [HyperX, HP]
 const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
 // All supported product IDs
-const PRODUCT_IDS: [u16; 9] = [0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92, 0x05B7, 0x16EA, 0x0c9d, 0x06BE];
+const PRODUCT_IDS: [u16; 9] = [
+    0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92, 0x05B7, 0x16EA, 0x0c9d, 0x06BE,
+];
 
 const RESPONSE_BUFFER_SIZE: usize = 256;
 const RESPONSE_DELAY: Duration = Duration::from_millis(50);
 
 pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     let state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
+    debug_println!("Found device selecting handler");
     let name = state
         .hid_device
         .get_product_string()?
@@ -102,12 +105,26 @@ impl Display for DeviceState {
 impl DeviceState {
     pub fn new(product_ids: &[u16], vendor_ids: &[u16]) -> Result<Self, DeviceError> {
         let hid_api = HidApi::new()?;
+        debug_println!(
+            "Devices: {:?}",
+            hid_api
+                .device_list()
+                .by_ref()
+                .map(|d| { (d.vendor_id(), d.product_id(), d.product_string()) })
+                .collect::<Vec<(u16, u16, Option<&str>)>>()
+        );
         let (hid_device, product_id, vendor_id) = hid_api
             .device_list()
             .find_map(|info| {
                 if product_ids.contains(&info.product_id())
                     && vendor_ids.contains(&info.vendor_id())
                 {
+                    debug_println!(
+                        "Selecting: {:x}:{:x} {:?}",
+                        info.vendor_id(),
+                        info.product_id(),
+                        info.product_string()
+                    );
                     Some((
                         hid_api.open(info.vendor_id(), info.product_id()),
                         info.product_id(),
