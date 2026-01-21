@@ -1,6 +1,6 @@
 use crate::{
     debug_println,
-    devices::{Device, DeviceError, DeviceEvent, DeviceState},
+    devices::{ChargingStatus, Device, DeviceError, DeviceEvent, DeviceState},
 };
 use std::time::Duration;
 
@@ -33,6 +33,29 @@ const EQ_REPORT_ID: u8 = 0x0c;
 const EQ_CMD: [u8; 5] = [0x02, 0x03, 0x00, 0x00, 0x5f];
 const EQ_PACKET_SIZE: usize = 64;
 
+// Battery packet
+const BATTERY_PACKET: [u8; 64] = {
+    let mut packet = [0u8; 64];
+    packet[0] = 0x0C;
+    packet[1] = 0x02;
+    packet[2] = 0x03;
+    packet[3] = 0x01;
+    packet[4] = 0x00;
+    packet[5] = 0x06;
+    packet[6] = 0x00;
+    packet
+};
+
+const CHARGING_RESPONSE: [u8; 64] = {
+    let mut packet = [0u8; 64];
+    packet[0] = 0x0D;
+    packet[1] = 0x02;
+    packet[2] = 0x03;
+    packet[3] = 0x00;
+    packet[4] = 0x0A;
+    packet
+};
+
 // Button report header (incoming from headset)
 const CONSUMER_CONTROL_HEADER: u8 = 0x0f;
 // Consumer control button values
@@ -53,7 +76,7 @@ fn make_auto_shutdown_packet(minutes: u64) -> Vec<u8> {
     packet[1..6].copy_from_slice(&AUTO_SHUTDOWN_CMD);
     // Value is 16-bit big-endian seconds
     let seconds = (minutes * 60) as u16;
-    packet[6] = (seconds >> 8) as u8;   // High byte
+    packet[6] = (seconds >> 8) as u8; // High byte
     packet[7] = (seconds & 0xFF) as u8; // Low byte
     packet
 }
@@ -92,9 +115,8 @@ impl Device for CloudIIISWireless {
         None
     }
 
-    // Cloud III S: Battery query not discovered yet
     fn get_battery_packet(&self) -> Option<Vec<u8>> {
-        None
+        Some(BATTERY_PACKET.to_vec())
     }
 
     // Cloud III S: Auto shutdown via SET_REPORT (report ID 0x0c)
@@ -209,6 +231,24 @@ impl Device for CloudIIISWireless {
                 );
                 None
             }
+            cmd_id if cmd_id == BATTERY_PACKET[0] => {
+                if BATTERY_PACKET[0..=5] == response[0..=5] {
+                    Some(vec![DeviceEvent::BatterLevel(response[6])])
+                } else {
+                    None
+                }
+            }
+            cmd_id if cmd_id == CHARGING_RESPONSE[0] => {
+                if CHARGING_RESPONSE[0..=4] == response[0..=4] {
+                    if response[5] == 1 {
+                        Some(vec![DeviceEvent::Charging(ChargingStatus::Charging)])
+                    } else {
+                        Some(vec![DeviceEvent::Charging(ChargingStatus::NotCharging)])
+                    }
+                } else {
+                    None
+                }
+            }
             _ => {
                 debug_println!("Unknown device event: {:?}", response);
                 None
@@ -226,24 +266,5 @@ impl Device for CloudIIISWireless {
 
     fn get_device_state_mut(&mut self) -> &mut DeviceState {
         &mut self.state
-    }
-
-    /// Cloud III S has limited status reporting over HID.
-    /// We can SET mic mute but cannot query device state.
-    /// Override to prevent "No response" errors.
-    fn active_refresh_state(&mut self) -> Result<(), DeviceError> {
-        // Cloud III S doesn't respond to status queries.
-        // Just mark as connected since we successfully opened the device.
-        self.state.connected = Some(true);
-
-        // Listen briefly for any incoming events (button presses, etc.)
-        let events = self.wait_for_updates(Duration::from_millis(100));
-        if let Some(events) = events {
-            for event in events {
-                self.state.update_self_with_event(&event);
-            }
-        }
-
-        Ok(())
     }
 }
