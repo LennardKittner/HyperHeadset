@@ -95,6 +95,26 @@ You can also download a compiled version from [releases](https://github.com/Lenn
 
 `cargo build --release` **will fail on MacOS** because cargo will try to build the tray application, but some dependencies are exclusive to Linux.
 
+### Windows (CLI only)
+
+The tray application is currently **Linux-only** (it uses `ksni`, a Linux tray backend).
+On Windows you can build the project and run the CLI.
+
+Prerequisites:
+
+- Rust (`rustup` / `cargo`)
+- Visual Studio / Build Tools with MSVC (C++ build tools)
+- Windows 10/11 SDK (provides `kernel32.lib`, etc.)
+
+Build (from a “Developer Command Prompt/PowerShell for VS”):
+
+`cargo build --release`
+
+Run the CLI:
+
+`cargo run --release --bin hyper_headset_cli`
+
+
 ## Usage
 
 ```

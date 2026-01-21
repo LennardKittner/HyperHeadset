@@ -10,7 +10,7 @@ use crate::{
         cloud_iii_s_wireless::CloudIIISWireless, cloud_iii_wireless::CloudIIIWireless,
     },
 };
-use hidapi::{HidApi, HidDevice, HidError};
+use hidapi::{DeviceInfo, HidApi, HidDevice, HidError};
 use std::{fmt::Display, time::Duration};
 use thistermination::TerminationFull;
 
@@ -22,13 +22,61 @@ const PRODUCT_IDS: [u16; 9] = [0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92, 0x05B7, 0
 const RESPONSE_BUFFER_SIZE: usize = 256;
 const RESPONSE_DELAY: Duration = Duration::from_millis(50);
 
+/// Write a HID report to the device.
+///
+/// On Windows, some HyperX dongles expose commands as **Feature reports** only.
+/// In that case, `hidapi::HidDevice::write()` fails with:
+/// `WriteFile: (0x00000001) Incorrect function.`
+///
+/// Linux/macOS hidraw paths often accept the same bytes via output reports, so this can look
+/// "Windows-exclusive". We transparently fall back to `send_feature_report` when we detect
+/// this specific failure.
+pub fn write_hid_report(device: &HidDevice, packet: &[u8]) -> Result<(), HidError> {
+    match device.write(packet) {
+        Ok(_) => Ok(()),
+        Err(write_err) => {
+            #[cfg(target_os = "windows")]
+            {
+                if let HidError::HidApiError { message } = &write_err {
+                    // Windows HID stack returns ERROR_INVALID_FUNCTION (0x1) when the device
+                    // doesn't support output reports / interrupt OUT.
+                    if message.contains("Incorrect function") || message.contains("(0x00000001)") {
+                        // If the feature report also fails, prefer returning the original
+                        // write() error since that's what callers attempted.
+                        if let Err(_feature_err) = device.send_feature_report(packet) {
+                            return Err(write_err);
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+            Err(write_err)
+        }
+    }
+}
+
 pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
-    let state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
+    let hid_api = HidApi::new()?;
+
+    // On Windows, a single dongle often appears as multiple HID interfaces. Some interfaces
+    // don't support OUT reports (write) or feature reports, yielding ERROR_INVALID_FUNCTION.
+    // We iterate all matching interfaces and pick the first one that accepts a benign write.
+    let candidates: Vec<&DeviceInfo> = hid_api
+        .device_list()
+        .filter(|info| PRODUCT_IDS.contains(&info.product_id()) && VENDOR_IDS.contains(&info.vendor_id()))
+        .collect();
+
+    for info in candidates {
+        let state = match DeviceState::new_from_device_info(&hid_api, info) {
+            Ok(state) => state,
+            Err(_) => continue,
+        };
+
     let name = state
-        .hid_device
-        .get_product_string()?
-        .ok_or(DeviceError::NoDeviceFound())?;
-    println!("Connecting to {}", name);
+            .device_name
+            .clone()
+            .unwrap_or_else(|| "Unknown".to_string());
+
     let mut device: Box<dyn Device> = match (state.vendor_id, state.product_id) {
         (v, p)
             if cloud_ii_wireless::VENDOR_IDS.contains(&v)
@@ -54,13 +102,50 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
         {
             Box::new(CloudIIIWireless::new_from_state(state))
         }
-        (_, _) => return Err(DeviceError::NoDeviceFound()),
+            (_, _) => continue,
     };
 
-    // Initialize capability flags
-    device.init_capabilities();
+        // Probe write capability so we don't pick a Windows HID interface that doesn't
+        // implement output reports (WriteFile) *or* feature reports (HidD_SetFeature).
+        //
+        // Prefer read-only "get" packets; if the device has no queries (e.g. Cloud III S),
+        // fall back to a best-effort "safe" set packet (e.g. unmute / disable toggles).
+        let probe_packets = [
+            device.get_wireless_connected_status_packet(),
+            device.get_battery_packet(),
+            device.get_charging_packet(),
+            device.get_mute_packet(),
+            device.get_silent_mode_packet(),
+            device.get_product_color_packet(),
+            device.get_side_tone_packet(),
+            device.get_side_tone_volume_packet(),
+            device.get_voice_prompt_packet(),
+            device.get_pairing_info_packet(),
+            device.get_sirk_packet(),
+            device.get_automatic_shut_down_packet(),
+            device.set_mute_packet(false),
+            device.set_silent_mode_packet(false),
+            device.set_side_tone_packet(false),
+            device.set_voice_prompt_packet(false),
+            device.set_surround_sound_packet(false),
+            device.set_side_tone_volume_packet(0),
+            device.set_automatic_shut_down_packet(Duration::from_secs(0)),
+        ];
+        let probe_packet = probe_packets.into_iter().flatten().next();
 
-    Ok(device)
+        if let Some(packet) = probe_packet {
+            device.prepare_write();
+            if let Err(_e) = write_hid_report(&device.get_device_state().hid_device, &packet) {
+                continue;
+            }
+        }
+
+        println!("Connecting to {}", name);
+    device.init_capabilities();
+        return Ok(device);
+    }
+
+    Err(DeviceError::NoDeviceFound())
 }
 
 #[derive(Debug)]
@@ -102,28 +187,22 @@ impl Display for DeviceState {
 impl DeviceState {
     pub fn new(product_ids: &[u16], vendor_ids: &[u16]) -> Result<Self, DeviceError> {
         let hid_api = HidApi::new()?;
-        let (hid_device, product_id, vendor_id) = hid_api
+        let info = hid_api
             .device_list()
-            .find_map(|info| {
-                if product_ids.contains(&info.product_id())
-                    && vendor_ids.contains(&info.vendor_id())
-                {
-                    Some((
-                        hid_api.open(info.vendor_id(), info.product_id()),
-                        info.product_id(),
-                        info.vendor_id(),
-                    ))
-                } else {
-                    None
-                }
+            .find(|info| {
+                product_ids.contains(&info.product_id()) && vendor_ids.contains(&info.vendor_id())
             })
             .ok_or(DeviceError::NoDeviceFound())?;
-        let hid_device = hid_device?;
+        Self::new_from_device_info(&hid_api, info)
+    }
+
+    pub fn new_from_device_info(hid_api: &HidApi, info: &DeviceInfo) -> Result<Self, DeviceError> {
+        let hid_device = info.open_device(hid_api)?;
         let device_name = hid_device.get_product_string()?;
         Ok(DeviceState {
             hid_device,
-            product_id,
-            vendor_id,
+            product_id: info.product_id(),
+            vendor_id: info.vendor_id(),
             device_name,
             charging: None,
             battery_level: None,
@@ -529,7 +608,7 @@ pub trait Device {
         for packet in packets.into_iter().flatten() {
             self.prepare_write();
             debug_println!("Write packet: {packet:?}");
-            self.get_device_state().hid_device.write(&packet)?;
+            write_hid_report(&self.get_device_state().hid_device, &packet)?;
             std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
@@ -561,7 +640,7 @@ pub trait Device {
         }
         if let Some(batter_packet) = self.get_battery_packet() {
             self.prepare_write();
-            self.get_device_state().hid_device.write(&batter_packet)?;
+            write_hid_report(&self.get_device_state().hid_device, &batter_packet)?;
             std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
