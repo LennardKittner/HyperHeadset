@@ -1,6 +1,6 @@
 use crate::{
     debug_println,
-    devices::{ChargingStatus, Device, DeviceError, DeviceEvent, DeviceState},
+    devices::{ChargingStatus, Color, Device, DeviceError, DeviceEvent, DeviceState},
 };
 use std::time::Duration;
 
@@ -34,27 +34,26 @@ const EQ_CMD: [u8; 5] = [0x02, 0x03, 0x00, 0x00, 0x5f];
 const EQ_PACKET_SIZE: usize = 64;
 
 // Battery packet
-const BATTERY_PACKET: [u8; 64] = {
-    let mut packet = [0u8; 64];
+const BASE_PACKET: [u8; 62] = {
+    let mut packet = [0u8; 62];
     packet[0] = 0x0C;
     packet[1] = 0x02;
     packet[2] = 0x03;
     packet[3] = 0x01;
     packet[4] = 0x00;
-    packet[5] = 0x06;
-    packet[6] = 0x00;
     packet
 };
+const RESPONSE_ID: u8 = 0x0C;
+const NOTIFICATION_ID: u8 = 0x0D;
 
-const CHARGING_RESPONSE: [u8; 64] = {
-    let mut packet = [0u8; 64];
-    packet[0] = 0x0D;
-    packet[1] = 0x02;
-    packet[2] = 0x03;
-    packet[3] = 0x00;
-    packet[4] = 0x0A;
-    packet
-};
+const BATTERY_COMMAND_ID: u8 = 0x06;
+const DONGLE_CONNECTED_COMMAND_ID: u8 = 0x02;
+const COLOR_COMMAND_ID: u8 = 0x4D;
+const CHARGE_STATE_COMMAND_ID: u8 = 0x48;
+const GET_MIC_MUTE_COMMAND_ID: u8 = 0x04;
+const GET_SIDE_TONE_COMMAND_ID: u8 = 0x16;
+const GET_AUTO_POWER_OFF_COMMAND_ID: u8 = 0x4B;
+const GET_VOICE_PROMPT_COMMAND_ID: u8 = 0x14;
 
 // Button report header (incoming from headset)
 const CONSUMER_CONTROL_HEADER: u8 = 0x0f;
@@ -94,6 +93,49 @@ fn make_equalizer_band_packet(band_index: u8, db_value: f32) -> Vec<u8> {
     packet
 }
 
+fn parse_automatic_shutdown_payload(high: u8, low: u8) -> Duration {
+    let num = (high as u64) * 256 + low as u64;
+    Duration::from_secs(num)
+}
+
+fn parse_response(response: &[u8]) -> Option<Vec<DeviceEvent>> {
+    if response[6] == 0xFF {
+        return None;
+    }
+    match response[5] {
+        DONGLE_CONNECTED_COMMAND_ID => Some(vec![DeviceEvent::WirelessConnected(response[6] == 2)]),
+        GET_MIC_MUTE_COMMAND_ID => Some(vec![DeviceEvent::Muted(response[6] == 1)]),
+        BATTERY_COMMAND_ID => Some(vec![DeviceEvent::BatterLevel(response[6])]),
+        GET_VOICE_PROMPT_COMMAND_ID => Some(vec![DeviceEvent::VoicePrompt(response[6] == 1)]),
+        GET_SIDE_TONE_COMMAND_ID => Some(vec![DeviceEvent::SideToneOn(response[6] == 1)]),
+        CHARGE_STATE_COMMAND_ID => Some(vec![DeviceEvent::Charging(ChargingStatus::from(
+            response[6],
+        ))]),
+        GET_AUTO_POWER_OFF_COMMAND_ID => Some(vec![DeviceEvent::AutomaticShutdownAfter(
+            parse_automatic_shutdown_payload(response[6], response[7]),
+        )]),
+        COLOR_COMMAND_ID => Some(vec![DeviceEvent::ProductColor(Color::from(response[6]))]),
+        3 | 5 => None,
+        _ => {
+            debug_println!("Unknown response {:?}", response);
+            None
+        }
+    }
+}
+
+fn parse_notification(response: &[u8]) -> Option<Vec<DeviceEvent>> {
+    match response[4] {
+        1 => Some(vec![DeviceEvent::BatterLevel(response[5])]),
+        3 => Some(vec![DeviceEvent::Muted(response[5] == 1)]),
+        5 => Some(vec![DeviceEvent::SideToneOn(response[5] == 1)]),
+        10 => Some(vec![DeviceEvent::Charging(ChargingStatus::from(
+            response[5],
+        ))]),
+        12 => Some(vec![DeviceEvent::WirelessConnected(response[5] == 1)]),
+        _ => None,
+    }
+}
+
 pub struct CloudIIISWireless {
     state: DeviceState,
 }
@@ -110,13 +152,16 @@ impl CloudIIISWireless {
 }
 
 impl Device for CloudIIISWireless {
-    // Cloud III S: Battery query not discovered yet
     fn get_charging_packet(&self) -> Option<Vec<u8>> {
-        None
+        let mut packet = BASE_PACKET.to_vec();
+        packet[5] = CHARGE_STATE_COMMAND_ID;
+        Some(packet)
     }
 
     fn get_battery_packet(&self) -> Option<Vec<u8>> {
-        Some(BATTERY_PACKET.to_vec())
+        let mut packet = BASE_PACKET.to_vec();
+        packet[5] = BATTERY_COMMAND_ID;
+        Some(packet)
     }
 
     // Cloud III S: Auto shutdown via SET_REPORT (report ID 0x0c)
@@ -126,13 +171,15 @@ impl Device for CloudIIISWireless {
     }
 
     fn get_automatic_shut_down_packet(&self) -> Option<Vec<u8>> {
-        None
+        let mut packet = BASE_PACKET.to_vec();
+        packet[5] = GET_AUTO_POWER_OFF_COMMAND_ID;
+        Some(packet)
     }
 
-    // Cloud III S: Cannot query mic state (no response received)
-    // Physical mic button doesn't emit state packets over HID
     fn get_mute_packet(&self) -> Option<Vec<u8>> {
-        None
+        let mut packet = BASE_PACKET.to_vec();
+        packet[5] = GET_MIC_MUTE_COMMAND_ID;
+        Some(packet)
     }
 
     // Cloud III S: Mic control - CONFIRMED WORKING
@@ -157,12 +204,15 @@ impl Device for CloudIIISWireless {
     }
 
     fn get_product_color_packet(&self) -> Option<Vec<u8>> {
-        None
+        let mut packet = BASE_PACKET.to_vec();
+        packet[5] = COLOR_COMMAND_ID;
+        Some(packet)
     }
 
-    // Cloud III S: Sidetone not discovered yet
     fn get_side_tone_packet(&self) -> Option<Vec<u8>> {
-        None
+        let mut packet = BASE_PACKET.to_vec();
+        packet[5] = GET_SIDE_TONE_COMMAND_ID;
+        Some(packet)
     }
 
     fn set_side_tone_packet(&self, _side_tone_on: bool) -> Option<Vec<u8>> {
@@ -178,7 +228,9 @@ impl Device for CloudIIISWireless {
     }
 
     fn get_voice_prompt_packet(&self) -> Option<Vec<u8>> {
-        None
+        let mut packet = BASE_PACKET.to_vec();
+        packet[5] = GET_VOICE_PROMPT_COMMAND_ID;
+        Some(packet)
     }
 
     fn set_voice_prompt_packet(&self, _enable: bool) -> Option<Vec<u8>> {
@@ -186,7 +238,9 @@ impl Device for CloudIIISWireless {
     }
 
     fn get_wireless_connected_status_packet(&self) -> Option<Vec<u8>> {
-        None
+        let mut packet = BASE_PACKET.to_vec();
+        packet[5] = DONGLE_CONNECTED_COMMAND_ID;
+        Some(packet)
     }
 
     fn get_sirk_packet(&self) -> Option<Vec<u8>> {
@@ -231,24 +285,8 @@ impl Device for CloudIIISWireless {
                 );
                 None
             }
-            cmd_id if cmd_id == BATTERY_PACKET[0] => {
-                if BATTERY_PACKET[0..=5] == response[0..=5] {
-                    Some(vec![DeviceEvent::BatterLevel(response[6])])
-                } else {
-                    None
-                }
-            }
-            cmd_id if cmd_id == CHARGING_RESPONSE[0] => {
-                if CHARGING_RESPONSE[0..=4] == response[0..=4] {
-                    if response[5] == 1 {
-                        Some(vec![DeviceEvent::Charging(ChargingStatus::Charging)])
-                    } else {
-                        Some(vec![DeviceEvent::Charging(ChargingStatus::NotCharging)])
-                    }
-                } else {
-                    None
-                }
-            }
+            RESPONSE_ID => parse_response(response),
+            NOTIFICATION_ID => parse_notification(response),
             _ => {
                 debug_println!("Unknown device event: {:?}", response);
                 None

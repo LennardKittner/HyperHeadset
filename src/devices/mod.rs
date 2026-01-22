@@ -355,6 +355,7 @@ pub enum DeviceEvent {
 #[derive(Debug, Copy, Clone)]
 pub enum Color {
     BlackBlack,
+    WhiteWhite,
     BlackRed,
     UnknownColor(u8),
 }
@@ -366,6 +367,7 @@ impl Display for Color {
             "{}",
             match self {
                 Color::BlackBlack => "Black".to_string(),
+                Color::WhiteWhite => "White".to_string(),
                 Color::BlackRed => "Red".to_string(),
                 Color::UnknownColor(n) => format!("Unknown color {}", n),
             }
@@ -377,6 +379,7 @@ impl From<u8> for Color {
     fn from(color: u8) -> Self {
         match color {
             0 => Color::BlackBlack,
+            1 => Color::WhiteWhite,
             2 => Color::BlackRed,
             _ => Color::UnknownColor(color),
         }
