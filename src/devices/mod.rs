@@ -10,7 +10,7 @@ use crate::{
         cloud_iii_s_wireless::CloudIIISWireless, cloud_iii_wireless::CloudIIIWireless,
     },
 };
-use hidapi::{HidApi, HidDevice, HidError};
+use hidapi::{HidApi, HidDevice, HidError, HidResult};
 use std::{fmt::Display, time::Duration};
 use thistermination::TerminationFull;
 
@@ -27,8 +27,7 @@ const RESPONSE_DELAY: Duration = Duration::from_millis(50);
 pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     let state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
     debug_println!("Found device selecting handler");
-    let name = state
-        .hid_device
+    let name = state.hid_devices[0]
         .get_product_string()?
         .ok_or(DeviceError::NoDeviceFound())?;
     println!("Connecting to {}", name);
@@ -68,7 +67,7 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
 
 #[derive(Debug)]
 pub struct DeviceState {
-    pub hid_device: HidDevice,
+    pub hid_devices: Vec<HidDevice>,
     pub product_id: u16,
     pub vendor_id: u16,
     pub device_name: Option<String>,
@@ -113,9 +112,9 @@ impl DeviceState {
                 .map(|d| { (d.vendor_id(), d.product_id(), d.product_string()) })
                 .collect::<Vec<(u16, u16, Option<&str>)>>()
         );
-        let (hid_device, product_id, vendor_id) = hid_api
+        let devices: Vec<(HidDevice, u16, u16)> = hid_api
             .device_list()
-            .find_map(|info| {
+            .filter_map(|info| {
                 if product_ids.contains(&info.product_id())
                     && vendor_ids.contains(&info.vendor_id())
                 {
@@ -123,10 +122,10 @@ impl DeviceState {
                         "Selecting: {:x}:{:x} {:?}",
                         info.vendor_id(),
                         info.product_id(),
-                        info.product_string()
+                        info.product_string().clone()
                     );
                     Some((
-                        hid_api.open(info.vendor_id(), info.product_id()),
+                        hid_api.open(info.vendor_id(), info.product_id()).ok()?,
                         info.product_id(),
                         info.vendor_id(),
                     ))
@@ -134,11 +133,22 @@ impl DeviceState {
                     None
                 }
             })
-            .ok_or(DeviceError::NoDeviceFound())?;
-        let hid_device = hid_device?;
-        let device_name = hid_device.get_product_string()?;
+            .collect();
+        if devices.is_empty() {
+            return Err(DeviceError::NoDeviceFound());
+        }
+        if !devices
+            .windows(2)
+            .all(|w| w[0].1 == w[1].1 && w[0].2 == w[1].2)
+        {
+            return Err(DeviceError::TooManyDevices());
+        }
+        let device_name = devices[0].0.get_product_string()?;
+        let product_id = devices[0].1;
+        let vendor_id = devices[0].2;
+        let devices: Vec<HidDevice> = devices.into_iter().map(|d| d.0).collect();
         Ok(DeviceState {
-            hid_device,
+            hid_devices: devices,
             product_id,
             vendor_id,
             device_name,
@@ -330,6 +340,8 @@ pub enum DeviceError {
     HeadSetOff(),
     #[termination(msg("No response."))]
     NoResponse(),
+    #[termination(msg("Only a single device at a time is supported."))]
+    TooManyDevices(),
     #[termination(msg("Unknown response: {0:?} with length: {1:?}"))]
     UnknownResponse([u8; 8], usize),
 }
@@ -509,19 +521,30 @@ pub trait Device {
     fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
         Ok(())
     }
-    fn wait_for_updates(&mut self, duration: Duration) -> Option<Vec<DeviceEvent>> {
-        let mut buf = [0u8; RESPONSE_BUFFER_SIZE];
-        let res = self
+    fn wait_for_updates(&mut self, duration: Duration) -> Vec<DeviceEvent> {
+        let res: Vec<(usize, [u8; RESPONSE_BUFFER_SIZE])> = self
             .get_device_state()
-            .hid_device
-            .read_timeout(&mut buf[..], duration.as_millis() as i32)
-            .ok()?;
+            .hid_devices
+            .iter()
+            .filter_map(|d| {
+                let mut buf = [0u8; RESPONSE_BUFFER_SIZE];
+                Some((
+                    d.read_timeout(&mut buf[..], duration.as_millis() as i32)
+                        .ok()?,
+                    buf,
+                ))
+            })
+            .collect();
 
-        if res == 0 {
-            return None;
+        if res.is_empty() || res.iter().all(|r| r.0 == 0) {
+            return vec![];
         }
 
-        self.get_event_from_device_response(&buf)
+        res.into_iter()
+            .map(|r| self.get_event_from_device_response(&r.1))
+            .flatten()
+            .flatten()
+            .collect()
     }
 
     /// Refreshes the state by querying all available information
@@ -549,13 +572,20 @@ pub trait Device {
         for packet in packets.into_iter().flatten() {
             self.prepare_write();
             debug_println!("Write packet: {packet:?}");
-            self.get_device_state().hid_device.write(&packet)?;
+            let results: Vec<HidResult<usize>> = self
+                .get_device_state()
+                .hid_devices
+                .iter()
+                .map(|d| d.write(&packet))
+                .collect();
+            debug_println!("{:?}", results);
             std::thread::sleep(RESPONSE_DELAY);
-            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
-                for event in events {
-                    self.get_device_state_mut().update_self_with_event(&event);
-                }
+            let events = self.wait_for_updates(Duration::from_secs(1));
+            if !events.is_empty() {
                 responded = true;
+            }
+            for event in events {
+                self.get_device_state_mut().update_self_with_event(&event);
             }
             if !matches!(self.get_device_state().connected, Some(true)) {
                 break;
@@ -573,20 +603,24 @@ pub trait Device {
     /// Only the battery level is actively queried because it is not communicated by the device on its own
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
         if self.allow_passive_refresh() {
-            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
-                for event in events {
-                    self.get_device_state_mut().update_self_with_event(&event);
-                }
+            let events = self.wait_for_updates(Duration::from_secs(1));
+            for event in events {
+                self.get_device_state_mut().update_self_with_event(&event);
             }
         }
         if let Some(batter_packet) = self.get_battery_packet() {
             self.prepare_write();
-            self.get_device_state().hid_device.write(&batter_packet)?;
+            let results: Vec<HidResult<usize>> = self
+                .get_device_state()
+                .hid_devices
+                .iter()
+                .map(|d| d.write(&batter_packet))
+                .collect();
+            debug_println!("{:?}", results);
             std::thread::sleep(RESPONSE_DELAY);
-            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
-                for event in events {
-                    self.get_device_state_mut().update_self_with_event(&event);
-                }
+            let events = self.wait_for_updates(Duration::from_secs(1));
+            for event in events {
+                self.get_device_state_mut().update_self_with_event(&event);
             }
         }
 

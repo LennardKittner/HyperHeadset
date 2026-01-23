@@ -271,10 +271,7 @@ impl Device for CloudIIWireless {
         // so we ignore the error
         let mut input_report_buffer = [0u8; 64];
         input_report_buffer[0] = 6;
-        let _ = self
-            .state
-            .hid_device
-            .get_input_report(&mut input_report_buffer);
+        let _ = self.state.hid_devices[0].get_input_report(&mut input_report_buffer);
     }
 
     fn allow_passive_refresh(&mut self) -> bool {
