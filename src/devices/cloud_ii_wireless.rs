@@ -7,7 +7,7 @@ use std::time::Duration;
 const HYPERX: u16 = 0x0951;
 pub const VENDOR_IDS: [u16; 1] = [HYPERX];
 // Possible Cloud II Wireless product IDs (and Cloud Flight S)
-pub const PRODUCT_IDS: [u16; 4] = [0x1718, 0x018B, 0x0b92, 0x16EA];
+pub const PRODUCT_IDS: [u16; 5] = [0x1718, 0x018B, 0x0b92, 0x16EA, 0x16EB];
 
 const BASE_PACKET: [u8; 62] = {
     let mut tmp = [0u8; 62];
