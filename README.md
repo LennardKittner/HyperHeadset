@@ -1,4 +1,5 @@
 # HyperHeadset
+
 A CLI and tray application for monitoring and managing HyperX headsets.
 
 <img src=./screenshots/tray_app.png alt="tray_app" width="400">
@@ -6,11 +7,13 @@ A CLI and tray application for monitoring and managing HyperX headsets.
 This project is not affiliated with, endorsed by, or associated with HyperX or its parent company in any way. All trademarks and brand names belong to their respective owners.
 
 ## Compatibility
+
 The CLI application is compatible with both Linux and MacOS operating systems.
 However, the tray application is only functional on Linux.
 Although it was only tested on Manjaro and Kubuntu with KDE, it should also work on other distribution and desktop environments.
 
 **Supported Headsets**:
+
 - HyperX Cloud II Wireless HP vendorID
 - HyperX Cloud II Wireless HyperX vendorID
 - HyperX Cloud III Wireless
@@ -91,6 +94,12 @@ To only build the CLI app on MacOS, use:
 To build both applications on Linux, use:
 `cargo build --release`
 
+Optional features (pass with `--features`):
+- `eq-editor` — TUI equalizer editor for the CLI (`--eq` flag)
+
+To build with all features:
+`cargo build --release --features eq-editor`
+
 You can also download a compiled version from [releases](https://github.com/LennardKittner/HyperHeadset/releases).
 
 `cargo build --release` **will fail on MacOS** because cargo will try to build the tray application, but some dependencies are exclusive to Linux.
@@ -103,21 +112,37 @@ A CLI application for monitoring and managing HyperX headsets.
 Usage: hyper_headset_cli [OPTIONS]
 
 Options:
-      --automatic_shutdown <automatic_shutdown>
+      --automatic-shutdown <automatic-shutdown>
           Set the delay in minutes after which the headset will automatically shutdown.
           0 will disable automatic shutdown.
       --mute <mute>
           Mute or unmute the headset. [possible values: true, false]
-      --enable_side_tone <enable_side_tone>
+      --enable-side-tone <enable-side-tone>
           Enable or disable side tone. [possible values: true, false]
-      --side_tone_volume <side_tone_volume>
+      --side-tone-volume <side-tone-volume>
           Set the side tone volume.
-      --enable_voice_prompt <enable_voice_prompt>
+      --enable-voice-prompt <enable-voice-prompt>
           Enable voice prompt. This may not be supported on your device. [possible values: true, false]
-      --surround_sound <surround_sound>
+      --surround-sound <surround-sound>
           Enables surround sound. This may be on by default and cannot be changed on your device. [possible values: true, false]
-      --mute_playback <mute_playback>
-          Mute or unmute playback. [possible values: true, false]
+      --mute-playback <mute-playback>
+          Mute or unmute playback. This may not be supported on your device. [possible values: true, false]
+      --eq
+          Open interactive EQ editor (TUI).
+          This may not be supported on your device.
+      --eq-profile <BAND=DB,...>
+          Set full EQ profile. Unspecified bands reset to 0 dB.
+          This may not be supported on your device.
+          BAND: index 0-9 or frequency (1khz, 250hz). Bare integers are indices, not Hz.
+            [0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz]
+          DB: -12.0 to 12.0.
+          Example: --eq-profile 5=-12.0,1khz=3.0,16khz=4.0
+      --eq-band <BAND=DB[,...]>
+          Adjust specific bands. Repeatable, comma-separated (last write wins per band).
+          This may not be supported on your device.
+          Others unchanged. Use alone or with --eq-profile (overrides on top of the profile).
+          See --eq-profile for band/dB reference.
+          Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0
   -h, --help
           Print help
   -V, --version
@@ -125,6 +150,7 @@ Options:
 
 Help only lists commands supported by this headset.
 ```
+
 `hyper_headset_cli` without any arguments will print all available headset information.
 
 ```
@@ -134,7 +160,7 @@ A CLI tray application for monitoring HyperX headsets.
 Usage: hyper_headset [OPTIONS]
 
 Options:
-      --refresh_interval <refresh_interval>  Set the refresh interval (in seconds)
+      --refresh-interval <refresh-interval>  Set the refresh interval (in seconds)
   -h, --help                                 Print help
   -V, --version                              Print version
 ```

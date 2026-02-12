@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use hidapi::{HidApi, HidDevice, HidError, HidResult};
-use std::{fmt::Display, time::Duration};
+use std::{collections::HashSet, fmt::Display, time::Duration};
 use thistermination::TerminationFull;
 
 // Possible vendor IDs [HyperX, HP]
@@ -112,20 +112,23 @@ impl DeviceState {
                 .map(|d| { (d.vendor_id(), d.product_id(), d.product_string()) })
                 .collect::<Vec<(u16, u16, Option<&str>)>>()
         );
+        let mut seen_paths = HashSet::new();
         let devices: Vec<(HidDevice, u16, u16)> = hid_api
             .device_list()
             .filter_map(|info| {
                 if product_ids.contains(&info.product_id())
                     && vendor_ids.contains(&info.vendor_id())
+                    && seen_paths.insert(info.path().to_owned())
                 {
                     debug_println!(
-                        "Selecting: {:x}:{:x} {:?}",
+                        "Selecting: {:x}:{:x} {:?} path={:?}",
                         info.vendor_id(),
                         info.product_id(),
-                        info.product_string().clone()
+                        info.product_string().clone(),
+                        info.path()
                     );
                     Some((
-                        hid_api.open(info.vendor_id(), info.product_id()).ok()?,
+                        hid_api.open_path(info.path()).ok()?,
                         info.product_id(),
                         info.vendor_id(),
                     ))
@@ -455,9 +458,10 @@ pub trait Device {
     fn reset_sirk_packet(&self) -> Option<Vec<u8>>;
     fn get_silent_mode_packet(&self) -> Option<Vec<u8>>;
     fn set_silent_mode_packet(&self, silence: bool) -> Option<Vec<u8>>;
-    /// Set equalizer band (0-9) to dB value (-12.0 to +12.0)
+    /// Build EQ packets — one packet per band (firmware only accepts one band per write).
     /// Bands: 0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz
-    fn set_equalizer_band_packet(&self, _band_index: u8, _db_value: f32) -> Option<Vec<u8>> {
+    /// dB values: -12.0 to +12.0
+    fn set_equalizer_bands_packets(&self, _bands: &[(u8, f32)]) -> Option<Vec<Vec<u8>>> {
         None
     }
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
@@ -491,7 +495,7 @@ pub trait Device {
         self.set_silent_mode_packet(false).is_some()
     }
     fn can_set_equalizer(&self) -> bool {
-        self.set_equalizer_band_packet(0, 0.0).is_some()
+        self.set_equalizer_bands_packets(&[(0, 0.0)]).is_some()
     }
 
     // Initialize capability flags in device state
@@ -545,6 +549,21 @@ pub trait Device {
             .flatten()
             .flatten()
             .collect()
+    }
+
+    /// WORKAROUND(firmware-no-response): Query connected status and update device state.
+    /// The dongle accepts HID writes even when headset is off, so we probe before trusting state.
+    /// TODO: Remove once firmware NAKs writes when headset is off.
+    fn probe_connected_status(&mut self) {
+        if let Some(packet) = self.get_wireless_connected_status_packet() {
+            self.prepare_write();
+            let _ = self.get_device_state().hid_devices[0].write(&packet);
+            std::thread::sleep(RESPONSE_DELAY);
+            let events = self.wait_for_updates(Duration::from_millis(500));
+            for event in events {
+                self.get_device_state_mut().update_self_with_event(&event);
+            }
+        }
     }
 
     /// Refreshes the state by querying all available information
