@@ -137,8 +137,9 @@ fn main() {
         .about("A CLI application for monitoring and managing HyperX headsets.")
         .after_help("Help only lists commands supported by this headset.")
         .arg(
-            Arg::new("automatic_shutdown")
-                .long("automatic_shutdown")
+            Arg::new("automatic-shutdown")
+                .long("automatic-shutdown")
+                .alias("automatic_shutdown")
                 .required(false)
                 .help(
                     "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
@@ -155,42 +156,47 @@ fn main() {
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
-            Arg::new("enable_side_tone")
-                .long("enable_side_tone")
+            Arg::new("enable-side-tone")
+                .long("enable-side-tone")
+                .alias("enable_side_tone")
                 .required(false)
                 .help("Enable or disable side tone.")
                 .hide(!device.can_set_side_tone())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
-            Arg::new("side_tone_volume")
-                .long("side_tone_volume")
+            Arg::new("side-tone-volume")
+                .long("side-tone-volume")
+                .alias("side_tone_volume")
                 .required(false)
                 .help("Set the side tone volume.")
                 .hide(!device.can_set_side_tone_volume())
                 .value_parser(clap::value_parser!(u8)),
         )
         .arg(
-            Arg::new("enable_voice_prompt")
-                .long("enable_voice_prompt")
+            Arg::new("enable-voice-prompt")
+                .long("enable-voice-prompt")
+                .alias("enable_voice_prompt")
                 .required(false)
                 .help("Enable voice prompt. This may not be supported on your device.")
                 .hide(!device.can_set_voice_prompt())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
-            Arg::new("surround_sound")
-                .long("surround_sound")
+            Arg::new("surround-sound")
+                .long("surround-sound")
+                .alias("surround_sound")
                 .required(false)
                 .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
                 .hide(!device.can_set_surround_sound())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
-            Arg::new("mute_playback")
-                .long("mute_playback")
+            Arg::new("mute-playback")
+                .long("mute-playback")
+                .alias("mute_playback")
                 .required(false)
-                .help("Mute or unmute playback.")
+                .help("Mute or unmute playback. This may not be supported on your device.")
                 .hide(!device.can_set_silent_mode())
                 .value_parser(clap::value_parser!(bool)),
         )
@@ -224,7 +230,7 @@ fn main() {
         )
         .get_matches();
 
-    if let Some(delay) = matches.get_one::<u8>("automatic_shutdown") {
+    if let Some(delay) = matches.get_one::<u8>("automatic-shutdown") {
         let delay = *delay as u64;
         if let Some(packet) =
             device.set_automatic_shut_down_packet(Duration::from_secs(delay * 60u64))
@@ -253,7 +259,7 @@ fn main() {
         }
     }
 
-    if let Some(enable) = matches.get_one::<bool>("enable_side_tone") {
+    if let Some(enable) = matches.get_one::<bool>("enable-side-tone") {
         if let Some(packet) = device.set_side_tone_packet(*enable) {
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
@@ -266,7 +272,7 @@ fn main() {
         }
     }
 
-    if let Some(volume) = matches.get_one::<u8>("side_tone_volume") {
+    if let Some(volume) = matches.get_one::<u8>("side-tone-volume") {
         if let Some(packet) = device.set_side_tone_volume_packet(*volume) {
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
@@ -279,7 +285,7 @@ fn main() {
         }
     }
 
-    if let Some(enable) = matches.get_one::<bool>("enable_voice_prompt") {
+    if let Some(enable) = matches.get_one::<bool>("enable-voice-prompt") {
         if let Some(packet) = device.set_voice_prompt_packet(*enable) {
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
@@ -292,7 +298,7 @@ fn main() {
         }
     }
 
-    if let Some(surround_sound) = matches.get_one::<bool>("surround_sound") {
+    if let Some(surround_sound) = matches.get_one::<bool>("surround-sound") {
         if let Some(packet) = device.set_surround_sound_packet(*surround_sound) {
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
@@ -306,7 +312,7 @@ fn main() {
         }
     }
 
-    if let Some(mute_playback) = matches.get_one::<bool>("mute_playback") {
+    if let Some(mute_playback) = matches.get_one::<bool>("mute-playback") {
         if let Some(packet) = device.set_silent_mode_packet(*mute_playback) {
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
@@ -344,7 +350,7 @@ fn main() {
         eq_pairs = Some(eq_map.into_iter().collect());
     }
 
-    if let Some(values) = matches.get_many::<String>("eq_band") {
+    if let Some(values) = matches.get_many::<String>("eq-band") {
         let pairs = eq_pairs.get_or_insert_with(Vec::new);
         for val in values {
             for part in val.split(',') {
