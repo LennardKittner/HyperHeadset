@@ -131,7 +131,9 @@ fn main() {
         }
     };
 
-    let matches = Command::new(env!("CARGO_PKG_NAME"))
+    let can_set_eq = device.can_set_equalizer();
+
+    let mut cmd = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("A CLI application for monitoring and managing HyperX headsets.")
@@ -201,8 +203,8 @@ fn main() {
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
-            Arg::new("eq")
-                .long("eq")
+            Arg::new("eq-profile")
+                .long("eq-profile")
                 .required(false)
                 .value_name("BAND=DB,...")
                 .help(
@@ -210,25 +212,79 @@ fn main() {
                      BAND: index 0-9 or frequency (1khz, 250hz). Bare integers are indices, not Hz.\n\
                      \x20 [0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz]\n\
                      DB: -12.0 to 12.0.\n\
-                     Example: --eq 5=-12.0,1khz=3.0,16khz=4.0",
+                     Example: --eq-profile 5=-12.0,1khz=3.0,16khz=4.0",
                 )
-                .hide(!device.can_set_equalizer()),
+                .hide(!can_set_eq),
         )
         .arg(
-            Arg::new("eq_band")
+            Arg::new("eq-band")
                 .long("eq-band")
                 .required(false)
                 .action(ArgAction::Append)
                 .value_name("BAND=DB[,...]")
                 .help(
                     "Adjust specific bands. Repeatable, comma-separated (last write wins per band).\n\
-                     Others unchanged. Use alone or with --eq (overrides on top of the profile).\n\
-                     See --eq for band/dB reference.\n\
+                     Others unchanged. Use alone or with --eq-profile (overrides on top of the profile).\n\
+                     See --eq-profile for band/dB reference.\n\
                      Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0",
                 )
-                .hide(!device.can_set_equalizer()),
-        )
-        .get_matches();
+                .hide(!can_set_eq),
+        );
+
+    // Feature-gated TUI editor arg
+    #[cfg(feature = "eq-editor")]
+    {
+        cmd = cmd.arg(
+            Arg::new("eq")
+                .long("eq")
+                .action(ArgAction::SetTrue)
+                .help("Open interactive EQ editor (TUI).\nThis may not be supported on your device.")
+                .hide(!can_set_eq),
+        );
+    }
+
+    let matches = cmd.get_matches();
+
+    // EQ TUI editor (--eq) - returns early
+    #[cfg(feature = "eq-editor")]
+    {
+        if matches.get_flag("eq") {
+            use hyper_headset::eq::editor::EqEditor;
+            use hyper_headset::eq::presets;
+
+            let editor = EqEditor::new();
+            match editor.run(Some(&mut *device)) {
+                Ok(Some(settings)) => {
+                    // Apply final EQ to device
+                    let pairs: Vec<(u8, f32)> = settings
+                        .bands
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &db)| (i as u8, db))
+                        .collect();
+                    if let Some(packet) = device.set_equalizer_bands_packet(&pairs) {
+                        device.prepare_write();
+                        if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+                            eprintln!("Failed to apply EQ: {:?}", err);
+                        }
+                    }
+                    if let Err(err) = presets::save_settings(&settings) {
+                        eprintln!("Failed to save settings: {:?}", err);
+                    }
+                    println!("EQ settings saved.");
+                    std::process::exit(0);
+                }
+                Ok(None) => {
+                    println!("EQ editing cancelled.");
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    eprintln!("EQ editor error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
 
     if let Some(delay) = matches.get_one::<u8>("automatic-shutdown") {
         let delay = *delay as u64;
@@ -325,12 +381,12 @@ fn main() {
         }
     }
 
-    // --eq: full profile (unspecified bands reset to 0 dB)
+    // --eq-profile: full profile (unspecified bands reset to 0 dB)
     // --eq-band: adjust specific bands only
-    // If both are given, --eq sets the base profile, --eq-band overrides on top.
+    // If both are given, --eq-profile sets the base profile, --eq-band overrides on top.
     let mut eq_pairs: Option<Vec<(u8, f32)>> = None;
 
-    if let Some(val) = matches.get_one::<String>("eq") {
+    if let Some(val) = matches.get_one::<String>("eq-profile") {
         // Start with all bands at 0 dB
         let mut eq_map: std::collections::BTreeMap<u8, f32> =
             (0u8..10).map(|i| (i, 0.0f32)).collect();
@@ -342,7 +398,7 @@ fn main() {
             match parse_eq_pair(part) {
                 Ok((band, db)) => { eq_map.insert(band, db); }
                 Err(err) => {
-                    eprintln!("ERROR: --eq: {}", err);
+                    eprintln!("ERROR: --eq-profile: {}", err);
                     std::process::exit(1);
                 }
             }

@@ -3,6 +3,8 @@ use std::time::Duration;
 
 mod status_tray;
 use hyper_headset::devices::connect_compatible_device;
+use hyper_headset::eq::presets;
+use hyper_headset::eq::TrayCommand;
 use status_tray::{StatusTray, TrayHandler};
 
 fn main() {
@@ -21,7 +23,21 @@ fn main() {
         .get_matches();
     let refresh_interval = *matches.get_one::<u64>("refresh-interval").unwrap_or(&3);
     let refresh_interval = Duration::from_secs(refresh_interval);
-    let tray_handler = TrayHandler::new(StatusTray::new());
+
+    // Channel for tray → main loop commands
+    let (command_tx, command_rx) = std::sync::mpsc::channel::<TrayCommand>();
+
+    let tray_handler = TrayHandler::new(StatusTray::new(command_tx));
+
+    // File watcher for preset/settings changes
+    let (_watcher, watcher_rx) = match presets::watch_config_dir() {
+        Ok(pair) => (Some(pair.0), Some(pair.1)),
+        Err(e) => {
+            eprintln!("Warning: failed to watch config directory: {e}");
+            (None, None)
+        }
+    };
+
     loop {
         let mut device = loop {
             match connect_compatible_device() {
@@ -31,9 +47,68 @@ fn main() {
             std::thread::sleep(Duration::from_secs(1));
         };
 
+        // Auto-apply saved EQ settings on device connect
+        if device.get_device_state().can_set_equalizer {
+            let eq_settings = presets::load_settings();
+            let pairs: Vec<(u8, f32)> = eq_settings
+                .bands
+                .iter()
+                .enumerate()
+                .map(|(i, &db)| (i as u8, db))
+                .collect();
+            if let Some(packet) = device.set_equalizer_bands_packet(&pairs) {
+                device.prepare_write();
+                if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+                    eprintln!("Failed to auto-apply EQ settings: {:?}", err);
+                }
+            }
+            tray_handler.reload_presets();
+        }
+
         // Run loop
         let mut run_counter = 0;
         loop {
+            // Process tray commands
+            while let Ok(cmd) = command_rx.try_recv() {
+                match cmd {
+                    TrayCommand::ApplyEqPreset(name) => {
+                        let all = presets::all_presets();
+                        if let Some(preset) = all.iter().find(|p| p.name == name) {
+                            let pairs: Vec<(u8, f32)> = preset
+                                .bands
+                                .iter()
+                                .enumerate()
+                                .map(|(i, &db)| (i as u8, db))
+                                .collect();
+                            if let Some(packet) = device.set_equalizer_bands_packet(&pairs) {
+                                device.prepare_write();
+                                if let Err(err) =
+                                    device.get_device_state().hid_devices[0].write(&packet)
+                                {
+                                    eprintln!("Failed to apply EQ preset: {:?}", err);
+                                }
+                            }
+                            let settings = presets::EqSettings {
+                                bands: preset.bands,
+                                active_preset: Some(name),
+                            };
+                            if let Err(err) = presets::save_settings(&settings) {
+                                eprintln!("Failed to save EQ settings: {:?}", err);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check for preset file changes
+            if let Some(ref wrx) = watcher_rx {
+                if wrx.try_recv().is_ok() {
+                    // Drain any additional events
+                    while wrx.try_recv().is_ok() {}
+                    tray_handler.reload_presets();
+                }
+            }
+
             std::thread::sleep(refresh_interval);
             // with the default refresh_interval the state is only actively queried every 3min
             // querying the device to frequently can lead to instability

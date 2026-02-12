@@ -1,5 +1,11 @@
 use hyper_headset::devices::DeviceState;
-use ksni::{menu::StandardItem, Handle, MenuItem, ToolTip, Tray, TrayService};
+use hyper_headset::eq::presets;
+use hyper_headset::eq::TrayCommand;
+use ksni::{
+    menu::{RadioGroup, RadioItem, StandardItem, SubMenu},
+    Handle, MenuItem, ToolTip, Tray, TrayService,
+};
+use std::sync::mpsc::Sender;
 
 pub struct TrayHandler {
     handle: Handle<StatusTray>,
@@ -27,9 +33,26 @@ impl TrayHandler {
                 device_state.device_name.clone(),
             ),
         };
+        let can_set_equalizer = device_state.can_set_equalizer;
         self.handle.update(|tray| {
             tray.message = message;
             tray.device_name = name;
+            tray.can_set_equalizer = can_set_equalizer;
+        })
+    }
+
+    pub fn reload_presets(&self) {
+        let all = presets::all_presets();
+        let settings = presets::load_settings();
+        let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
+        let active_preset = settings
+            .active_preset
+            .as_ref()
+            .and_then(|name| preset_names.iter().position(|n| n == name));
+
+        self.handle.update(|tray| {
+            tray.eq_presets = preset_names;
+            tray.active_eq_preset = active_preset;
         })
     }
 }
@@ -37,13 +60,29 @@ impl TrayHandler {
 pub struct StatusTray {
     device_name: Option<String>,
     message: String,
+    command_tx: Sender<TrayCommand>,
+    eq_presets: Vec<String>,
+    active_eq_preset: Option<usize>,
+    can_set_equalizer: bool,
 }
 
 impl StatusTray {
-    pub fn new() -> Self {
+    pub fn new(command_tx: Sender<TrayCommand>) -> Self {
+        let all = presets::all_presets();
+        let settings = presets::load_settings();
+        let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
+        let active_preset = settings
+            .active_preset
+            .as_ref()
+            .and_then(|name| preset_names.iter().position(|n| n == name));
+
         StatusTray {
             device_name: None,
             message: NO_COMPATIBLE_DEVICE.to_string(),
+            command_tx,
+            eq_presets: preset_names,
+            active_eq_preset: active_preset,
+            can_set_equalizer: false,
         }
     }
 }
@@ -82,6 +121,50 @@ impl Tray for StatusTray {
                 .into()
             })
             .collect();
+
+        if self.can_set_equalizer && !self.eq_presets.is_empty() {
+            state_items.push(MenuItem::Separator);
+
+            let radio_options: Vec<RadioItem> = self
+                .eq_presets
+                .iter()
+                .map(|name| RadioItem {
+                    label: name.clone(),
+                    ..Default::default()
+                })
+                .collect();
+
+            let submenu_items: Vec<MenuItem<Self>> = vec![
+                RadioGroup {
+                    selected: self.active_eq_preset.unwrap_or(usize::MAX),
+                    select: Box::new(|this: &mut Self, index| {
+                        if let Some(name) = this.eq_presets.get(index).cloned() {
+                            let _ = this.command_tx.send(TrayCommand::ApplyEqPreset(name));
+                            this.active_eq_preset = Some(index);
+                        }
+                    }),
+                    options: radio_options,
+                }
+                .into(),
+                MenuItem::Separator,
+                StandardItem {
+                    label: "Edit with: hyper_headset_cli --eq".into(),
+                    enabled: false,
+                    ..Default::default()
+                }
+                .into(),
+            ];
+
+            state_items.push(
+                SubMenu {
+                    label: "EQ Preset".into(),
+                    submenu: submenu_items,
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+
         let exit = StandardItem {
             label: "Exit".into(),
             icon_name: "application-exit".into(),

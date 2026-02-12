@@ -121,18 +121,21 @@ Options:
           Enables surround sound. This may be on by default and cannot be changed on your device. [possible values: true, false]
       --mute-playback <mute-playback>
           Mute or unmute playback. This may not be supported on your device. [possible values: true, false]
-      --eq <BAND=DB,...>
+      --eq
+          Open interactive EQ editor (TUI).
+          This may not be supported on your device.
+      --eq-profile <BAND=DB,...>
           Set full EQ profile. Unspecified bands reset to 0 dB.
           This may not be supported on your device.
           BAND: index 0-9 or frequency (1khz, 250hz). Bare integers are indices, not Hz.
             [0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz]
           DB: -12.0 to 12.0.
-          Example: --eq 5=-12.0,1khz=3.0,16khz=4.0
+          Example: --eq-profile 5=-12.0,1khz=3.0,16khz=4.0
       --eq-band <BAND=DB[,...]>
           Adjust specific bands. Repeatable, comma-separated (last write wins per band).
           This may not be supported on your device.
-          Others unchanged. Use alone or with --eq (overrides on top of the profile).
-          See --eq for band/dB reference.
+          Others unchanged. Use alone or with --eq-profile (overrides on top of the profile).
+          See --eq-profile for band/dB reference.
           Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0
   -h, --help
           Print help

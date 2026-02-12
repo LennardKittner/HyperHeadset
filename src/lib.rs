@@ -1,4 +1,5 @@
 pub mod devices;
+pub mod eq;
 
 #[macro_export]
 macro_rules! debug_println {
