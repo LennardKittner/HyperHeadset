@@ -249,32 +249,48 @@ fn main() {
     #[cfg(feature = "eq-editor")]
     {
         if matches.get_flag("eq") {
-            use hyper_headset::eq::editor::EqEditor;
+            use hyper_headset::eq::editor::{EditorResult, EqEditor};
             use hyper_headset::eq::presets;
 
             let editor = EqEditor::new();
             match editor.run(Some(&mut *device)) {
-                Ok(Some(settings)) => {
-                    // Apply final EQ to device
-                    let pairs: Vec<(u8, f32)> = settings
-                        .bands
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &db)| (i as u8, db))
-                        .collect();
-                    if let Some(packet) = device.set_equalizer_bands_packet(&pairs) {
-                        device.prepare_write();
-                        if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
-                            eprintln!("Failed to apply EQ: {:?}", err);
+                Ok(EditorResult::Saved { name, bands }) => {
+                    // Save preset file
+                    let preset = presets::EqPreset {
+                        name: name.clone(),
+                        bands,
+                    };
+                    if let Err(err) = presets::save_preset(&preset) {
+                        eprintln!("Failed to save preset: {:?}", err);
+                    }
+                    // Always keep TUI.json in sync with last TUI session state
+                    if name != "TUI" {
+                        let tui_preset = presets::EqPreset {
+                            name: "TUI".to_string(),
+                            bands,
+                        };
+                        if let Err(err) = presets::save_preset(&tui_preset) {
+                            eprintln!("Failed to update TUI preset: {:?}", err);
                         }
                     }
-                    if let Err(err) = presets::save_settings(&settings) {
-                        eprintln!("Failed to save settings: {:?}", err);
+                    // Update selected profile
+                    let profile = presets::SelectedProfile {
+                        active_preset: Some(name.clone()),
+                    };
+                    if let Err(err) = presets::save_selected_profile(&profile) {
+                        eprintln!("Failed to save selected profile: {:?}", err);
                     }
-                    println!("EQ settings saved.");
+                    println!("EQ preset '{}' saved.", name);
                     std::process::exit(0);
                 }
-                Ok(None) => {
+                Ok(EditorResult::Cancelled { name, bands: _ }) => {
+                    // Restore selected profile to match headset state
+                    let profile = presets::SelectedProfile {
+                        active_preset: Some(name),
+                    };
+                    if let Err(err) = presets::save_selected_profile(&profile) {
+                        eprintln!("Failed to restore selected profile: {:?}", err);
+                    }
                     println!("EQ editing cancelled.");
                     std::process::exit(0);
                 }

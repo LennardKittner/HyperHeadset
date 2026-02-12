@@ -1,5 +1,5 @@
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -15,22 +15,47 @@ use std::io;
 
 use crate::devices::Device;
 use crate::eq::presets::{
-    all_presets, is_builtin, load_settings, load_user_presets, save_user_presets,
-    EqPreset, EqSettings,
+    all_presets, delete_preset, is_builtin, load_preset, load_selected_profile, load_user_presets,
+    save_preset, EqPreset,
 };
 use crate::eq::{DB_MAX, DB_MIN, EQ_FREQUENCIES, NUM_BANDS};
 
 #[derive(PartialEq)]
 enum EditorMode {
+    StartupConflict,
     Normal,
     PresetSelect,
     PresetSave,
     PresetDelete,
+    ConfirmQuit,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum StartupConflictOption {
+    OverwriteTui,
+    LoadTui,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum ConfirmQuitOption {
+    SaveTui,
+    SaveAs,
+    Undo,
+}
+
+/// Result from the EQ editor.
+pub enum EditorResult {
+    /// User saved: (preset_name, bands). Save preset file + set selected profile.
+    Saved { name: String, bands: [f32; NUM_BANDS] },
+    /// User cancelled/undid: (preset_name, bands). Restore selected profile + headset state.
+    Cancelled { name: String, bands: [f32; NUM_BANDS] },
 }
 
 pub struct EqEditor {
     bands: [f32; NUM_BANDS],
     original_bands: [f32; NUM_BANDS],
+    original_preset: String,
+    reference_bands: [f32; NUM_BANDS],
     cursor: usize,
     modified: bool,
     presets: Vec<EqPreset>,
@@ -38,28 +63,105 @@ pub struct EqEditor {
     mode: EditorMode,
     preset_list_state: ListState,
     save_input: String,
+    confirm_quit_selection: ConfirmQuitOption,
+    exit_after_preset_save: bool,
+    conflict_preset_name: Option<String>,
+    conflict_preset_bands: Option<[f32; NUM_BANDS]>,
+    startup_conflict_selection: StartupConflictOption,
 }
 
 impl EqEditor {
     pub fn new() -> Self {
         let presets = all_presets();
-        let settings = load_settings();
-        let active = settings.active_preset.clone();
+        let profile = load_selected_profile();
+        let selected_name = profile.active_preset;
+
+        // Load TUI state and detect conflicts with selected profile
+        let tui_preset = load_preset("TUI");
+        let tui_exists = tui_preset.is_some();
+        let tui_bands = tui_preset.map(|p| p.bands).unwrap_or([0.0; NUM_BANDS]);
+
+        let (mode, bands, active_name, original_name, conflict_name, conflict_bands) =
+            match &selected_name {
+                Some(name) if name != "TUI" => {
+                    if let Some(selected_preset) = load_preset(name) {
+                        if !tui_exists {
+                            // No TUI.json yet — just load the selected preset directly
+                            (
+                                EditorMode::Normal,
+                                selected_preset.bands,
+                                Some(name.clone()),
+                                name.clone(),
+                                None,
+                                None,
+                            )
+                        } else if selected_preset.bands != tui_bands {
+                            // TUI exists and differs from selected — conflict
+                            (
+                                EditorMode::StartupConflict,
+                                tui_bands,
+                                Some("TUI".to_string()),
+                                "TUI".to_string(),
+                                Some(name.clone()),
+                                Some(selected_preset.bands),
+                            )
+                        } else {
+                            // Same bands, no conflict — load selected preset name
+                            (
+                                EditorMode::Normal,
+                                tui_bands,
+                                Some(name.clone()),
+                                name.clone(),
+                                None,
+                                None,
+                            )
+                        }
+                    } else {
+                        // Selected preset not found — fall back to TUI
+                        (
+                            EditorMode::Normal,
+                            tui_bands,
+                            Some("TUI".to_string()),
+                            "TUI".to_string(),
+                            None,
+                            None,
+                        )
+                    }
+                }
+                _ => {
+                    // Selected is TUI or nothing
+                    (
+                        EditorMode::Normal,
+                        tui_bands,
+                        selected_name.clone(),
+                        selected_name.unwrap_or_else(|| "TUI".to_string()),
+                        None,
+                        None,
+                    )
+                }
+            };
 
         EqEditor {
-            bands: settings.bands,
-            original_bands: settings.bands,
+            bands,
+            original_bands: bands,
+            original_preset: original_name,
+            reference_bands: bands,
             cursor: 0,
             modified: false,
             presets,
-            active_preset: active,
-            mode: EditorMode::Normal,
+            active_preset: active_name,
+            mode,
             preset_list_state: ListState::default(),
             save_input: String::new(),
+            confirm_quit_selection: ConfirmQuitOption::SaveTui,
+            exit_after_preset_save: false,
+            conflict_preset_name: conflict_name.clone(),
+            conflict_preset_bands: conflict_bands,
+            startup_conflict_selection: StartupConflictOption::OverwriteTui,
         }
     }
 
-    pub fn run(mut self, mut device: Option<&mut dyn Device>) -> io::Result<Option<EqSettings>> {
+    pub fn run(mut self, mut device: Option<&mut dyn Device>) -> io::Result<EditorResult> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen)?;
@@ -87,20 +189,47 @@ impl EqEditor {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         device: &mut Option<&mut dyn Device>,
-    ) -> io::Result<Option<EqSettings>> {
+    ) -> io::Result<EditorResult> {
+        // Sync EQ to headset on startup (unless conflict dialog is showing)
+        if self.mode != EditorMode::StartupConflict {
+            self.send_all_bands_to_device(device);
+        }
+
         loop {
             terminal.draw(|frame| self.draw(frame))?;
 
             if let Event::Key(key) = event::read()? {
+                // Ctrl+C: save current state as TUI and exit
+                if key.code == KeyCode::Char('c')
+                    && key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    return Ok(EditorResult::Saved {
+                        name: "TUI".to_string(),
+                        bands: self.bands,
+                    });
+                }
+
                 match self.mode {
+                    EditorMode::StartupConflict => {
+                        self.handle_startup_conflict_key(key, device);
+                    }
                     EditorMode::Normal => {
                         if let Some(result) = self.handle_normal_key(key, device) {
                             return Ok(result);
                         }
                     }
                     EditorMode::PresetSelect => self.handle_preset_select_key(key, device),
-                    EditorMode::PresetSave => self.handle_preset_save_key(key),
+                    EditorMode::PresetSave => {
+                        if let Some(result) = self.handle_preset_save_key(key) {
+                            return Ok(result);
+                        }
+                    }
                     EditorMode::PresetDelete => self.handle_preset_delete_key(key),
+                    EditorMode::ConfirmQuit => {
+                        if let Some(result) = self.handle_confirm_quit_key(key, device) {
+                            return Ok(result);
+                        }
+                    }
                 }
             }
         }
@@ -131,9 +260,11 @@ impl EqEditor {
 
         // Overlay popups
         match self.mode {
+            EditorMode::StartupConflict => self.draw_startup_conflict(frame, area),
             EditorMode::PresetSelect => self.draw_preset_select(frame, area),
             EditorMode::PresetSave => self.draw_preset_save(frame, area),
             EditorMode::PresetDelete => self.draw_preset_delete(frame, area),
+            EditorMode::ConfirmQuit => self.draw_confirm_quit(frame, area),
             EditorMode::Normal => {}
         }
     }
@@ -278,7 +409,9 @@ impl EqEditor {
                 Span::styled("0", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(": Reset band  "),
                 Span::styled("r", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(": Reset all"),
+                Span::raw(": Revert  "),
+                Span::styled("⇧0", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(": Flat"),
             ]),
             Line::from(vec![
                 Span::styled("p", Style::default().add_modifier(Modifier::BOLD)),
@@ -292,10 +425,109 @@ impl EqEditor {
                 Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw("/"),
                 Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(": Cancel"),
+                Span::raw(": Exit"),
             ]),
         ];
         Paragraph::new(lines)
+    }
+
+    fn handle_startup_conflict_key(
+        &mut self,
+        key: KeyEvent,
+        device: &mut Option<&mut dyn Device>,
+    ) {
+        match key.code {
+            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                self.startup_conflict_selection =
+                    if self.startup_conflict_selection == StartupConflictOption::OverwriteTui {
+                        StartupConflictOption::LoadTui
+                    } else {
+                        StartupConflictOption::OverwriteTui
+                    };
+            }
+            KeyCode::Enter => {
+                match self.startup_conflict_selection {
+                    StartupConflictOption::OverwriteTui => {
+                        if let Some(bands) = self.conflict_preset_bands {
+                            self.bands = bands;
+                            self.original_bands = bands;
+                            self.reference_bands = bands;
+                            self.active_preset = self.conflict_preset_name.clone();
+                            self.original_preset = self
+                                .conflict_preset_name
+                                .clone()
+                                .unwrap_or_else(|| "TUI".to_string());
+                        }
+                    }
+                    StartupConflictOption::LoadTui => {
+                        // Keep TUI bands as loaded
+                    }
+                }
+                self.conflict_preset_name = None;
+                self.conflict_preset_bands = None;
+                self.mode = EditorMode::Normal;
+                // Now sync chosen state to headset
+                self.send_all_bands_to_device(device);
+            }
+            _ => {}
+        }
+    }
+
+    fn draw_startup_conflict(&self, frame: &mut Frame, area: Rect) {
+        let popup = centered_rect(65, 30, area);
+        frame.render_widget(Clear, popup);
+
+        let block = Block::default()
+            .title(" Profile Conflict ")
+            .borders(Borders::ALL);
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+
+        let preset_name = self
+            .conflict_preset_name
+            .as_deref()
+            .unwrap_or("Unknown");
+
+        let btn =
+            |label: &str, option: StartupConflictOption, sel_color: Color| -> Span<'static> {
+                if self.startup_conflict_selection == option {
+                    Span::styled(
+                        format!(" {} ", label),
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(sel_color)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::styled(format!(" {} ", label), Style::default().fg(Color::DarkGray))
+                }
+            };
+
+        let lines = vec![
+            Line::default(),
+            Line::from(format!(
+                "  Selected profile '{}' differs from TUI state.",
+                preset_name
+            )),
+            Line::default(),
+            Line::from(vec![
+                Span::raw("   "),
+                btn(
+                    &format!("Overwrite TUI with '{}'", preset_name),
+                    StartupConflictOption::OverwriteTui,
+                    Color::Yellow,
+                ),
+                Span::raw("  "),
+                btn("Load TUI", StartupConflictOption::LoadTui, Color::Green),
+            ]),
+            Line::default(),
+            Line::from(Span::styled(
+                "  \u{2190}\u{2192}/Tab: Switch  Enter: Confirm",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+        let paragraph = Paragraph::new(lines);
+        frame.render_widget(paragraph, inner);
     }
 
     /// Returns Some(result) to exit, None to continue
@@ -303,7 +535,7 @@ impl EqEditor {
         &mut self,
         key: KeyEvent,
         device: &mut Option<&mut dyn Device>,
-    ) -> Option<Option<EqSettings>> {
+    ) -> Option<EditorResult> {
         match key.code {
             KeyCode::Left => {
                 self.cursor = (self.cursor + NUM_BANDS - 1) % NUM_BANDS;
@@ -337,9 +569,16 @@ impl EqEditor {
                 self.send_band_to_device(device, self.cursor);
             }
             KeyCode::Char('r') => {
+                self.bands = self.reference_bands;
+                self.modified = self.bands != self.original_bands;
+                self.send_all_bands_to_device(device);
+            }
+            KeyCode::Char(')') => {
+                // Shift+0: reset all bands to flat
                 self.bands = [0.0; NUM_BANDS];
                 self.modified = true;
                 self.active_preset = Some("Flat".to_string());
+                self.reference_bands = self.bands;
                 self.send_all_bands_to_device(device);
             }
             KeyCode::Char('p') => {
@@ -368,17 +607,22 @@ impl EqEditor {
                 }
             }
             KeyCode::Enter => {
-                let settings = EqSettings {
+                let name = self.active_preset.clone().unwrap_or_else(|| "TUI".to_string());
+                return Some(EditorResult::Saved {
+                    name,
                     bands: self.bands,
-                    active_preset: self.active_preset.clone(),
-                };
-                return Some(Some(settings));
+                });
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 if self.modified {
-                    self.restore_original(device);
+                    self.confirm_quit_selection = ConfirmQuitOption::SaveTui;
+                    self.mode = EditorMode::ConfirmQuit;
+                } else {
+                    return Some(EditorResult::Cancelled {
+                        name: self.original_preset.clone(),
+                        bands: self.original_bands,
+                    });
                 }
-                return Some(None);
             }
             _ => {}
         }
@@ -410,6 +654,7 @@ impl EqEditor {
                 if let Some(i) = self.preset_list_state.selected() {
                     if let Some(preset) = self.presets.get(i) {
                         self.bands = preset.bands;
+                        self.reference_bands = preset.bands;
                         self.active_preset = Some(preset.name.clone());
                         self.modified = true;
                         self.send_all_bands_to_device(device);
@@ -424,7 +669,7 @@ impl EqEditor {
         }
     }
 
-    fn handle_preset_save_key(&mut self, key: KeyEvent) {
+    fn handle_preset_save_key(&mut self, key: KeyEvent) -> Option<EditorResult> {
         match key.code {
             KeyCode::Char(c) => {
                 if self.save_input.len() < 30 {
@@ -440,27 +685,28 @@ impl EqEditor {
                         name: self.save_input.clone(),
                         bands: self.bands,
                     };
-                    let mut user_presets = load_user_presets();
-                    if let Some(existing) =
-                        user_presets.iter_mut().find(|p| p.name == preset.name)
-                    {
-                        *existing = preset;
-                    } else {
-                        user_presets.push(preset);
-                    }
-                    save_user_presets(&user_presets).ok();
+                    save_preset(&preset).ok();
                     self.active_preset = Some(self.save_input.clone());
                     self.presets = all_presets();
+
+                    if self.exit_after_preset_save {
+                        return Some(EditorResult::Saved {
+                            name: self.save_input.clone(),
+                            bands: self.bands,
+                        });
+                    }
                 }
                 self.save_input.clear();
                 self.mode = EditorMode::Normal;
             }
             KeyCode::Esc => {
                 self.save_input.clear();
+                self.exit_after_preset_save = false;
                 self.mode = EditorMode::Normal;
             }
             _ => {}
         }
+        None
     }
 
     fn handle_preset_delete_key(&mut self, key: KeyEvent) {
@@ -484,14 +730,12 @@ impl EqEditor {
             KeyCode::Enter => {
                 if let Some(i) = self.preset_list_state.selected() {
                     if i < user_presets.len() {
-                        let name = user_presets[i].name.clone();
-                        let new_presets: Vec<_> =
-                            user_presets.into_iter().filter(|p| p.name != name).collect();
-                        save_user_presets(&new_presets).ok();
-                        self.presets = all_presets();
-                        if self.active_preset.as_deref() == Some(&name) {
+                        let name = &user_presets[i].name;
+                        delete_preset(name).ok();
+                        if self.active_preset.as_deref() == Some(name) {
                             self.active_preset = None;
                         }
+                        self.presets = all_presets();
                     }
                 }
                 self.preset_list_state.select(Some(0));
@@ -502,6 +746,105 @@ impl EqEditor {
             }
             _ => {}
         }
+    }
+
+    fn handle_confirm_quit_key(
+        &mut self,
+        key: KeyEvent,
+        device: &mut Option<&mut dyn Device>,
+    ) -> Option<EditorResult> {
+        match key.code {
+            KeyCode::Right | KeyCode::Tab => {
+                self.confirm_quit_selection = match self.confirm_quit_selection {
+                    ConfirmQuitOption::SaveTui => ConfirmQuitOption::SaveAs,
+                    ConfirmQuitOption::SaveAs => ConfirmQuitOption::Undo,
+                    ConfirmQuitOption::Undo => ConfirmQuitOption::SaveTui,
+                };
+            }
+            KeyCode::Left | KeyCode::BackTab => {
+                self.confirm_quit_selection = match self.confirm_quit_selection {
+                    ConfirmQuitOption::SaveTui => ConfirmQuitOption::Undo,
+                    ConfirmQuitOption::SaveAs => ConfirmQuitOption::SaveTui,
+                    ConfirmQuitOption::Undo => ConfirmQuitOption::SaveAs,
+                };
+            }
+            KeyCode::Enter => match self.confirm_quit_selection {
+                ConfirmQuitOption::SaveTui => {
+                    return Some(EditorResult::Saved {
+                        name: "TUI".to_string(),
+                        bands: self.bands,
+                    });
+                }
+                ConfirmQuitOption::SaveAs => {
+                    self.exit_after_preset_save = true;
+                    self.mode = EditorMode::PresetSave;
+                    self.save_input = self
+                        .active_preset
+                        .as_ref()
+                        .filter(|name| !is_builtin(name))
+                        .cloned()
+                        .unwrap_or_default();
+                }
+                ConfirmQuitOption::Undo => {
+                    self.restore_original(device);
+                    return Some(EditorResult::Cancelled {
+                        name: self.original_preset.clone(),
+                        bands: self.original_bands,
+                    });
+                }
+            },
+            KeyCode::Esc => {
+                self.mode = EditorMode::Normal;
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn draw_confirm_quit(&self, frame: &mut Frame, area: Rect) {
+        let popup = centered_rect(60, 25, area);
+        frame.render_widget(Clear, popup);
+
+        let block = Block::default()
+            .title(" Unsaved Changes ")
+            .borders(Borders::ALL);
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+
+        let btn = |label: &str, option: ConfirmQuitOption, sel_color: Color| -> Span<'static> {
+            if self.confirm_quit_selection == option {
+                Span::styled(
+                    format!(" {} ", label),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(sel_color)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled(format!(" {} ", label), Style::default().fg(Color::DarkGray))
+            }
+        };
+
+        let lines = vec![
+            Line::default(),
+            Line::from("  You have unsaved EQ changes."),
+            Line::default(),
+            Line::from(vec![
+                Span::raw("   "),
+                btn("Save TUI", ConfirmQuitOption::SaveTui, Color::Green),
+                Span::raw("  "),
+                btn("Save As", ConfirmQuitOption::SaveAs, Color::Cyan),
+                Span::raw("  "),
+                btn("Undo Changes", ConfirmQuitOption::Undo, Color::Red),
+            ]),
+            Line::default(),
+            Line::from(Span::styled(
+                "  \u{2190}\u{2192}/Tab: Switch  Enter: Confirm  Esc: Back",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+        let paragraph = Paragraph::new(lines);
+        frame.render_widget(paragraph, inner);
     }
 
     fn send_band_to_device(&self, device: &mut Option<&mut dyn Device>, band: usize) {

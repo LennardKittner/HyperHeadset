@@ -43,9 +43,9 @@ impl TrayHandler {
 
     pub fn reload_presets(&self) {
         let all = presets::all_presets();
-        let settings = presets::load_settings();
+        let profile = presets::load_selected_profile();
         let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
-        let active_preset = settings
+        let active_preset = profile
             .active_preset
             .as_ref()
             .and_then(|name| preset_names.iter().position(|n| n == name));
@@ -69,9 +69,9 @@ pub struct StatusTray {
 impl StatusTray {
     pub fn new(command_tx: Sender<TrayCommand>) -> Self {
         let all = presets::all_presets();
-        let settings = presets::load_settings();
+        let profile = presets::load_selected_profile();
         let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
-        let active_preset = settings
+        let active_preset = profile
             .active_preset
             .as_ref()
             .and_then(|name| preset_names.iter().position(|n| n == name));
@@ -139,6 +139,11 @@ impl Tray for StatusTray {
                     selected: self.active_eq_preset.unwrap_or(usize::MAX),
                     select: Box::new(|this: &mut Self, index| {
                         if let Some(name) = this.eq_presets.get(index).cloned() {
+                            // Persist selection immediately so other processes (TUI) see it
+                            let profile = presets::SelectedProfile {
+                                active_preset: Some(name.clone()),
+                            };
+                            let _ = presets::save_selected_profile(&profile);
                             let _ = this.command_tx.send(TrayCommand::ApplyEqPreset(name));
                             this.active_eq_preset = Some(index);
                         }

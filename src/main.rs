@@ -47,21 +47,7 @@ fn main() {
             std::thread::sleep(Duration::from_secs(1));
         };
 
-        // Auto-apply saved EQ settings on device connect
         if device.get_device_state().can_set_equalizer {
-            let eq_settings = presets::load_settings();
-            let pairs: Vec<(u8, f32)> = eq_settings
-                .bands
-                .iter()
-                .enumerate()
-                .map(|(i, &db)| (i as u8, db))
-                .collect();
-            if let Some(packet) = device.set_equalizer_bands_packet(&pairs) {
-                device.prepare_write();
-                if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
-                    eprintln!("Failed to auto-apply EQ settings: {:?}", err);
-                }
-            }
             tray_handler.reload_presets();
         }
 
@@ -72,8 +58,7 @@ fn main() {
             while let Ok(cmd) = command_rx.try_recv() {
                 match cmd {
                     TrayCommand::ApplyEqPreset(name) => {
-                        let all = presets::all_presets();
-                        if let Some(preset) = all.iter().find(|p| p.name == name) {
+                        if let Some(preset) = presets::load_preset(&name) {
                             let pairs: Vec<(u8, f32)> = preset
                                 .bands
                                 .iter()
@@ -87,13 +72,6 @@ fn main() {
                                 {
                                     eprintln!("Failed to apply EQ preset: {:?}", err);
                                 }
-                            }
-                            let settings = presets::EqSettings {
-                                bands: preset.bands,
-                                active_preset: Some(name),
-                            };
-                            if let Err(err) = presets::save_settings(&settings) {
-                                eprintln!("Failed to save EQ settings: {:?}", err);
                             }
                         }
                     }
