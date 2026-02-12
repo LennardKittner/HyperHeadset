@@ -143,6 +143,53 @@ Options:
 Once it's open, hover over the headset icon in the system tray or right-click to view details such as the battery level.
 You can also exit via the right-clock menu.
 
+## Equalizer
+
+The CLI supports per-band equalizer control on headsets that have EQ support (currently only the Cloud III S Wireless).
+
+### Arguments
+
+**`--eq-band BAND=DB`** -- Set a single equalizer band. Can be repeated to set multiple bands.
+
+```
+hyper_headset_cli --eq-band 5=-12.0 --eq-band 1khz=3.0
+```
+
+**`--eq BAND=DB,BAND=DB,...`** -- Set multiple equalizer bands in one shot, comma-separated.
+
+```
+hyper_headset_cli --eq 0=0.0,5=-12.0,16khz=4.0
+```
+
+Both arguments can be used together in the same invocation.
+
+### Band reference
+
+BAND can be specified as:
+- **An integer 0-9**: interpreted as band **index** (see table below)
+- **A frequency with suffix**: e.g. `1khz`, `64hz`, `250Hz`, `16KHZ` (case-insensitive, trailing `z` is optional)
+
+**Important**: Bare integers are band *indices*, not frequencies. `1` means index 1 (64 Hz), **not** 1 kHz. To specify 1 kHz, write `1khz`.
+
+### Frequency-to-index mapping
+
+| Index | Frequency |
+|-------|-----------|
+| 0     | 32 Hz     |
+| 1     | 64 Hz     |
+| 2     | 125 Hz    |
+| 3     | 250 Hz    |
+| 4     | 500 Hz    |
+| 5     | 1 kHz     |
+| 6     | 2 kHz     |
+| 7     | 4 kHz     |
+| 8     | 8 kHz     |
+| 9     | 16 kHz    |
+
+### DB range
+
+Values must be between **-12.0** and **12.0** dB. Both integer and float formats are accepted: `3`, `3.0`, `-12`, `-12.0`.
+
 ## Contributing / TODOs
 
 - [ ] Menu bar app for MacOS.
