@@ -154,7 +154,7 @@ fn main() {
             // WORKAROUND(firmware-no-response): passive_refresh may not reliably detect
             // reconnection. Actively probe connected status when headset is not connected.
             // TODO: Remove once passive_refresh reliably detects reconnects.
-            if !was_connected {
+            if !was_connected && device.get_device_state().can_set_equalizer {
                 device.probe_connected_status();
                 tray_handler.update(device.get_device_state());
             }
@@ -171,17 +171,6 @@ fn main() {
                 }
             }
             was_connected = is_connected;
-
-            // WORKAROUND(firmware-no-response): passive_refresh_state() always returns Ok(()),
-            // so disconnect is only detected via active_refresh (every 30 cycles). This check
-            // catches spontaneous disconnect notifications received during passive refresh.
-            // Only break on actual transition (was connected → now disconnected), not when
-            // the headset was never on in this session.
-            // TODO: Remove once passive_refresh_state returns Err on disconnect.
-            if was_connected && !is_connected {
-                eprintln!("Headset disconnected.");
-                break;
-            }
 
             run_counter += 1;
         }
