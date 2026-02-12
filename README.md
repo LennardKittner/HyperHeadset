@@ -41,18 +41,6 @@ MacOS:
 
 `brew install hidapi`
 
-### GTK4 (optional, for EQ popup)
-
-Only required if building with `--features eq-popup` (the left-click EQ preset popup in the tray app).
-
-Debian/Ubuntu:
-
-`sudo apt install libgtk-4-dev`
-
-Arch:
-
-`sudo pacman -S gtk4`
-
 ### Other Dependencies
 
 These dependencies are probably already installed.
@@ -108,10 +96,9 @@ To build both applications on Linux, use:
 
 Optional features (pass with `--features`):
 - `eq-editor` — TUI equalizer editor for the CLI (`--eq` flag)
-- `eq-popup` — GTK4 left-click EQ popup for the tray app (requires `libgtk-4-dev`)
 
 To build with all features:
-`cargo build --release --features eq-editor,eq-popup`
+`cargo build --release --features eq-editor`
 
 You can also download a compiled version from [releases](https://github.com/LennardKittner/HyperHeadset/releases).
 

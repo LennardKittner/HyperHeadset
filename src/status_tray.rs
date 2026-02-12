@@ -1,8 +1,6 @@
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
 
 use hyper_headset::devices::DeviceState;
-use hyper_headset::eq::popup::{EqPopupController, PopupCommand, PopupState};
 use hyper_headset::eq::presets;
 use hyper_headset::eq::TrayCommand;
 use ksni::{
@@ -17,20 +15,16 @@ fn escape_label(s: &str) -> String {
 
 pub struct TrayHandler {
     handle: Handle<StatusTray>,
-    popup_controller: Option<Arc<dyn EqPopupController>>,
 }
 
 const NO_COMPATIBLE_DEVICE: &str = "No compatible device found.\nIs the dongle plugged in?\nIf you are using Linux did you add the Udev rules?";
 
 impl TrayHandler {
-    pub fn new(tray: StatusTray, popup_controller: Option<Arc<dyn EqPopupController>>) -> Self {
+    pub fn new(tray: StatusTray) -> Self {
         let tray_service = TrayService::new(tray);
         let handle = tray_service.handle();
         tray_service.spawn();
-        TrayHandler {
-            handle,
-            popup_controller,
-        }
+        TrayHandler { handle }
     }
 
     pub fn update(&self, device_state: &DeviceState) {
@@ -66,29 +60,12 @@ impl TrayHandler {
             .as_ref()
             .and_then(|name| preset_names.iter().position(|n| n == name));
 
-        // Update popup if present
-        if let Some(ref popup) = self.popup_controller {
-            popup.send(PopupCommand::UpdateState(PopupState {
-                presets: preset_names.clone(),
-                active_preset: active_name.clone(),
-                synced,
-                is_connected: true, // reload_presets is only called when device is available
-            }));
-        }
-
         self.handle.update(|tray| {
             tray.eq_presets = preset_names;
             tray.active_eq_preset = active_index;
             tray.eq_synced = synced;
             tray.active_preset_name = active_name;
         })
-    }
-
-    /// Hide the popup (e.g. on device disconnect or reconnect loop).
-    pub fn hide_popup(&self) {
-        if let Some(ref popup) = self.popup_controller {
-            popup.send(PopupCommand::Hide);
-        }
     }
 }
 
@@ -102,14 +79,10 @@ pub struct StatusTray {
     is_connected: bool,
     eq_synced: bool,
     active_preset_name: Option<String>,
-    popup_controller: Option<Arc<dyn EqPopupController>>,
 }
 
 impl StatusTray {
-    pub fn new(
-        command_tx: Sender<TrayCommand>,
-        popup_controller: Option<Arc<dyn EqPopupController>>,
-    ) -> Self {
+    pub fn new(command_tx: Sender<TrayCommand>) -> Self {
         let all = presets::all_presets();
         let profile = presets::load_selected_profile();
         let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
@@ -130,28 +103,11 @@ impl StatusTray {
             is_connected: false,
             eq_synced,
             active_preset_name,
-            popup_controller,
         }
     }
 }
 
 impl Tray for StatusTray {
-    fn activate(&mut self, x: i32, y: i32) {
-        if let Some(ref popup) = self.popup_controller {
-            if self.can_set_equalizer {
-                popup.send(PopupCommand::Show {
-                    x,
-                    y,
-                    state: PopupState {
-                        presets: self.eq_presets.clone(),
-                        active_preset: self.active_preset_name.clone(),
-                        synced: self.eq_synced,
-                        is_connected: self.is_connected,
-                    },
-                });
-            }
-        }
-    }
     fn id(&self) -> String {
         env!("CARGO_PKG_NAME").into()
     }

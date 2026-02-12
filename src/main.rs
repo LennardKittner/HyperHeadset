@@ -1,10 +1,8 @@
 use clap::{Arg, Command};
-use std::sync::Arc;
 use std::time::Duration;
 
 mod status_tray;
 use hyper_headset::devices::connect_compatible_device;
-use hyper_headset::eq::popup::EqPopupController;
 use hyper_headset::eq::presets;
 use hyper_headset::eq::TrayCommand;
 use status_tray::{StatusTray, TrayHandler};
@@ -91,23 +89,7 @@ fn main() {
     // Channel for tray → main loop commands
     let (command_tx, command_rx) = std::sync::mpsc::channel::<TrayCommand>();
 
-    // Spawn GTK4 popup thread if eq-popup feature is enabled
-    let popup_controller: Option<Arc<dyn EqPopupController>> = {
-        #[cfg(feature = "eq-popup")]
-        {
-            let ctrl = hyper_headset::eq::popup_gtk4::spawn_gtk_popup_thread(command_tx.clone());
-            Some(Arc::new(ctrl))
-        }
-        #[cfg(not(feature = "eq-popup"))]
-        {
-            None
-        }
-    };
-
-    let tray_handler = TrayHandler::new(
-        StatusTray::new(command_tx, popup_controller.clone()),
-        popup_controller,
-    );
+    let tray_handler = TrayHandler::new(StatusTray::new(command_tx));
 
     // File watcher for preset/settings changes
     let (_watcher, watcher_rx) = match presets::watch_config_dir() {
@@ -131,11 +113,6 @@ fn main() {
             tray_handler.reload_presets();
             // Auto-sync is handled by the transition detection in the inner loop
             // (was_connected: false → true triggers sync when headset comes online)
-        }
-
-        #[cfg(not(feature = "eq-popup"))]
-        if device.get_device_state().can_set_equalizer {
-            eprintln!("Tip: This headset supports EQ. Rebuild with --features eq-popup for the left-click EQ popup.");
         }
 
         // Run loop
@@ -172,7 +149,6 @@ fn main() {
                 Err(error) => {
                     eprintln!("{error}");
                     tray_handler.update(device.get_device_state());
-                    tray_handler.hide_popup();
                     break; // try to reconnect
                 }
             };

@@ -15,12 +15,10 @@ dirs = "6"
 notify = "7"
 ratatui = { version = "0.29", optional = true }
 crossterm = { version = "0.28", optional = true }
-gtk4 = { version = "0.10", optional = true }
 
 [features]
 default = []
 eq-editor = ["ratatui", "crossterm"]
-eq-popup = ["gtk4"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = "0.2.0"
