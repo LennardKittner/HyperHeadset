@@ -34,8 +34,8 @@ const EQ_CMD: [u8; 5] = [0x02, 0x03, 0x00, 0x00, 0x5f];
 const EQ_PACKET_SIZE: usize = 64;
 
 // Battery packet
-const BASE_PACKET: [u8; 62] = {
-    let mut packet = [0u8; 62];
+const BASE_PACKET: [u8; 64] = {
+    let mut packet = [0u8; 64];
     packet[0] = 0x0C;
     packet[1] = 0x02;
     packet[2] = 0x03;

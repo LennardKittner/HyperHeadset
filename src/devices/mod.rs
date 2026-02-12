@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use hidapi::{HidApi, HidDevice, HidError, HidResult};
-use std::{fmt::Display, time::Duration};
+use std::{collections::HashSet, fmt::Display, time::Duration};
 use thistermination::TerminationFull;
 
 // Possible vendor IDs [HyperX, HP]
@@ -112,20 +112,23 @@ impl DeviceState {
                 .map(|d| { (d.vendor_id(), d.product_id(), d.product_string()) })
                 .collect::<Vec<(u16, u16, Option<&str>)>>()
         );
+        let mut seen_paths = HashSet::new();
         let devices: Vec<(HidDevice, u16, u16)> = hid_api
             .device_list()
             .filter_map(|info| {
                 if product_ids.contains(&info.product_id())
                     && vendor_ids.contains(&info.vendor_id())
+                    && seen_paths.insert(info.path().to_owned())
                 {
                     debug_println!(
-                        "Selecting: {:x}:{:x} {:?}",
+                        "Selecting: {:x}:{:x} {:?} path={:?}",
                         info.vendor_id(),
                         info.product_id(),
-                        info.product_string().clone()
+                        info.product_string().clone(),
+                        info.path()
                     );
                     Some((
-                        hid_api.open(info.vendor_id(), info.product_id()).ok()?,
+                        hid_api.open_path(info.path()).ok()?,
                         info.product_id(),
                         info.vendor_id(),
                     ))
