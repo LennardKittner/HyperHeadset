@@ -17,9 +17,9 @@ fn apply_and_sync(
     // WORKAROUND(firmware-no-response): Probe connected status fresh before applying.
     // TODO: Remove this probe once firmware NAKs writes when headset is off.
     device.probe_connected_status();
+    tray_handler.update(device.get_device_state());
     if device.get_device_state().connected != Some(true) {
         eprintln!("Headset not connected, EQ preset '{}' queued for sync.", name);
-        tray_handler.update(device.get_device_state());
         let profile = presets::SelectedProfile {
             active_preset: Some(name.to_string()),
             synced: false,
@@ -108,19 +108,13 @@ fn main() {
 
         if device.get_device_state().can_set_equalizer {
             tray_handler.reload_presets();
-
-            // Auto-sync unsynced profile on reconnect
-            let profile = presets::load_selected_profile();
-            if !profile.synced {
-                if let Some(ref name) = profile.active_preset {
-                    println!("Syncing EQ preset '{}' to headset...", name);
-                    apply_and_sync(&mut device, name, &tray_handler);
-                }
-            }
+            // Auto-sync is handled by the transition detection in the inner loop
+            // (was_connected: false → true triggers sync when headset comes online)
         }
 
         // Run loop
         let mut run_counter = 0;
+        let mut was_connected = device.get_device_state().connected == Some(true);
         loop {
             // Process tray commands
             while let Ok(cmd) = command_rx.try_recv() {
@@ -157,11 +151,34 @@ fn main() {
             };
             tray_handler.update(device.get_device_state());
 
+            // WORKAROUND(firmware-no-response): passive_refresh may not reliably detect
+            // reconnection. Actively probe connected status when headset is not connected.
+            // TODO: Remove once passive_refresh reliably detects reconnects.
+            if !was_connected {
+                device.probe_connected_status();
+                tray_handler.update(device.get_device_state());
+            }
+
+            // Sync unsynced profile when headset transitions to connected
+            let is_connected = device.get_device_state().connected == Some(true);
+            if is_connected && !was_connected && device.get_device_state().can_set_equalizer {
+                let profile = presets::load_selected_profile();
+                if !profile.synced {
+                    if let Some(ref name) = profile.active_preset {
+                        println!("Syncing EQ preset '{}' to headset...", name);
+                        apply_and_sync(&mut device, name, &tray_handler);
+                    }
+                }
+            }
+            was_connected = is_connected;
+
             // WORKAROUND(firmware-no-response): passive_refresh_state() always returns Ok(()),
             // so disconnect is only detected via active_refresh (every 30 cycles). This check
             // catches spontaneous disconnect notifications received during passive refresh.
+            // Only break on actual transition (was connected → now disconnected), not when
+            // the headset was never on in this session.
             // TODO: Remove once passive_refresh_state returns Err on disconnect.
-            if device.get_device_state().connected == Some(false) {
+            if was_connected && !is_connected {
                 eprintln!("Headset disconnected.");
                 break;
             }
