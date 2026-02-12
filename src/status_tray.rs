@@ -1,24 +1,36 @@
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+
 use hyper_headset::devices::DeviceState;
+use hyper_headset::eq::popup::{EqPopupController, PopupCommand, PopupState};
 use hyper_headset::eq::presets;
 use hyper_headset::eq::TrayCommand;
 use ksni::{
     menu::{RadioGroup, RadioItem, StandardItem, SubMenu},
     Handle, MenuItem, ToolTip, Tray, TrayService,
 };
-use std::sync::mpsc::Sender;
+
+/// Escape underscores for ksni labels (single `_` is an accelerator prefix).
+fn escape_label(s: &str) -> String {
+    s.replace('_', "__")
+}
 
 pub struct TrayHandler {
     handle: Handle<StatusTray>,
+    popup_controller: Option<Arc<dyn EqPopupController>>,
 }
 
 const NO_COMPATIBLE_DEVICE: &str = "No compatible device found.\nIs the dongle plugged in?\nIf you are using Linux did you add the Udev rules?";
 
 impl TrayHandler {
-    pub fn new(tray: StatusTray) -> Self {
+    pub fn new(tray: StatusTray, popup_controller: Option<Arc<dyn EqPopupController>>) -> Self {
         let tray_service = TrayService::new(tray);
         let handle = tray_service.handle();
         tray_service.spawn();
-        TrayHandler { handle }
+        TrayHandler {
+            handle,
+            popup_controller,
+        }
     }
 
     pub fn update(&self, device_state: &DeviceState) {
@@ -50,14 +62,19 @@ impl TrayHandler {
         let synced = profile.synced;
         let active_name = profile.active_preset;
 
-        // Only show radio selection when synced
-        let active_index = if synced {
-            active_name
-                .as_ref()
-                .and_then(|name| preset_names.iter().position(|n| n == name))
-        } else {
-            None
-        };
+        let active_index = active_name
+            .as_ref()
+            .and_then(|name| preset_names.iter().position(|n| n == name));
+
+        // Update popup if present
+        if let Some(ref popup) = self.popup_controller {
+            popup.send(PopupCommand::UpdateState(PopupState {
+                presets: preset_names.clone(),
+                active_preset: active_name.clone(),
+                synced,
+                is_connected: true, // reload_presets is only called when device is available
+            }));
+        }
 
         self.handle.update(|tray| {
             tray.eq_presets = preset_names;
@@ -65,6 +82,13 @@ impl TrayHandler {
             tray.eq_synced = synced;
             tray.active_preset_name = active_name;
         })
+    }
+
+    /// Hide the popup (e.g. on device disconnect or reconnect loop).
+    pub fn hide_popup(&self) {
+        if let Some(ref popup) = self.popup_controller {
+            popup.send(PopupCommand::Hide);
+        }
     }
 }
 
@@ -78,24 +102,23 @@ pub struct StatusTray {
     is_connected: bool,
     eq_synced: bool,
     active_preset_name: Option<String>,
+    popup_controller: Option<Arc<dyn EqPopupController>>,
 }
 
 impl StatusTray {
-    pub fn new(command_tx: Sender<TrayCommand>) -> Self {
+    pub fn new(
+        command_tx: Sender<TrayCommand>,
+        popup_controller: Option<Arc<dyn EqPopupController>>,
+    ) -> Self {
         let all = presets::all_presets();
         let profile = presets::load_selected_profile();
         let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
 
         let eq_synced = profile.synced;
         let active_preset_name = profile.active_preset;
-        // Only show selection when synced
-        let active_preset = if eq_synced {
-            active_preset_name
-                .as_ref()
-                .and_then(|name| preset_names.iter().position(|n| n == name))
-        } else {
-            None
-        };
+        let active_preset = active_preset_name
+            .as_ref()
+            .and_then(|name| preset_names.iter().position(|n| n == name));
 
         StatusTray {
             device_name: None,
@@ -107,11 +130,28 @@ impl StatusTray {
             is_connected: false,
             eq_synced,
             active_preset_name,
+            popup_controller,
         }
     }
 }
 
 impl Tray for StatusTray {
+    fn activate(&mut self, x: i32, y: i32) {
+        if let Some(ref popup) = self.popup_controller {
+            if self.can_set_equalizer {
+                popup.send(PopupCommand::Show {
+                    x,
+                    y,
+                    state: PopupState {
+                        presets: self.eq_presets.clone(),
+                        active_preset: self.active_preset_name.clone(),
+                        synced: self.eq_synced,
+                        is_connected: self.is_connected,
+                    },
+                });
+            }
+        }
+    }
     fn id(&self) -> String {
         env!("CARGO_PKG_NAME").into()
     }
@@ -145,7 +185,7 @@ impl Tray for StatusTray {
             .lines()
             .map(|line| {
                 StandardItem {
-                    label: line.to_string(),
+                    label: escape_label(line),
                     enabled: false,
                     ..Default::default()
                 }
@@ -157,13 +197,25 @@ impl Tray for StatusTray {
             state_items.push(MenuItem::Separator);
 
             let is_connected = self.is_connected;
+            let applying_name = if !self.eq_synced {
+                self.active_preset_name.as_deref()
+            } else {
+                None
+            };
             let radio_options: Vec<RadioItem> = self
                 .eq_presets
                 .iter()
-                .map(|name| RadioItem {
-                    label: name.clone(),
-                    enabled: is_connected,
-                    ..Default::default()
+                .map(|name| {
+                    let label = if applying_name == Some(name.as_str()) {
+                        escape_label(&format!("{} (applying...)", name))
+                    } else {
+                        escape_label(name)
+                    };
+                    RadioItem {
+                        label,
+                        enabled: is_connected,
+                        ..Default::default()
+                    }
                 })
                 .collect();
 
@@ -179,7 +231,7 @@ impl Tray for StatusTray {
                             };
                             let _ = presets::save_selected_profile(&profile);
                             let _ = this.command_tx.send(TrayCommand::ApplyEqPreset(name.clone()));
-                            // Don't set active_eq_preset here — wait for sync confirmation via reload_presets()
+                            this.active_eq_preset = Some(index);
                             this.active_preset_name = Some(name);
                             this.eq_synced = false;
                         }
@@ -192,7 +244,7 @@ impl Tray for StatusTray {
             submenu_items.push(MenuItem::Separator);
             submenu_items.push(
                 StandardItem {
-                    label: "Edit with: hyper_headset_cli --eq".into(),
+                    label: "Edit with: hyper__headset__cli --eq".into(),
                     enabled: false,
                     ..Default::default()
                 }

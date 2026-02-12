@@ -1,7 +1,11 @@
+pub mod popup;
 pub mod presets;
 
 #[cfg(feature = "eq-editor")]
 pub mod editor;
+
+#[cfg(feature = "eq-popup")]
+pub mod popup_gtk4;
 
 /// EQ band frequencies with labels and descriptions.
 /// (frequency_hz, short_label, description)
