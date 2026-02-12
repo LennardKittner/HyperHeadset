@@ -7,6 +7,50 @@ use hyper_headset::eq::presets;
 use hyper_headset::eq::TrayCommand;
 use status_tray::{StatusTray, TrayHandler};
 
+/// Apply the named EQ preset to the device and update sync state.
+/// Saves synced=true on success, synced=false on failure, then reloads tray.
+fn apply_and_sync(
+    device: &mut Box<dyn hyper_headset::devices::Device>,
+    name: &str,
+    tray_handler: &TrayHandler,
+) {
+    let success = if let Some(preset) = presets::load_preset(name) {
+        let pairs: Vec<(u8, f32)> = preset
+            .bands
+            .iter()
+            .enumerate()
+            .map(|(i, &db)| (i as u8, db))
+            .collect();
+        if let Some(packet) = device.set_equalizer_bands_packet(&pairs) {
+            device.prepare_write();
+            match device.get_device_state().hid_devices[0].write(&packet) {
+                Ok(_) => true,
+                Err(err) => {
+                    eprintln!("Failed to apply EQ preset '{}': {:?}", name, err);
+                    false
+                }
+            }
+        } else {
+            eprintln!("Device does not support EQ");
+            false
+        }
+    } else {
+        eprintln!("EQ preset '{}' not found", name);
+        false
+    };
+
+    if success {
+        println!("EQ preset '{}' applied.", name);
+    }
+
+    let profile = presets::SelectedProfile {
+        active_preset: Some(name.to_string()),
+        synced: success,
+    };
+    let _ = presets::save_selected_profile(&profile);
+    tray_handler.reload_presets();
+}
+
 fn main() {
     let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
@@ -49,6 +93,15 @@ fn main() {
 
         if device.get_device_state().can_set_equalizer {
             tray_handler.reload_presets();
+
+            // Auto-sync unsynced profile on reconnect
+            let profile = presets::load_selected_profile();
+            if !profile.synced {
+                if let Some(ref name) = profile.active_preset {
+                    println!("Syncing EQ preset '{}' to headset...", name);
+                    apply_and_sync(&mut device, name, &tray_handler);
+                }
+            }
         }
 
         // Run loop
@@ -58,22 +111,7 @@ fn main() {
             while let Ok(cmd) = command_rx.try_recv() {
                 match cmd {
                     TrayCommand::ApplyEqPreset(name) => {
-                        if let Some(preset) = presets::load_preset(&name) {
-                            let pairs: Vec<(u8, f32)> = preset
-                                .bands
-                                .iter()
-                                .enumerate()
-                                .map(|(i, &db)| (i as u8, db))
-                                .collect();
-                            if let Some(packet) = device.set_equalizer_bands_packet(&pairs) {
-                                device.prepare_write();
-                                if let Err(err) =
-                                    device.get_device_state().hid_devices[0].write(&packet)
-                                {
-                                    eprintln!("Failed to apply EQ preset: {:?}", err);
-                                }
-                            }
-                        }
+                        apply_and_sync(&mut device, &name, &tray_handler);
                     }
                 }
             }
@@ -89,7 +127,7 @@ fn main() {
 
             std::thread::sleep(refresh_interval);
             // with the default refresh_interval the state is only actively queried every 3min
-            // querying the device to frequently can lead to instability
+            // querying the device too frequently can lead to instability
             match if run_counter % 30 == 0 {
                 device.active_refresh_state()
             } else {

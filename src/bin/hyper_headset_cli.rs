@@ -252,6 +252,9 @@ fn main() {
             use hyper_headset::eq::editor::{EditorResult, EqEditor};
             use hyper_headset::eq::presets;
 
+            // Capture current profile state before TUI starts (for restore on cancel)
+            let previous_profile = presets::load_selected_profile();
+
             let editor = EqEditor::new();
             match editor.run(Some(&mut *device)) {
                 Ok(EditorResult::Saved { name, bands }) => {
@@ -273,9 +276,10 @@ fn main() {
                             eprintln!("Failed to update TUI preset: {:?}", err);
                         }
                     }
-                    // Update selected profile
+                    // TUI sends bands live — headset already has them, so synced=true
                     let profile = presets::SelectedProfile {
                         active_preset: Some(name.clone()),
+                        synced: true,
                     };
                     if let Err(err) = presets::save_selected_profile(&profile) {
                         eprintln!("Failed to save selected profile: {:?}", err);
@@ -284,9 +288,10 @@ fn main() {
                     std::process::exit(0);
                 }
                 Ok(EditorResult::Cancelled { name, bands: _ }) => {
-                    // Restore selected profile to match headset state
+                    // Restore previous profile with its original synced state
                     let profile = presets::SelectedProfile {
                         active_preset: Some(name),
+                        synced: previous_profile.synced,
                     };
                     if let Err(err) = presets::save_selected_profile(&profile) {
                         eprintln!("Failed to restore selected profile: {:?}", err);

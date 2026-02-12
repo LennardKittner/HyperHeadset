@@ -34,10 +34,12 @@ impl TrayHandler {
             ),
         };
         let can_set_equalizer = device_state.can_set_equalizer;
+        let is_connected = device_state.connected == Some(true);
         self.handle.update(|tray| {
             tray.message = message;
             tray.device_name = name;
             tray.can_set_equalizer = can_set_equalizer;
+            tray.is_connected = is_connected;
         })
     }
 
@@ -45,14 +47,23 @@ impl TrayHandler {
         let all = presets::all_presets();
         let profile = presets::load_selected_profile();
         let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
-        let active_preset = profile
-            .active_preset
-            .as_ref()
-            .and_then(|name| preset_names.iter().position(|n| n == name));
+        let synced = profile.synced;
+        let active_name = profile.active_preset;
+
+        // Only show radio selection when synced
+        let active_index = if synced {
+            active_name
+                .as_ref()
+                .and_then(|name| preset_names.iter().position(|n| n == name))
+        } else {
+            None
+        };
 
         self.handle.update(|tray| {
             tray.eq_presets = preset_names;
-            tray.active_eq_preset = active_preset;
+            tray.active_eq_preset = active_index;
+            tray.eq_synced = synced;
+            tray.active_preset_name = active_name;
         })
     }
 }
@@ -64,6 +75,9 @@ pub struct StatusTray {
     eq_presets: Vec<String>,
     active_eq_preset: Option<usize>,
     can_set_equalizer: bool,
+    is_connected: bool,
+    eq_synced: bool,
+    active_preset_name: Option<String>,
 }
 
 impl StatusTray {
@@ -71,10 +85,17 @@ impl StatusTray {
         let all = presets::all_presets();
         let profile = presets::load_selected_profile();
         let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
-        let active_preset = profile
-            .active_preset
-            .as_ref()
-            .and_then(|name| preset_names.iter().position(|n| n == name));
+
+        let eq_synced = profile.synced;
+        let active_preset_name = profile.active_preset;
+        // Only show selection when synced
+        let active_preset = if eq_synced {
+            active_preset_name
+                .as_ref()
+                .and_then(|name| preset_names.iter().position(|n| n == name))
+        } else {
+            None
+        };
 
         StatusTray {
             device_name: None,
@@ -83,6 +104,9 @@ impl StatusTray {
             eq_presets: preset_names,
             active_eq_preset: active_preset,
             can_set_equalizer: false,
+            is_connected: false,
+            eq_synced,
+            active_preset_name,
         }
     }
 }
@@ -95,12 +119,19 @@ impl Tray for StatusTray {
         "audio-headset".into()
     }
     fn tool_tip(&self) -> ToolTip {
-        let description = self
+        let mut description = self
             .message
             .lines()
             .filter(|l| !l.contains("Unknown"))
             .collect::<Vec<&str>>()
             .join("\n");
+        if let Some(ref name) = self.active_preset_name {
+            if self.eq_synced {
+                description.push_str(&format!("\nEQ: {}", name));
+            } else {
+                description.push_str(&format!("\nEQ: {} (not synced)", name));
+            }
+        }
         ToolTip {
             title: self.device_name.clone().unwrap_or("Unknown".to_string()),
             description,
@@ -125,40 +156,48 @@ impl Tray for StatusTray {
         if self.can_set_equalizer && !self.eq_presets.is_empty() {
             state_items.push(MenuItem::Separator);
 
+            let is_connected = self.is_connected;
             let radio_options: Vec<RadioItem> = self
                 .eq_presets
                 .iter()
                 .map(|name| RadioItem {
                     label: name.clone(),
+                    enabled: is_connected,
                     ..Default::default()
                 })
                 .collect();
 
-            let submenu_items: Vec<MenuItem<Self>> = vec![
+            let mut submenu_items: Vec<MenuItem<Self>> = vec![
                 RadioGroup {
                     selected: self.active_eq_preset.unwrap_or(usize::MAX),
                     select: Box::new(|this: &mut Self, index| {
                         if let Some(name) = this.eq_presets.get(index).cloned() {
-                            // Persist selection immediately so other processes (TUI) see it
+                            // Save with synced=false — main loop confirms sync
                             let profile = presets::SelectedProfile {
                                 active_preset: Some(name.clone()),
+                                synced: false,
                             };
                             let _ = presets::save_selected_profile(&profile);
-                            let _ = this.command_tx.send(TrayCommand::ApplyEqPreset(name));
-                            this.active_eq_preset = Some(index);
+                            let _ = this.command_tx.send(TrayCommand::ApplyEqPreset(name.clone()));
+                            // Don't set active_eq_preset here — wait for sync confirmation via reload_presets()
+                            this.active_preset_name = Some(name);
+                            this.eq_synced = false;
                         }
                     }),
                     options: radio_options,
                 }
                 .into(),
-                MenuItem::Separator,
+            ];
+
+            submenu_items.push(MenuItem::Separator);
+            submenu_items.push(
                 StandardItem {
                     label: "Edit with: hyper_headset_cli --eq".into(),
                     enabled: false,
                     ..Default::default()
                 }
                 .into(),
-            ];
+            );
 
             state_items.push(
                 SubMenu {

@@ -10,10 +10,13 @@ pub struct EqPreset {
     pub bands: [f32; NUM_BANDS],
 }
 
-/// Stored in selected_profile.json — just the active preset name.
+/// Stored in selected_profile.json — tracks desired preset and sync state.
+/// `synced` is true when the preset was successfully sent to the headset.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SelectedProfile {
     pub active_preset: Option<String>,
+    #[serde(default)]
+    pub synced: bool,
 }
 
 pub fn builtin_presets() -> Vec<EqPreset> {
