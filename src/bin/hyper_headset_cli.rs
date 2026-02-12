@@ -133,6 +133,11 @@ fn main() {
 
     let can_set_eq = device.can_set_equalizer();
 
+    #[cfg(not(feature = "eq-editor"))]
+    if can_set_eq {
+        eprintln!("Tip: This headset supports EQ. Rebuild with --features eq-editor for the TUI equalizer.");
+    }
+
     let mut cmd = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
@@ -454,11 +459,14 @@ fn main() {
     }
 
     if let Some(ref pairs) = eq_pairs {
-        if let Some(packet) = device.set_equalizer_bands_packet(pairs) {
-            device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
-                eprintln!("Failed to set equalizer with error: {:?}", err);
-                std::process::exit(1);
+        if let Some(packets) = device.set_equalizer_bands_packets(pairs) {
+            for packet in packets {
+                device.prepare_write();
+                if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+                    eprintln!("Failed to set equalizer with error: {:?}", err);
+                    std::process::exit(1);
+                }
+                std::thread::sleep(Duration::from_millis(3));
             }
         } else {
             eprintln!("ERROR: Equalizer control is not supported on this device");

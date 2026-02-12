@@ -458,10 +458,10 @@ pub trait Device {
     fn reset_sirk_packet(&self) -> Option<Vec<u8>>;
     fn get_silent_mode_packet(&self) -> Option<Vec<u8>>;
     fn set_silent_mode_packet(&self, silence: bool) -> Option<Vec<u8>>;
-    /// Set one or more equalizer bands in a single packet.
+    /// Build EQ packets — one packet per band (firmware only accepts one band per write).
     /// Bands: 0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz
     /// dB values: -12.0 to +12.0
-    fn set_equalizer_bands_packet(&self, _bands: &[(u8, f32)]) -> Option<Vec<u8>> {
+    fn set_equalizer_bands_packets(&self, _bands: &[(u8, f32)]) -> Option<Vec<Vec<u8>>> {
         None
     }
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
@@ -495,7 +495,7 @@ pub trait Device {
         self.set_silent_mode_packet(false).is_some()
     }
     fn can_set_equalizer(&self) -> bool {
-        self.set_equalizer_bands_packet(&[(0, 0.0)]).is_some()
+        self.set_equalizer_bands_packets(&[(0, 0.0)]).is_some()
     }
 
     // Initialize capability flags in device state

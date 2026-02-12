@@ -247,24 +247,26 @@ impl Device for CloudIIISWireless {
         None
     }
 
-    // Cloud III S: Batch EQ - one or more (band, hi, lo) triplets in one packet
-    fn set_equalizer_bands_packet(&self, bands: &[(u8, f32)]) -> Option<Vec<u8>> {
+    // Cloud III S: one EQ band per packet (firmware ignores additional bands in a single write)
+    fn set_equalizer_bands_packets(&self, bands: &[(u8, f32)]) -> Option<Vec<Vec<u8>>> {
         if bands.is_empty() || bands.iter().any(|(b, _)| *b > 9) {
             return None;
         }
-        let mut packet = vec![0u8; EQ_PACKET_SIZE];
-        packet[0] = EQ_REPORT_ID;
-        packet[1..6].copy_from_slice(&EQ_CMD);
-        let mut offset = 6;
-        for &(band_index, db_value) in bands {
-            let value_int = (db_value * 100.0).clamp(-1200.0, 1200.0) as i16;
-            let value_bytes = value_int.to_be_bytes();
-            packet[offset] = band_index;
-            packet[offset + 1] = value_bytes[0];
-            packet[offset + 2] = value_bytes[1];
-            offset += 3;
-        }
-        Some(packet)
+        let packets = bands
+            .iter()
+            .map(|&(band_index, db_value)| {
+                let mut packet = vec![0u8; EQ_PACKET_SIZE];
+                packet[0] = EQ_REPORT_ID;
+                packet[1..6].copy_from_slice(&EQ_CMD);
+                let value_int = (db_value * 100.0).clamp(-1200.0, 1200.0) as i16;
+                let value_bytes = value_int.to_be_bytes();
+                packet[6] = band_index;
+                packet[7] = value_bytes[0];
+                packet[8] = value_bytes[1];
+                packet
+            })
+            .collect();
+        Some(packets)
     }
 
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {

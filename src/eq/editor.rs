@@ -849,41 +849,38 @@ impl EqEditor {
 
     fn send_band_to_device(&self, device: &mut Option<&mut dyn Device>, band: usize) {
         if let Some(ref mut dev) = device {
-            if let Some(packet) =
-                dev.set_equalizer_bands_packet(&[(band as u8, self.bands[band])])
+            if let Some(packets) =
+                dev.set_equalizer_bands_packets(&[(band as u8, self.bands[band])])
             {
-                dev.prepare_write();
-                let _ = dev.get_device_state().hid_devices[0].write(&packet);
+                for packet in packets {
+                    dev.prepare_write();
+                    let _ = dev.get_device_state().hid_devices[0].write(&packet);
+                }
             }
         }
     }
 
     fn send_all_bands_to_device(&self, device: &mut Option<&mut dyn Device>) {
-        if let Some(ref mut dev) = device {
-            let pairs: Vec<(u8, f32)> = self
-                .bands
-                .iter()
-                .enumerate()
-                .map(|(i, &db)| (i as u8, db))
-                .collect();
-            if let Some(packet) = dev.set_equalizer_bands_packet(&pairs) {
-                dev.prepare_write();
-                let _ = dev.get_device_state().hid_devices[0].write(&packet);
-            }
-        }
+        self.send_bands_to_device(device, &self.bands);
     }
 
     fn restore_original(&self, device: &mut Option<&mut dyn Device>) {
+        self.send_bands_to_device(device, &self.original_bands);
+    }
+
+    fn send_bands_to_device(&self, device: &mut Option<&mut dyn Device>, bands: &[f32; NUM_BANDS]) {
         if let Some(ref mut dev) = device {
-            let pairs: Vec<(u8, f32)> = self
-                .original_bands
+            let pairs: Vec<(u8, f32)> = bands
                 .iter()
                 .enumerate()
                 .map(|(i, &db)| (i as u8, db))
                 .collect();
-            if let Some(packet) = dev.set_equalizer_bands_packet(&pairs) {
-                dev.prepare_write();
-                let _ = dev.get_device_state().hid_devices[0].write(&packet);
+            if let Some(packets) = dev.set_equalizer_bands_packets(&pairs) {
+                for packet in packets {
+                    dev.prepare_write();
+                    let _ = dev.get_device_state().hid_devices[0].write(&packet);
+                    std::thread::sleep(std::time::Duration::from_millis(3));
+                }
             }
         }
     }
