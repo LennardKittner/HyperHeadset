@@ -1,4 +1,5 @@
 # HyperHeadset
+
 A CLI and tray application for monitoring and managing HyperX headsets.
 
 <img src=./screenshots/tray_app.png alt="tray_app" width="400">
@@ -6,11 +7,13 @@ A CLI and tray application for monitoring and managing HyperX headsets.
 This project is not affiliated with, endorsed by, or associated with HyperX or its parent company in any way. All trademarks and brand names belong to their respective owners.
 
 ## Compatibility
+
 The CLI application is compatible with both Linux and MacOS operating systems.
 However, the tray application is only functional on Linux.
 Although it was only tested on Manjaro and Kubuntu with KDE, it should also work on other distribution and desktop environments.
 
 **Supported Headsets**:
+
 - HyperX Cloud II Wireless HP vendorID
 - HyperX Cloud II Wireless HyperX vendorID
 - HyperX Cloud III Wireless
@@ -117,7 +120,20 @@ Options:
       --surround_sound <surround_sound>
           Enables surround sound. This may be on by default and cannot be changed on your device. [possible values: true, false]
       --mute_playback <mute_playback>
-          Mute or unmute playback. [possible values: true, false]
+          Mute or unmute playback. This may not be supported on your device. [possible values: true, false]
+      --eq <BAND=DB,...>
+          Set full EQ profile. Unspecified bands reset to 0 dB.
+          This may not be supported on your device.
+          BAND: index 0-9 or frequency (1khz, 250hz). Bare integers are indices, not Hz.
+            [0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz]
+          DB: -12.0 to 12.0.
+          Example: --eq 5=-12.0,1khz=3.0,16khz=4.0
+      --eq-band <BAND=DB[,...]>
+          Adjust specific bands. Repeatable, comma-separated (last write wins per band).
+          This may not be supported on your device.
+          Others unchanged. Use alone or with --eq (overrides on top of the profile).
+          See --eq for band/dB reference.
+          Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0
   -h, --help
           Print help
   -V, --version
@@ -125,6 +141,7 @@ Options:
 
 Help only lists commands supported by this headset.
 ```
+
 `hyper_headset_cli` without any arguments will print all available headset information.
 
 ```
@@ -142,53 +159,6 @@ Options:
 `hyper_headset` without any arguments will start the tray application with a 3s refresh interval.
 Once it's open, hover over the headset icon in the system tray or right-click to view details such as the battery level.
 You can also exit via the right-clock menu.
-
-## Equalizer
-
-The CLI supports per-band equalizer control on headsets that have EQ support (currently only the Cloud III S Wireless).
-
-### Arguments
-
-**`--eq-band BAND=DB`** -- Set a single equalizer band. Can be repeated to set multiple bands.
-
-```
-hyper_headset_cli --eq-band 5=-12.0 --eq-band 1khz=3.0
-```
-
-**`--eq BAND=DB,BAND=DB,...`** -- Set multiple equalizer bands in one shot, comma-separated.
-
-```
-hyper_headset_cli --eq 0=0.0,5=-12.0,16khz=4.0
-```
-
-Both arguments can be used together in the same invocation.
-
-### Band reference
-
-BAND can be specified as:
-- **An integer 0-9**: interpreted as band **index** (see table below)
-- **A frequency with suffix**: e.g. `1khz`, `64hz`, `250Hz`, `16KHZ` (case-insensitive, trailing `z` is optional)
-
-**Important**: Bare integers are band *indices*, not frequencies. `1` means index 1 (64 Hz), **not** 1 kHz. To specify 1 kHz, write `1khz`.
-
-### Frequency-to-index mapping
-
-| Index | Frequency |
-|-------|-----------|
-| 0     | 32 Hz     |
-| 1     | 64 Hz     |
-| 2     | 125 Hz    |
-| 3     | 250 Hz    |
-| 4     | 500 Hz    |
-| 5     | 1 kHz     |
-| 6     | 2 kHz     |
-| 7     | 4 kHz     |
-| 8     | 8 kHz     |
-| 9     | 16 kHz    |
-
-### DB range
-
-Values must be between **-12.0** and **12.0** dB. Both integer and float formats are accepted: `3`, `3.0`, `-12`, `-12.0`.
 
 ## Contributing / TODOs
 

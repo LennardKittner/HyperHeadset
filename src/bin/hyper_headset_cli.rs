@@ -195,29 +195,30 @@ fn main() {
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
-            Arg::new("eq_band")
-                .long("eq-band")
-                .required(false)
-                .action(ArgAction::Append)
-                .value_name("BAND=DB")
-                .help(
-                    "Set an equalizer band. Repeatable.\n\
-                     BAND is an index (0-9) or frequency (e.g. 1khz, 250hz).\n\
-                     DB is -12.0 to 12.0.\n\
-                     Example: --eq-band 5=-12.0 --eq-band 1khz=3.0",
-                )
-                .hide(!device.can_set_equalizer()),
-        )
-        .arg(
             Arg::new("eq")
                 .long("eq")
                 .required(false)
                 .value_name("BAND=DB,...")
                 .help(
-                    "Set multiple equalizer bands in one shot, comma-separated.\n\
-                     BAND is an index (0-9) or frequency (e.g. 1khz, 250hz).\n\
-                     DB is -12.0 to 12.0.\n\
-                     Example: --eq 0=0.0,5=-12.0,16khz=4.0",
+                    "Set full EQ profile. Unspecified bands reset to 0 dB.\n\
+                     BAND: index 0-9 or frequency (1khz, 250hz). Bare integers are indices, not Hz.\n\
+                     \x20 [0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz]\n\
+                     DB: -12.0 to 12.0.\n\
+                     Example: --eq 5=-12.0,1khz=3.0,16khz=4.0",
+                )
+                .hide(!device.can_set_equalizer()),
+        )
+        .arg(
+            Arg::new("eq_band")
+                .long("eq-band")
+                .required(false)
+                .action(ArgAction::Append)
+                .value_name("BAND=DB[,...]")
+                .help(
+                    "Adjust specific bands. Repeatable, comma-separated (last write wins per band).\n\
+                     Others unchanged. Use alone or with --eq (overrides on top of the profile).\n\
+                     See --eq for band/dB reference.\n\
+                     Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0",
                 )
                 .hide(!device.can_set_equalizer()),
         )
@@ -318,42 +319,62 @@ fn main() {
         }
     }
 
-    // Collect EQ pairs from both --eq-band and --eq
-    let mut eq_pairs: Vec<(u8, f32)> = Vec::new();
-
-    if let Some(values) = matches.get_many::<String>("eq_band") {
-        for val in values {
-            match parse_eq_pair(val) {
-                Ok(pair) => eq_pairs.push(pair),
-                Err(err) => {
-                    eprintln!("ERROR: --eq-band: {}", err);
-                    std::process::exit(1);
-                }
-            }
-        }
-    }
+    // --eq: full profile (unspecified bands reset to 0 dB)
+    // --eq-band: adjust specific bands only
+    // If both are given, --eq sets the base profile, --eq-band overrides on top.
+    let mut eq_pairs: Option<Vec<(u8, f32)>> = None;
 
     if let Some(val) = matches.get_one::<String>("eq") {
+        // Start with all bands at 0 dB
+        let mut eq_map: std::collections::BTreeMap<u8, f32> =
+            (0u8..10).map(|i| (i, 0.0f32)).collect();
         for part in val.split(',') {
             let part = part.trim();
             if part.is_empty() {
                 continue;
             }
             match parse_eq_pair(part) {
-                Ok(pair) => eq_pairs.push(pair),
+                Ok((band, db)) => { eq_map.insert(band, db); }
                 Err(err) => {
                     eprintln!("ERROR: --eq: {}", err);
                     std::process::exit(1);
                 }
             }
         }
+        eq_pairs = Some(eq_map.into_iter().collect());
     }
 
-    for (band_index, db_value) in &eq_pairs {
-        if let Some(packet) = device.set_equalizer_band_packet(*band_index, *db_value) {
+    if let Some(values) = matches.get_many::<String>("eq_band") {
+        let pairs = eq_pairs.get_or_insert_with(Vec::new);
+        for val in values {
+            for part in val.split(',') {
+                let part = part.trim();
+                if part.is_empty() {
+                    continue;
+                }
+                match parse_eq_pair(part) {
+                    Ok((band, db)) => {
+                        // Override if band already exists, otherwise append
+                        if let Some(existing) = pairs.iter_mut().find(|(b, _)| *b == band) {
+                            existing.1 = db;
+                        } else {
+                            pairs.push((band, db));
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("ERROR: --eq-band: {}", err);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(ref pairs) = eq_pairs {
+        if let Some(packet) = device.set_equalizer_bands_packet(pairs) {
             device.prepare_write();
             if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
-                eprintln!("Failed to set equalizer band {} with error: {:?}", band_index, err);
+                eprintln!("Failed to set equalizer with error: {:?}", err);
                 std::process::exit(1);
             }
         } else {
