@@ -106,20 +106,20 @@ A CLI application for monitoring and managing HyperX headsets.
 Usage: hyper_headset_cli [OPTIONS]
 
 Options:
-      --automatic_shutdown <automatic_shutdown>
+      --automatic-shutdown <automatic-shutdown>
           Set the delay in minutes after which the headset will automatically shutdown.
           0 will disable automatic shutdown.
       --mute <mute>
           Mute or unmute the headset. [possible values: true, false]
-      --enable_side_tone <enable_side_tone>
+      --enable-side-tone <enable-side-tone>
           Enable or disable side tone. [possible values: true, false]
-      --side_tone_volume <side_tone_volume>
+      --side-tone-volume <side-tone-volume>
           Set the side tone volume.
-      --enable_voice_prompt <enable_voice_prompt>
+      --enable-voice-prompt <enable-voice-prompt>
           Enable voice prompt. This may not be supported on your device. [possible values: true, false]
-      --surround_sound <surround_sound>
+      --surround-sound <surround-sound>
           Enables surround sound. This may be on by default and cannot be changed on your device. [possible values: true, false]
-      --mute_playback <mute_playback>
+      --mute-playback <mute-playback>
           Mute or unmute playback. This may not be supported on your device. [possible values: true, false]
       --eq <BAND=DB,...>
           Set full EQ profile. Unspecified bands reset to 0 dB.
@@ -151,7 +151,7 @@ A CLI tray application for monitoring HyperX headsets.
 Usage: hyper_headset [OPTIONS]
 
 Options:
-      --refresh_interval <refresh_interval>  Set the refresh interval (in seconds)
+      --refresh-interval <refresh-interval>  Set the refresh interval (in seconds)
   -h, --help                                 Print help
   -V, --version                              Print version
 ```

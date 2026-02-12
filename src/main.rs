@@ -11,14 +11,15 @@ fn main() {
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("A tray application for monitoring HyperX headsets.")
         .arg(
-            Arg::new("refresh_interval")
-                .long("refresh_interval")
+            Arg::new("refresh-interval")
+                .long("refresh-interval")
+                .alias("refresh_interval")
                 .required(false)
                 .help("Set the refresh interval (in seconds)")
                 .value_parser(clap::value_parser!(u64)),
         )
         .get_matches();
-    let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
+    let refresh_interval = *matches.get_one::<u64>("refresh-interval").unwrap_or(&3);
     let refresh_interval = Duration::from_secs(refresh_interval);
     let tray_handler = TrayHandler::new(StatusTray::new());
     loop {
