@@ -14,6 +14,21 @@ fn apply_and_sync(
     name: &str,
     tray_handler: &TrayHandler,
 ) {
+    // WORKAROUND(firmware-no-response): Probe connected status fresh before applying.
+    // TODO: Remove this probe once firmware NAKs writes when headset is off.
+    device.probe_connected_status();
+    if device.get_device_state().connected != Some(true) {
+        eprintln!("Headset not connected, EQ preset '{}' queued for sync.", name);
+        tray_handler.update(device.get_device_state());
+        let profile = presets::SelectedProfile {
+            active_preset: Some(name.to_string()),
+            synced: false,
+        };
+        let _ = presets::save_selected_profile(&profile);
+        tray_handler.reload_presets();
+        return;
+    }
+
     let success = if let Some(preset) = presets::load_preset(name) {
         let pairs: Vec<(u8, f32)> = preset
             .bands
@@ -141,6 +156,16 @@ fn main() {
                 }
             };
             tray_handler.update(device.get_device_state());
+
+            // WORKAROUND(firmware-no-response): passive_refresh_state() always returns Ok(()),
+            // so disconnect is only detected via active_refresh (every 30 cycles). This check
+            // catches spontaneous disconnect notifications received during passive refresh.
+            // TODO: Remove once passive_refresh_state returns Err on disconnect.
+            if device.get_device_state().connected == Some(false) {
+                eprintln!("Headset disconnected.");
+                break;
+            }
+
             run_counter += 1;
         }
     }

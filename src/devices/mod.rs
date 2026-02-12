@@ -551,6 +551,21 @@ pub trait Device {
             .collect()
     }
 
+    /// WORKAROUND(firmware-no-response): Query connected status and update device state.
+    /// The dongle accepts HID writes even when headset is off, so we probe before trusting state.
+    /// TODO: Remove once firmware NAKs writes when headset is off.
+    fn probe_connected_status(&mut self) {
+        if let Some(packet) = self.get_wireless_connected_status_packet() {
+            self.prepare_write();
+            let _ = self.get_device_state().hid_devices[0].write(&packet);
+            std::thread::sleep(RESPONSE_DELAY);
+            let events = self.wait_for_updates(Duration::from_millis(500));
+            for event in events {
+                self.get_device_state_mut().update_self_with_event(&event);
+            }
+        }
+    }
+
     /// Refreshes the state by querying all available information
     fn active_refresh_state(&mut self) -> Result<(), DeviceError> {
         let packets = vec![
