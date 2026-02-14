@@ -1,6 +1,7 @@
 # HyperHeadset
-![AUR Version](https://img.shields.io/aur/version/hyperheadset-git)
-![GitHub Release](https://img.shields.io/github/v/release/LennardKittner/HyperHeadset)
+[![AUR Version](https://img.shields.io/aur/version/hyperheadset-git)](https://aur.archlinux.org/packages/hyperheadset-git)
+[![GitHub Release](https://img.shields.io/github/v/release/LennardKittner/HyperHeadset)](https://github.com/LennardKittner/HyperHeadset/releases)
+[![Sponsor](https://img.shields.io/badge/-Sponsor-green?style=flat&logo=github)](https://github.com/sponsors/LennardKittner)
 
 A CLI and tray application for monitoring and managing HyperX headsets.
 
