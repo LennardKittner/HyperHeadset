@@ -116,6 +116,7 @@ Once created, replug the wireless dongle.
 ## Usage
 
 ```
+hyper_headset_cli --help
 A CLI application for monitoring and managing HyperX headsets.
 
 Usage: hyper_headset_cli [OPTIONS]
