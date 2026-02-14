@@ -1,4 +1,7 @@
 # HyperHeadset
+![AUR Version](https://img.shields.io/aur/version/hyperheadset-git)
+![GitHub Release](https://img.shields.io/github/v/release/LennardKittner/HyperHeadset)
+
 A CLI and tray application for monitoring and managing HyperX headsets.
 
 <img src=./screenshots/tray_app.png alt="tray_app" width="400">
@@ -20,7 +23,34 @@ Although it was only tested on Manjaro and Kubuntu with KDE, it should also work
 
 It should be possible to add support for other HyperX headsets.
 
-## Prerequisites
+## Installation
+
+### Arch Linux (AUR)
+No manual setup required (dependencies and udev rules are handled automatically):
+```bash
+yay -S hyperheadset-git
+```
+
+### Prebuilt Binary (Linux/MacOS)
+
+Download from [GitHub releases](https://github.com/LennardKittner/HyperHeadset/releases).
+
+⚠️ Linux users must manually install the udev rule (see Prerequisites below).
+
+## Build from Source
+
+This project uses git submodules, so before building you have to initialize them via:
+`git submodule update --init --recursive`
+
+To only build the CLI app on MacOS, use:
+`cargo build --release --bin hyper_headset_cli`
+
+To build both applications on Linux, use:
+`cargo build --release`
+
+See prerequisites below for installing dependencies and adding the udev rule.
+
+## Prerequisites (Binary Releases / Building from Source Only)
 
 ### Hidraw
 
@@ -82,21 +112,6 @@ KERNEL=="hidraw*", ATTRS{idProduct}=="0c9d", ATTRS{idVendor}=="03f0", MODE="0666
 
 Once created, replug the wireless dongle.
 
-## Building
-
-This project uses git submodules, so before building you have to initialize them via:
-`git submodule update --init --recursive`
-
-To only build the CLI app on MacOS, use:
-`cargo build --release --bin hyper_headset_cli`
-
-To build both applications on Linux, use:
-`cargo build --release`
-
-You can also download a compiled version from [releases](https://github.com/LennardKittner/HyperHeadset/releases).
-
-`cargo build --release` **will fail on MacOS** because cargo will try to build the tray application, but some dependencies are exclusive to Linux.
-
 ## Usage
 
 ```
@@ -130,7 +145,7 @@ Help only lists commands supported by this headset.
 `hyper_headset_cli` without any arguments will print all available headset information.
 
 ```
-hyper_headset  --help
+hyper_headset --help
 A CLI tray application for monitoring HyperX headsets.
 
 Usage: hyper_headset [OPTIONS]
