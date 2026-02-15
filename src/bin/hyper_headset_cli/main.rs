@@ -1,3 +1,6 @@
+#[cfg(feature = "eq-editor")]
+mod eq_editor;
+
 use std::time::Duration;
 
 use clap::{Arg, ArgAction, Command};
@@ -259,7 +262,7 @@ fn main() {
     #[cfg(feature = "eq-editor")]
     {
         if matches.get_flag("eq") {
-            use hyper_headset::eq::editor::{EditorResult, EqEditor};
+            use crate::eq_editor::{EditorResult, EqEditor};
             use hyper_headset::eq::presets;
 
             // Capture current profile state before TUI starts (for restore on cancel)

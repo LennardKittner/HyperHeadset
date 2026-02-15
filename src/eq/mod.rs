@@ -1,8 +1,5 @@
 pub mod presets;
 
-#[cfg(feature = "eq-editor")]
-pub mod editor;
-
 /// EQ band frequencies with labels and descriptions.
 /// (frequency_hz, short_label, description)
 pub const EQ_FREQUENCIES: [(u32, &str, &str); 10] = [

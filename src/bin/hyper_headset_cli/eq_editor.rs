@@ -13,12 +13,12 @@ use ratatui::{
 };
 use std::io;
 
-use crate::devices::Device;
-use crate::eq::presets::{
+use hyper_headset::devices::Device;
+use hyper_headset::eq::presets::{
     all_presets, delete_preset, is_builtin, load_preset, load_selected_profile, load_user_presets,
     save_preset, EqPreset,
 };
-use crate::eq::{DB_MAX, DB_MIN, EQ_FREQUENCIES, NUM_BANDS};
+use hyper_headset::eq::{DB_MAX, DB_MIN, EQ_FREQUENCIES, NUM_BANDS};
 
 #[derive(PartialEq)]
 enum EditorMode {
