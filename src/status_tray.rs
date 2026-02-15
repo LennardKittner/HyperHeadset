@@ -1,12 +1,19 @@
+#[cfg(feature = "eq-support")]
 use std::sync::mpsc::Sender;
 
 use hyper_headset::devices::DeviceState;
+#[cfg(feature = "eq-support")]
 use hyper_headset::eq::presets;
+#[cfg(feature = "eq-support")]
 use hyper_headset::eq::TrayCommand;
 use ksni::{
-    menu::{RadioGroup, RadioItem, StandardItem, SubMenu},
+    menu::StandardItem,
     Handle, MenuItem, ToolTip, Tray, TrayService,
 };
+#[cfg(feature = "eq-support")]
+use ksni::menu::SubMenu;
+#[cfg(feature = "eq-support")]
+use ksni::menu::{RadioGroup, RadioItem};
 
 /// Escape underscores for ksni labels (single `_` is an accelerator prefix).
 fn escape_label(s: &str) -> String {
@@ -49,6 +56,7 @@ impl TrayHandler {
         })
     }
 
+    #[cfg(feature = "eq-support")]
     pub fn reload_presets(&self) {
         let all = presets::all_presets();
         let profile = presets::load_selected_profile();
@@ -72,16 +80,22 @@ impl TrayHandler {
 pub struct StatusTray {
     device_name: Option<String>,
     message: String,
+    #[cfg(feature = "eq-support")]
     command_tx: Sender<TrayCommand>,
+    #[cfg(feature = "eq-support")]
     eq_presets: Vec<String>,
+    #[cfg(feature = "eq-support")]
     active_eq_preset: Option<usize>,
     can_set_equalizer: bool,
     is_connected: bool,
+    #[cfg(feature = "eq-support")]
     eq_synced: bool,
+    #[cfg(feature = "eq-support")]
     active_preset_name: Option<String>,
 }
 
 impl StatusTray {
+    #[cfg(feature = "eq-support")]
     pub fn new(command_tx: Sender<TrayCommand>) -> Self {
         let all = presets::all_presets();
         let profile = presets::load_selected_profile();
@@ -105,6 +119,16 @@ impl StatusTray {
             active_preset_name,
         }
     }
+
+    #[cfg(not(feature = "eq-support"))]
+    pub fn new() -> Self {
+        StatusTray {
+            device_name: None,
+            message: NO_COMPATIBLE_DEVICE.to_string(),
+            can_set_equalizer: false,
+            is_connected: false,
+        }
+    }
 }
 
 impl Tray for StatusTray {
@@ -115,12 +139,14 @@ impl Tray for StatusTray {
         "audio-headset".into()
     }
     fn tool_tip(&self) -> ToolTip {
+        #[allow(unused_mut)]
         let mut description = self
             .message
             .lines()
             .filter(|l| !l.contains("Unknown"))
             .collect::<Vec<&str>>()
             .join("\n");
+        #[cfg(feature = "eq-support")]
         if let Some(ref name) = self.active_preset_name {
             if self.eq_synced {
                 description.push_str(&format!("\nEQ: {}", name));
@@ -149,6 +175,7 @@ impl Tray for StatusTray {
             })
             .collect();
 
+        #[cfg(feature = "eq-support")]
         if self.can_set_equalizer && !self.eq_presets.is_empty() {
             state_items.push(MenuItem::Separator);
 
@@ -211,6 +238,19 @@ impl Tray for StatusTray {
                 SubMenu {
                     label: "EQ Preset".into(),
                     submenu: submenu_items,
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+
+        #[cfg(not(feature = "eq-support"))]
+        if self.can_set_equalizer {
+            state_items.push(MenuItem::Separator);
+            state_items.push(
+                StandardItem {
+                    label: "EQ presets available — rebuild with --features eq-support".into(),
+                    enabled: false,
                     ..Default::default()
                 }
                 .into(),

@@ -85,20 +85,39 @@ Once created, replug the wireless dongle.
 
 ## Building
 
+### Initialize submodules
+
 This project uses git submodules, so before building you have to initialize them via:
-`git submodule update --init --recursive`
 
-To only build the CLI app on MacOS, use:
-`cargo build --release --bin hyper_headset_cli`
+```sh
+git submodule update --init --recursive
+```
 
-To build both applications on Linux, use:
-`cargo build --release`
+---
 
-Optional features (pass with `--features`):
-- `eq-editor` — TUI equalizer editor for the CLI (`--eq` flag)
+### Build for your platform
 
-To build with all features:
-`cargo build --release --features eq-editor`
+To only build the CLI app on MacOS:
+
+```sh
+cargo build --release --bin hyper_headset_cli
+```
+
+To build both applications on Linux:
+
+```sh
+cargo build --release
+```
+
+### Build with features
+
+If your headset supports EQ (Cloud III S Wireless), add `--features eq-editor` for the full EQ experience (tray presets + TUI editor):
+
+```sh
+cargo build --release --features eq-editor
+```
+
+Use `--features eq-support` instead if you only want tray EQ presets without the TUI editor.
 
 You can also download a compiled version from [releases](https://github.com/LennardKittner/HyperHeadset/releases).
 

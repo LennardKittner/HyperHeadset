@@ -1,4 +1,5 @@
 pub mod devices;
+#[cfg(feature = "eq-support")]
 pub mod eq;
 
 #[macro_export]

@@ -9,16 +9,17 @@ description = "A CLI and tray application for monitoring and managing HyperX hea
 clap = "4.5.32"
 hidapi = { path = "vendor/hidapi" }
 thistermination = "1.0.0"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-dirs = "6"
-notify = "7"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+dirs = { version = "6", optional = true }
+notify = { version = "7", optional = true }
 ratatui = { version = "0.29", optional = true }
 crossterm = { version = "0.28", optional = true }
 
 [features]
 default = []
-eq-editor = ["ratatui", "crossterm"]
+eq-support = ["serde", "serde_json", "dirs", "notify"]
+eq-editor = ["eq-support", "ratatui", "crossterm"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = "0.2.0"

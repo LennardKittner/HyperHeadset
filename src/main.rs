@@ -3,12 +3,15 @@ use std::time::Duration;
 
 mod status_tray;
 use hyper_headset::devices::connect_compatible_device;
+#[cfg(feature = "eq-support")]
 use hyper_headset::eq::presets;
+#[cfg(feature = "eq-support")]
 use hyper_headset::eq::TrayCommand;
 use status_tray::{StatusTray, TrayHandler};
 
 /// Apply the named EQ preset to the device and update sync state.
 /// Saves synced=true on success, synced=false on failure, then reloads tray.
+#[cfg(feature = "eq-support")]
 fn apply_and_sync(
     device: &mut Box<dyn hyper_headset::devices::Device>,
     name: &str,
@@ -87,11 +90,16 @@ fn main() {
     let refresh_interval = Duration::from_secs(refresh_interval);
 
     // Channel for tray → main loop commands
+    #[cfg(feature = "eq-support")]
     let (command_tx, command_rx) = std::sync::mpsc::channel::<TrayCommand>();
 
+    #[cfg(feature = "eq-support")]
     let tray_handler = TrayHandler::new(StatusTray::new(command_tx));
+    #[cfg(not(feature = "eq-support"))]
+    let tray_handler = TrayHandler::new(StatusTray::new());
 
     // File watcher for preset/settings changes
+    #[cfg(feature = "eq-support")]
     let (_watcher, watcher_rx) = match presets::watch_config_dir() {
         Ok(pair) => (Some(pair.0), Some(pair.1)),
         Err(e) => {
@@ -109,10 +117,14 @@ fn main() {
             std::thread::sleep(Duration::from_secs(1));
         };
 
+        #[cfg(feature = "eq-support")]
         if device.get_device_state().can_set_equalizer {
             tray_handler.reload_presets();
-            // Auto-sync is handled by the transition detection in the inner loop
-            // (was_connected: false → true triggers sync when headset comes online)
+        }
+
+        #[cfg(not(feature = "eq-support"))]
+        if device.get_device_state().can_set_equalizer {
+            eprintln!("This headset supports EQ presets. Rebuild with --features eq-support to enable.");
         }
 
         // Run loop
@@ -120,6 +132,7 @@ fn main() {
         let mut was_connected = device.get_device_state().connected == Some(true);
         loop {
             // Process tray commands
+            #[cfg(feature = "eq-support")]
             while let Ok(cmd) = command_rx.try_recv() {
                 match cmd {
                     TrayCommand::ApplyEqPreset(name) => {
@@ -129,6 +142,7 @@ fn main() {
             }
 
             // Check for preset file changes
+            #[cfg(feature = "eq-support")]
             if let Some(ref wrx) = watcher_rx {
                 if wrx.try_recv().is_ok() {
                     // Drain any additional events
@@ -164,6 +178,7 @@ fn main() {
 
             // Sync unsynced profile when headset transitions to connected
             let is_connected = device.get_device_state().connected == Some(true);
+            #[cfg(feature = "eq-support")]
             if is_connected && !was_connected && device.get_device_state().can_set_equalizer {
                 let profile = presets::load_selected_profile();
                 if !profile.synced {

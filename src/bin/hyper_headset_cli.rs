@@ -133,11 +133,16 @@ fn main() {
 
     let can_set_eq = device.can_set_equalizer();
 
-    #[cfg(not(feature = "eq-editor"))]
+    #[cfg(not(feature = "eq-support"))]
+    if can_set_eq {
+        eprintln!("Tip: This headset supports EQ. Rebuild with --features eq-support for EQ presets, or --features eq-editor for the TUI equalizer.");
+    }
+    #[cfg(all(feature = "eq-support", not(feature = "eq-editor")))]
     if can_set_eq {
         eprintln!("Tip: This headset supports EQ. Rebuild with --features eq-editor for the TUI equalizer.");
     }
 
+    #[allow(unused_mut)]
     let mut cmd = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
