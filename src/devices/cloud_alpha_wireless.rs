@@ -200,9 +200,11 @@ impl Device for CloudAlphaWireless {
             GET_BATTERY_RESPONSE_CODE | GET_BATTERY_CMD_ID => {
                 Some(vec![DeviceEvent::BatterLevel(response[3])])
             }
-            GET_AUTO_SHUTDOWN_CMD_ID => Some(vec![DeviceEvent::AutomaticShutdownAfter(
-                Duration::from_secs(response[3] as u64 * 60),
-            )]),
+            SET_AUTO_SHUTDOWN_CMD_ID | GET_AUTO_SHUTDOWN_CMD_ID => {
+                Some(vec![DeviceEvent::AutomaticShutdownAfter(
+                    Duration::from_secs(response[3] as u64 * 60),
+                )])
+            }
             GET_MUTE_RESPONSE_CODE | GET_MUTE_CMD_ID => {
                 Some(vec![DeviceEvent::Muted(response[3] == 1)])
             }
@@ -210,11 +212,15 @@ impl Device for CloudAlphaWireless {
             GET_SIDE_TONE_ON_RESPONSE_CODE | GET_SIDE_TONE_ON_CMD_ID => {
                 Some(vec![DeviceEvent::SideToneOn(response[3] == 1)])
             }
-            GET_SIDE_TONE_VOLUME_CMD_ID => Some(vec![DeviceEvent::SideToneVolume(response[3])]), //Correct?
+            SET_SIDE_TONE_VOLUME_CMD_ID | GET_SIDE_TONE_VOLUME_CMD_ID => {
+                Some(vec![DeviceEvent::SideToneVolume(response[3])])
+            } //Correct?
             GET_WIRELESS_STATUS_RESPONSE_CODE | GET_WIRELESS_STATUS_CMD_ID => {
                 Some(vec![DeviceEvent::WirelessConnected(response[3] == 2)])
             }
-            GET_VOICE_PROMPT_CMD_ID => Some(vec![DeviceEvent::VoicePrompt(response[3] == 1)]),
+            SET_VOICE_PROMPT_CMD_ID | GET_VOICE_PROMPT_CMD_ID => {
+                Some(vec![DeviceEvent::VoicePrompt(response[3] == 1)])
+            }
             GET_PRODUCT_COLOR_CMD_ID => {
                 Some(vec![DeviceEvent::ProductColor(Color::from(response[3]))])
             }
