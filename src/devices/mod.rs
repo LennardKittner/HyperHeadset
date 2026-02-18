@@ -1,3 +1,4 @@
+pub mod cloud_alpha_wireless;
 pub mod cloud_ii_wireless;
 pub mod cloud_ii_wireless_dts;
 pub mod cloud_iii_s_wireless;
@@ -6,8 +7,9 @@ pub mod cloud_iii_wireless;
 use crate::{
     debug_println,
     devices::{
-        cloud_ii_wireless::CloudIIWireless, cloud_ii_wireless_dts::CloudIIWirelessDTS,
-        cloud_iii_s_wireless::CloudIIISWireless, cloud_iii_wireless::CloudIIIWireless,
+        cloud_alpha_wireless::CloudAlphaWireless, cloud_ii_wireless::CloudIIWireless,
+        cloud_ii_wireless_dts::CloudIIWirelessDTS, cloud_iii_s_wireless::CloudIIISWireless,
+        cloud_iii_wireless::CloudIIIWireless,
     },
 };
 use hidapi::{HidApi, HidDevice, HidError};
@@ -17,8 +19,9 @@ use thistermination::TerminationFull;
 // Possible vendor IDs [HyperX, HP]
 const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
 // All supported product IDs
-const PRODUCT_IDS: [u16; 10] = [
-    0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92, 0x05B7, 0x16EA, 0x16EB, 0x0c9d, 0x06BE,
+const PRODUCT_IDS: [u16; 13] = [
+    0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92, 0x05B7, 0x16EA, 0x16EB, 0x0c9d, 0x06BE, 0x1743, 0x1765,
+    0x098D,
 ];
 
 const RESPONSE_BUFFER_SIZE: usize = 256;
@@ -56,6 +59,12 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
                 && cloud_iii_wireless::PRODUCT_IDS.contains(&p) =>
         {
             Box::new(CloudIIIWireless::new_from_state(state))
+        }
+        (v, p)
+            if cloud_alpha_wireless::VENDOR_IDS.contains(&v)
+                && cloud_alpha_wireless::PRODUCT_IDS.contains(&p) =>
+        {
+            Box::new(CloudAlphaWireless::new_from_state(state))
         }
         (_, _) => return Err(DeviceError::NoDeviceFound()),
     };
@@ -421,6 +430,9 @@ impl From<u8> for ChargingStatus {
 }
 
 pub trait Device {
+    fn get_response_buffer(&self) -> Vec<u8> {
+        [0u8; RESPONSE_BUFFER_SIZE].to_vec()
+    }
     fn get_charging_packet(&self) -> Option<Vec<u8>>;
     fn get_battery_packet(&self) -> Option<Vec<u8>>;
     fn set_automatic_shut_down_packet(&self, shutdown_after: Duration) -> Option<Vec<u8>>;
@@ -510,7 +522,7 @@ pub trait Device {
         Ok(())
     }
     fn wait_for_updates(&mut self, duration: Duration) -> Option<Vec<DeviceEvent>> {
-        let mut buf = [0u8; RESPONSE_BUFFER_SIZE];
+        let mut buf = self.get_response_buffer();
         let res = self
             .get_device_state()
             .hid_device
