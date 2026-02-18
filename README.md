@@ -12,7 +12,6 @@ This project is not affiliated with, endorsed by, or associated with HyperX or i
 ## Compatibility
 The CLI application is compatible with both Linux and MacOS operating systems.
 However, the tray application is only functional on Linux.
-Although it was only tested on Manjaro and Kubuntu with KDE, it should also work on other distribution and desktop environments.
 
 **Supported Headsets**:
 - HyperX Cloud II Wireless HP vendorID
@@ -21,8 +20,9 @@ Although it was only tested on Manjaro and Kubuntu with KDE, it should also work
 - HyperX Cloud III S Wireless
 - HyperX Cloud Stinger 2 Wireless
 - HyperX Cloud Flight S
+- HyperX Cloud Alpha Wireless
 
-It should be possible to add support for other HyperX headsets.
+If your headset is not supported, feel free to open an issue.
 
 ## Installation
 
@@ -99,6 +99,7 @@ SUBSYSTEMS=="usb", ATTRS{idProduct}=="06be", ATTRS{idVendor}=="03f0", MODE="0666
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="16ea", ATTRS{idVendor}=="0951", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="16eb", ATTRS{idVendor}=="0951", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="0c9d", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="098d", ATTRS{idVendor}=="03f0", MODE="0666"
 
 KERNEL=="hidraw*", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666"
@@ -109,6 +110,7 @@ KERNEL=="hidraw*", ATTRS{idProduct}=="06be", ATTRS{idVendor}=="03f0", MODE="0666
 KERNEL=="hidraw*", ATTRS{idProduct}=="16ea", ATTRS{idVendor}=="0951", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="16eb", ATTRS{idVendor}=="0951", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="0c9d", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="098d", ATTRS{idVendor}=="03f0", MODE="0666"
 ```
 
 Once created, replug the wireless dongle.
