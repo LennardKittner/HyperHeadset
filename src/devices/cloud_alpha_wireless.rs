@@ -205,11 +205,11 @@ impl Device for CloudAlphaWireless {
                     Duration::from_secs(response[3] as u64 * 60),
                 )])
             }
-            GET_MUTE_RESPONSE_CODE | GET_MUTE_CMD_ID => {
+            SET_MUTE_CMD_ID | GET_MUTE_RESPONSE_CODE | GET_MUTE_CMD_ID => {
                 Some(vec![DeviceEvent::Muted(response[3] == 1)])
             }
             GET_PAIRING_CMD_ID => Some(vec![DeviceEvent::PairingInfo(response[3])]),
-            GET_SIDE_TONE_ON_RESPONSE_CODE | GET_SIDE_TONE_ON_CMD_ID => {
+            SET_SIDE_TONE_ON_CMD_ID | GET_SIDE_TONE_ON_RESPONSE_CODE | GET_SIDE_TONE_ON_CMD_ID => {
                 Some(vec![DeviceEvent::SideToneOn(response[3] == 1)])
             }
             SET_SIDE_TONE_VOLUME_CMD_ID | GET_SIDE_TONE_VOLUME_CMD_ID => {
