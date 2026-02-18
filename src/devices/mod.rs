@@ -602,6 +602,8 @@ pub trait Device {
         self.execute_headset_specific_functionality()?;
 
         let mut responded = false;
+        // So we do not immediately break if another response is queued
+        self.get_device_state_mut().connected = Some(true);
         for packet in packets.into_iter().flatten() {
             self.prepare_write();
             debug_println!("Write packet: {packet:?}");
