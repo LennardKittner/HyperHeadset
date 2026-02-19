@@ -1,3 +1,4 @@
+pub mod cloud_alpha_wireless;
 pub mod cloud_ii_wireless;
 pub mod cloud_ii_wireless_dts;
 pub mod cloud_iii_s_wireless;
@@ -6,60 +7,78 @@ pub mod cloud_iii_wireless;
 use crate::{
     debug_println,
     devices::{
-        cloud_ii_wireless::CloudIIWireless, cloud_ii_wireless_dts::CloudIIWirelessDTS,
-        cloud_iii_s_wireless::CloudIIISWireless, cloud_iii_wireless::CloudIIIWireless,
+        cloud_alpha_wireless::CloudAlphaWireless, cloud_ii_wireless::CloudIIWireless,
+        cloud_ii_wireless_dts::CloudIIWirelessDTS, cloud_iii_s_wireless::CloudIIISWireless,
+        cloud_iii_wireless::CloudIIIWireless,
     },
 };
-use hidapi::{HidApi, HidDevice, HidError, HidResult};
+use hidapi::{HidApi, HidDevice, HidError};
 use std::{collections::HashSet, fmt::Display, time::Duration};
 use thistermination::TerminationFull;
 
-// Possible vendor IDs [HyperX, HP]
-const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
-// All supported product IDs
-const PRODUCT_IDS: [u16; 9] = [
-    0x1718, 0x018B, 0x0D93, 0x0696, 0x0b92, 0x05B7, 0x16EA, 0x0c9d, 0x06BE,
+type DeviceFactory = fn(DeviceState) -> Box<dyn Device>;
+
+struct DeviceEntry {
+    vendor_ids: &'static [u16],
+    product_ids: &'static [u16],
+    factory: DeviceFactory,
+}
+
+const DEVICE_REGISTER: &[DeviceEntry] = &[
+    DeviceEntry {
+        vendor_ids: &cloud_ii_wireless::VENDOR_IDS,
+        product_ids: &cloud_ii_wireless::PRODUCT_IDS,
+        factory: |s| Box::new(CloudIIWireless::new_from_state(s)),
+    },
+    DeviceEntry {
+        vendor_ids: &cloud_ii_wireless_dts::VENDOR_IDS,
+        product_ids: &cloud_ii_wireless_dts::PRODUCT_IDS,
+        factory: |s| Box::new(CloudIIWirelessDTS::new_from_state(s)),
+    },
+    DeviceEntry {
+        vendor_ids: &cloud_iii_s_wireless::VENDOR_IDS,
+        product_ids: &cloud_iii_s_wireless::PRODUCT_IDS,
+        factory: |s| Box::new(CloudIIISWireless::new_from_state(s)),
+    },
+    DeviceEntry {
+        vendor_ids: &cloud_iii_wireless::VENDOR_IDS,
+        product_ids: &cloud_iii_wireless::PRODUCT_IDS,
+        factory: |s| Box::new(CloudIIIWireless::new_from_state(s)),
+    },
+    DeviceEntry {
+        vendor_ids: &cloud_alpha_wireless::VENDOR_IDS,
+        product_ids: &cloud_alpha_wireless::PRODUCT_IDS,
+        factory: |s| Box::new(CloudAlphaWireless::new_from_state(s)),
+    },
 ];
 
 const RESPONSE_BUFFER_SIZE: usize = 256;
 const RESPONSE_DELAY: Duration = Duration::from_millis(50);
 
 pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
-    let state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
+    let all_product_ids: Vec<u16> = DEVICE_REGISTER
+        .iter()
+        .flat_map(|e| e.product_ids.iter().copied())
+        .collect();
+    let all_vendor_ids: Vec<u16> = DEVICE_REGISTER
+        .iter()
+        .flat_map(|e| e.vendor_ids.iter().copied())
+        .collect();
+    let state = DeviceState::new(&all_product_ids, &all_vendor_ids)?;
     debug_println!("Found device selecting handler");
-    let name = state.hid_devices[0]
+    let name = state
+        .hid_device
         .get_product_string()?
         .ok_or(DeviceError::NoDeviceFound())?;
     println!("Connecting to {}", name);
-    let mut device: Box<dyn Device> = match (state.vendor_id, state.product_id) {
-        (v, p)
-            if cloud_ii_wireless::VENDOR_IDS.contains(&v)
-                && cloud_ii_wireless::PRODUCT_IDS.contains(&p) =>
-        {
-            Box::new(CloudIIWireless::new_from_state(state))
-        }
-        (v, p)
-            if cloud_ii_wireless_dts::VENDOR_IDS.contains(&v)
-                && cloud_ii_wireless_dts::PRODUCT_IDS.contains(&p) =>
-        {
-            Box::new(CloudIIWirelessDTS::new_from_state(state))
-        }
-        (v, p)
-            if cloud_iii_s_wireless::VENDOR_IDS.contains(&v)
-                && cloud_iii_s_wireless::PRODUCT_IDS.contains(&p) =>
-        {
-            Box::new(CloudIIISWireless::new_from_state(state))
-        }
-        (v, p)
-            if cloud_iii_wireless::VENDOR_IDS.contains(&v)
-                && cloud_iii_wireless::PRODUCT_IDS.contains(&p) =>
-        {
-            Box::new(CloudIIIWireless::new_from_state(state))
-        }
-        (_, _) => return Err(DeviceError::NoDeviceFound()),
-    };
+    let entry = DEVICE_REGISTER
+        .iter()
+        .find(|e| {
+            e.vendor_ids.contains(&state.vendor_id) && e.product_ids.contains(&state.product_id)
+        })
+        .ok_or(DeviceError::NoDeviceFound())?;
 
-    // Initialize capability flags
+    let mut device = (entry.factory)(state);
     device.init_capabilities();
 
     Ok(device)
@@ -67,7 +86,7 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
 
 #[derive(Debug)]
 pub struct DeviceState {
-    pub hid_devices: Vec<HidDevice>,
+    pub hid_device: HidDevice,
     pub product_id: u16,
     pub vendor_id: u16,
     pub device_name: Option<String>,
@@ -104,6 +123,7 @@ impl Display for DeviceState {
 impl DeviceState {
     pub fn new(product_ids: &[u16], vendor_ids: &[u16]) -> Result<Self, DeviceError> {
         let hid_api = HidApi::new()?;
+        let mut potential_devices = HashSet::new();
         debug_println!(
             "Devices: {:?}",
             hid_api
@@ -112,46 +132,66 @@ impl DeviceState {
                 .map(|d| { (d.vendor_id(), d.product_id(), d.product_string()) })
                 .collect::<Vec<(u16, u16, Option<&str>)>>()
         );
-        let mut seen_paths = HashSet::new();
-        let devices: Vec<(HidDevice, u16, u16)> = hid_api
+        let device_lookup_result = hid_api
             .device_list()
-            .filter_map(|info| {
+            .find_map(|info| {
                 if product_ids.contains(&info.product_id())
                     && vendor_ids.contains(&info.vendor_id())
-                    && seen_paths.insert(info.path().to_owned())
                 {
                     debug_println!(
-                        "Selecting: {:x}:{:x} {:?} path={:?}",
+                        "Selecting: {:x}:{:x} {:?}",
                         info.vendor_id(),
                         info.product_id(),
-                        info.product_string().clone(),
-                        info.path()
+                        info.product_string()
                     );
                     Some((
-                        hid_api.open_path(info.path()).ok()?,
+                        hid_api.open(info.vendor_id(), info.product_id()),
                         info.product_id(),
                         info.vendor_id(),
                     ))
                 } else {
+                    if let Some(name) = info.product_string() {
+                        if name.contains("HyperX") {
+                            potential_devices.insert((
+                                info.vendor_id(),
+                                info.product_id(),
+                                info.product_string(),
+                            ));
+                        }
+                    }
                     None
                 }
             })
-            .collect();
-        if devices.is_empty() {
-            return Err(DeviceError::NoDeviceFound());
-        }
-        if !devices
-            .windows(2)
-            .all(|w| w[0].1 == w[1].1 && w[0].2 == w[1].2)
-        {
-            return Err(DeviceError::TooManyDevices());
-        }
-        let device_name = devices[0].0.get_product_string()?;
-        let product_id = devices[0].1;
-        let vendor_id = devices[0].2;
-        let devices: Vec<HidDevice> = devices.into_iter().map(|d| d.0).collect();
+            .ok_or(DeviceError::NoDeviceFound());
+        let (hid_device, product_id, vendor_id) = match device_lookup_result {
+            Ok(value) => value,
+            Err(DeviceError::NoDeviceFound()) => {
+                if !potential_devices.is_empty() {
+                    let names = potential_devices
+                        .iter()
+                        .map(|e| {
+                            format!(
+                                "    vendorID: 0x{:04X} productID: 0x{:04X} name: {}",
+                                e.0,
+                                e.1,
+                                e.2.unwrap_or("Unknown")
+                            )
+                        })
+                        .collect::<Vec<String>>()
+                        .join(",\n");
+                    println!(
+                        "Found the following HyperX device{}: [\n{}\n]\nHowever, either {} not supported or the product ID is not yet known.",
+                        if potential_devices.len() > 1 { "s" } else { "" }, names, if potential_devices.len() > 1 { "they are" } else { "it is" }
+                    )
+                }
+                return Err(DeviceError::NoDeviceFound());
+            }
+            Err(e) => return Err(e),
+        };
+        let hid_device = hid_device?;
+        let device_name = hid_device.get_product_string()?;
         Ok(DeviceState {
-            hid_devices: devices,
+            hid_device,
             product_id,
             vendor_id,
             device_name,
@@ -343,8 +383,6 @@ pub enum DeviceError {
     HeadSetOff(),
     #[termination(msg("No response."))]
     NoResponse(),
-    #[termination(msg("Only a single device at a time is supported."))]
-    TooManyDevices(),
     #[termination(msg("Unknown response: {0:?} with length: {1:?}"))]
     UnknownResponse([u8; 8], usize),
 }
@@ -436,6 +474,9 @@ impl From<u8> for ChargingStatus {
 }
 
 pub trait Device {
+    fn get_response_buffer(&self) -> Vec<u8> {
+        [0u8; RESPONSE_BUFFER_SIZE].to_vec()
+    }
     fn get_charging_packet(&self) -> Option<Vec<u8>>;
     fn get_battery_packet(&self) -> Option<Vec<u8>>;
     fn set_automatic_shut_down_packet(&self, shutdown_after: Duration) -> Option<Vec<u8>>;
@@ -525,30 +566,20 @@ pub trait Device {
     fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
         Ok(())
     }
-    fn wait_for_updates(&mut self, duration: Duration) -> Vec<DeviceEvent> {
-        let res: Vec<(usize, [u8; RESPONSE_BUFFER_SIZE])> = self
-            .get_device_state()
-            .hid_devices
-            .iter()
-            .filter_map(|d| {
-                let mut buf = [0u8; RESPONSE_BUFFER_SIZE];
-                Some((
-                    d.read_timeout(&mut buf[..], duration.as_millis() as i32)
-                        .ok()?,
-                    buf,
-                ))
-            })
-            .collect();
 
-        if res.is_empty() || res.iter().all(|r| r.0 == 0) {
-            return vec![];
+    fn wait_for_updates(&mut self, duration: Duration) -> Option<Vec<DeviceEvent>> {
+        let mut buf = self.get_response_buffer();
+        let res = self
+            .get_device_state()
+            .hid_device
+            .read_timeout(&mut buf[..], duration.as_millis() as i32)
+            .ok()?;
+
+        if res == 0 {
+            return None;
         }
 
-        res.into_iter()
-            .map(|r| self.get_event_from_device_response(&r.1))
-            .flatten()
-            .flatten()
-            .collect()
+        self.get_event_from_device_response(&buf)
     }
 
     /// WORKAROUND(firmware-no-response): Query connected status and update device state.
@@ -557,11 +588,12 @@ pub trait Device {
     fn probe_connected_status(&mut self) {
         if let Some(packet) = self.get_wireless_connected_status_packet() {
             self.prepare_write();
-            let _ = self.get_device_state().hid_devices[0].write(&packet);
+            let _ = self.get_device_state().hid_device.write(&packet);
             std::thread::sleep(RESPONSE_DELAY);
-            let events = self.wait_for_updates(Duration::from_millis(500));
-            for event in events {
-                self.get_device_state_mut().update_self_with_event(&event);
+            if let Some(events) = self.wait_for_updates(Duration::from_millis(500)) {
+                for event in events {
+                    self.get_device_state_mut().update_self_with_event(&event);
+                }
             }
         }
     }
@@ -588,23 +620,18 @@ pub trait Device {
         self.execute_headset_specific_functionality()?;
 
         let mut responded = false;
+        // So we do not immediately break if another response is queued
+        self.get_device_state_mut().connected = Some(true);
         for packet in packets.into_iter().flatten() {
             self.prepare_write();
             debug_println!("Write packet: {packet:?}");
-            let results: Vec<HidResult<usize>> = self
-                .get_device_state()
-                .hid_devices
-                .iter()
-                .map(|d| d.write(&packet))
-                .collect();
-            debug_println!("{:?}", results);
+            self.get_device_state().hid_device.write(&packet)?;
             std::thread::sleep(RESPONSE_DELAY);
-            let events = self.wait_for_updates(Duration::from_secs(1));
-            if !events.is_empty() {
+            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+                for event in events {
+                    self.get_device_state_mut().update_self_with_event(&event);
+                }
                 responded = true;
-            }
-            for event in events {
-                self.get_device_state_mut().update_self_with_event(&event);
             }
             if !matches!(self.get_device_state().connected, Some(true)) {
                 break;
@@ -622,24 +649,20 @@ pub trait Device {
     /// Only the battery level is actively queried because it is not communicated by the device on its own
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
         if self.allow_passive_refresh() {
-            let events = self.wait_for_updates(Duration::from_secs(1));
-            for event in events {
-                self.get_device_state_mut().update_self_with_event(&event);
+            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+                for event in events {
+                    self.get_device_state_mut().update_self_with_event(&event);
+                }
             }
         }
         if let Some(batter_packet) = self.get_battery_packet() {
             self.prepare_write();
-            let results: Vec<HidResult<usize>> = self
-                .get_device_state()
-                .hid_devices
-                .iter()
-                .map(|d| d.write(&batter_packet))
-                .collect();
-            debug_println!("{:?}", results);
+            self.get_device_state().hid_device.write(&batter_packet)?;
             std::thread::sleep(RESPONSE_DELAY);
-            let events = self.wait_for_updates(Duration::from_secs(1));
-            for event in events {
-                self.get_device_state_mut().update_self_with_event(&event);
+            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+                for event in events {
+                    self.get_device_state_mut().update_self_with_event(&event);
+                }
             }
         }
 

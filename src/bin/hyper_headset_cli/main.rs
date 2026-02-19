@@ -326,7 +326,7 @@ fn main() {
             device.set_automatic_shut_down_packet(Duration::from_secs(delay * 60u64))
         {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                 eprintln!("Failed to set automatic shutdown with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -339,7 +339,7 @@ fn main() {
     if let Some(mute) = matches.get_one::<bool>("mute") {
         if let Some(packet) = device.set_mute_packet(*mute) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                 eprintln!("Failed to mute with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -352,7 +352,7 @@ fn main() {
     if let Some(enable) = matches.get_one::<bool>("enable-side-tone") {
         if let Some(packet) = device.set_side_tone_packet(*enable) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                 eprintln!("Failed to enable side tone with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -365,7 +365,7 @@ fn main() {
     if let Some(volume) = matches.get_one::<u8>("side-tone-volume") {
         if let Some(packet) = device.set_side_tone_volume_packet(*volume) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                 eprintln!("Failed to set side tone volume with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -378,7 +378,7 @@ fn main() {
     if let Some(enable) = matches.get_one::<bool>("enable-voice-prompt") {
         if let Some(packet) = device.set_voice_prompt_packet(*enable) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                 eprintln!("Failed to enable voice prompt with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -391,7 +391,7 @@ fn main() {
     if let Some(surround_sound) = matches.get_one::<bool>("surround-sound") {
         if let Some(packet) = device.set_surround_sound_packet(*surround_sound) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                 eprintln!("Failed to set surround sound with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -405,7 +405,7 @@ fn main() {
     if let Some(mute_playback) = matches.get_one::<bool>("mute-playback") {
         if let Some(packet) = device.set_silent_mode_packet(*mute_playback) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                 eprintln!("Failed to mute playback with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -470,7 +470,7 @@ fn main() {
         if let Some(packets) = device.set_equalizer_bands_packets(pairs) {
             for packet in packets {
                 device.prepare_write();
-                if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+                if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                     eprintln!("Failed to set equalizer with error: {:?}", err);
                     std::process::exit(1);
                 }
@@ -483,6 +483,14 @@ fn main() {
     }
 
     std::thread::sleep(Duration::from_secs_f64(0.5));
+
+    // setting an option may cause a response form the headset
+    if device.allow_passive_refresh() {
+        if let Err(error) = device.passive_refresh_state() {
+            eprintln!("{error}");
+            std::process::exit(1);
+        };
+    }
 
     if let Err(error) = device.active_refresh_state() {
         eprintln!("{error}");

@@ -43,7 +43,7 @@ fn apply_and_sync(
             let mut ok = true;
             for packet in packets {
                 device.prepare_write();
-                if let Err(err) = device.get_device_state().hid_devices[0].write(&packet) {
+                if let Err(err) = device.get_device_state().hid_device.write(&packet) {
                     eprintln!("Failed to apply EQ preset '{}': {:?}", name, err);
                     ok = false;
                     break;

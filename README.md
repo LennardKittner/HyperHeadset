@@ -1,4 +1,7 @@
 # HyperHeadset
+[![AUR Version](https://img.shields.io/aur/version/hyperheadset-git)](https://aur.archlinux.org/packages/hyperheadset-git)
+[![GitHub Release](https://img.shields.io/github/v/release/LennardKittner/HyperHeadset)](https://github.com/LennardKittner/HyperHeadset/releases)
+[![Sponsor](https://img.shields.io/badge/-Sponsor-green?style=flat&logo=github)](https://github.com/sponsors/LennardKittner)
 
 A CLI and tray application for monitoring and managing HyperX headsets.
 
@@ -10,7 +13,6 @@ This project is not affiliated with, endorsed by, or associated with HyperX or i
 
 The CLI application is compatible with both Linux and MacOS operating systems.
 However, the tray application is only functional on Linux.
-Although it was only tested on Manjaro and Kubuntu with KDE, it should also work on other distribution and desktop environments.
 
 **Supported Headsets**:
 
@@ -20,10 +22,48 @@ Although it was only tested on Manjaro and Kubuntu with KDE, it should also work
 - HyperX Cloud III S Wireless
 - HyperX Cloud Stinger 2 Wireless
 - HyperX Cloud Flight S
+- HyperX Cloud Alpha Wireless
 
-It should be possible to add support for other HyperX headsets.
+If your headset is not supported, feel free to open an issue.
 
-## Prerequisites
+## Installation
+
+### Arch Linux (AUR)
+No manual setup required (dependencies and udev rules are handled automatically):
+```bash
+yay -S hyperheadset-git
+```
+
+### Prebuilt Binary (Linux/MacOS)
+
+Download from [GitHub releases](https://github.com/LennardKittner/HyperHeadset/releases).
+
+⚠️ Linux users must manually install the udev rule (see Prerequisites below).
+
+## Build from Source
+
+This project uses git submodules, so before building you have to initialize them via:
+`git submodule update --init --recursive`
+
+To only build the CLI app on MacOS, use:
+`cargo build --release --bin hyper_headset_cli`
+
+To build both applications on Linux, use:
+`cargo build --release`
+
+See prerequisites below for installing dependencies and adding the udev rule.
+
+### Build with features
+
+If your headset supports EQ (e.g. Cloud III S Wireless), add `--features eq-editor` for the full EQ experience (tray presets + TUI editor):
+
+```sh
+cargo build --release --features eq-editor
+```
+
+Use `--features eq-support` instead if you only want tray EQ presets without the TUI editor.
+
+## Prerequisites (Binary Releases / Building from Source Only)
 
 ### Hidraw
 
@@ -69,7 +109,11 @@ SUBSYSTEMS=="usb", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="05b7", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="06be", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="16ea", ATTRS{idVendor}=="0951", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="16eb", ATTRS{idVendor}=="0951", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="0c9d", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="098d", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="1765", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="1743", ATTRS{idVendor}=="03f0", MODE="0666"
 
 KERNEL=="hidraw*", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666"
@@ -78,54 +122,19 @@ KERNEL=="hidraw*", ATTRS{idProduct}=="1718", ATTRS{idVendor}=="0951", MODE="0666
 KERNEL=="hidraw*", ATTRS{idProduct}=="05b7", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="06be", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="16ea", ATTRS{idVendor}=="0951", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="16eb", ATTRS{idVendor}=="0951", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="0c9d", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="098d", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="1765", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="1743", ATTRS{idVendor}=="03f0", MODE="0666"
 ```
 
 Once created, replug the wireless dongle.
 
-## Building
-
-### Initialize submodules
-
-This project uses git submodules, so before building you have to initialize them via:
-
-```sh
-git submodule update --init --recursive
-```
-
----
-
-### Build for your platform
-
-To only build the CLI app on MacOS:
-
-```sh
-cargo build --release --bin hyper_headset_cli
-```
-
-To build both applications on Linux:
-
-```sh
-cargo build --release
-```
-
-### Build with features
-
-If your headset supports EQ (Cloud III S Wireless), add `--features eq-editor` for the full EQ experience (tray presets + TUI editor):
-
-```sh
-cargo build --release --features eq-editor
-```
-
-Use `--features eq-support` instead if you only want tray EQ presets without the TUI editor.
-
-You can also download a compiled version from [releases](https://github.com/LennardKittner/HyperHeadset/releases).
-
-`cargo build --release` **will fail on MacOS** because cargo will try to build the tray application, but some dependencies are exclusive to Linux.
-
 ## Usage
 
 ```
+hyper_headset_cli --help
 A CLI application for monitoring and managing HyperX headsets.
 
 Usage: hyper_headset_cli [OPTIONS]
@@ -173,7 +182,7 @@ Help only lists commands supported by this headset.
 `hyper_headset_cli` without any arguments will print all available headset information.
 
 ```
-hyper_headset  --help
+hyper_headset --help
 A CLI tray application for monitoring HyperX headsets.
 
 Usage: hyper_headset [OPTIONS]

@@ -854,7 +854,7 @@ impl EqEditor {
             {
                 for packet in packets {
                     dev.prepare_write();
-                    let _ = dev.get_device_state().hid_devices[0].write(&packet);
+                    let _ = dev.get_device_state().hid_device.write(&packet);
                 }
             }
         }
@@ -878,7 +878,7 @@ impl EqEditor {
             if let Some(packets) = dev.set_equalizer_bands_packets(&pairs) {
                 for packet in packets {
                     dev.prepare_write();
-                    let _ = dev.get_device_state().hid_devices[0].write(&packet);
+                    let _ = dev.get_device_state().hid_device.write(&packet);
                     std::thread::sleep(std::time::Duration::from_millis(3));
                 }
             }
