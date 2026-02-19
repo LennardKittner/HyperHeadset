@@ -22,6 +22,8 @@ const BASE_PACKET2: [u8; 20] = {
     packet
 };
 
+const RESPONSE_BUFFER_SIZE: usize = 256;
+
 const GET_CHARGING_CMD_ID: u8 = 3;
 const GET_MIC_CONNECTED_CMD_ID: u8 = 8;
 const GET_BATTERY_CMD_ID: u8 = 2;
@@ -56,6 +58,12 @@ impl CloudIIWirelessDTS {
 }
 
 impl Device for CloudIIWirelessDTS {
+    fn get_response_buffer(&self) -> Vec<u8> {
+        let mut tmp = [0u8; RESPONSE_BUFFER_SIZE].to_vec();
+        tmp[0] = 33;
+        tmp
+    }
+
     fn get_charging_packet(&self) -> Option<Vec<u8>> {
         let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = GET_CHARGING_CMD_ID;
@@ -165,9 +173,11 @@ impl Device for CloudIIWirelessDTS {
     }
 
     fn get_wireless_connected_status_packet(&self) -> Option<Vec<u8>> {
-        let mut tmp = BASE_PACKET.to_vec();
-        tmp[3] = GET_WIRELESS_STATUS_CMD_ID;
-        Some(tmp)
+        // works but causes state to reset e.g. unmutes the headset
+        // let mut tmp = BASE_PACKET.to_vec();
+        // tmp[3] = GET_WIRELESS_STATUS_CMD_ID;
+        // Some(tmp)
+        None
     }
 
     fn get_sirk_packet(&self) -> Option<Vec<u8>> {
