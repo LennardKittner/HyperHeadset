@@ -211,7 +211,7 @@ impl Device for CloudIIWirelessDTS {
                 Some(vec![DeviceEvent::Muted(status == 1)])
             }
             (_, GET_PAIRING_CMD_ID, status, _) => Some(vec![DeviceEvent::PairingInfo(status)]),
-            (_, SET_SIDE_TONE_ON_CMD_ID, status, _) => {
+            (_, GET_SIDE_TONE_ON_CMD_ID, status, _) | (_, SET_SIDE_TONE_ON_CMD_ID, status, _) => {
                 Some(vec![DeviceEvent::SideToneOn(status == 1)])
             }
             (_, GET_SIDE_TONE_VOLUME_CMD_ID, status, _) => {
