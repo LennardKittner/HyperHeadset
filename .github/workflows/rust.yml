@@ -40,9 +40,17 @@ jobs:
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       steps:
         - uses: actions/checkout@v3
- 
+          with:
+            fetch-depth: 0  # needed to get full commit history for rev-list
+
         - name: Clone AUR repo
           run: git clone https://aur.archlinux.org/hyperheadset-git.git aur-pkg
+
+        - name: Compute and update pkgver
+          run: |
+            PKGVER=$(git describe --long --abbrev=7 | sed 's/\([^-]*-g\)/r\1/;s/-/./g')
+            sed -i "s/^pkgver=.*/pkgver=$PKGVER/" aur-pkg/PKGBUILD
+            sed -i "s/^pkgrel=.*/pkgrel=1/" aur-pkg/PKGBUILD
 
         - name: Publish to AUR
           uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
