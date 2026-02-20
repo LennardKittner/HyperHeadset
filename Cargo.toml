@@ -1,6 +1,6 @@
 [package]
 name = "hyper_headset"
-version = "1.4.1"
+version = "1.4.2"
 edition = "2021"
 authors = ["Lennard Kittner"]
 description = "A CLI and tray application for monitoring and managing HyperX headsets."
