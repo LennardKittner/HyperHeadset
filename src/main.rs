@@ -25,7 +25,10 @@ fn main() {
         let mut device = loop {
             match connect_compatible_device() {
                 Ok(d) => break d,
-                Err(e) => eprintln!("Connecting failed with error: {e}"),
+                Err(e) => {
+                    tray_handler.clear_state();
+                    eprintln!("Connecting failed with error: {e}")
+                }
             }
             std::thread::sleep(Duration::from_secs(1));
         };

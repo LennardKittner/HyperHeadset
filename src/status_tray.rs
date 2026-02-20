@@ -5,7 +5,7 @@ pub struct TrayHandler {
     handle: Handle<StatusTray>,
 }
 
-const NO_COMPATIBLE_DEVICE: &str = "No compatible device found.\nIs the dongle plugged in?\nIf you are using Linux did you add the Udev rules?";
+const NO_COMPATIBLE_DEVICE: &str = "No compatible device found.\nIs the dongle plugged in?\nIf you are using Linux did you\nadd the Udev rules?";
 
 impl TrayHandler {
     pub fn new(tray: StatusTray) -> Self {
@@ -30,6 +30,13 @@ impl TrayHandler {
         self.handle.update(|tray| {
             tray.message = message;
             tray.device_name = name;
+        })
+    }
+
+    pub fn clear_state(&self) {
+        self.handle.update(|tray| {
+            tray.message = NO_COMPATIBLE_DEVICE.to_string();
+            tray.device_name = None;
         })
     }
 }
