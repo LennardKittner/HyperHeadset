@@ -48,11 +48,14 @@ pub struct CloudIIWirelessDTS {
 
 impl CloudIIWirelessDTS {
     pub fn new_from_state(state: DeviceState) -> Self {
+        let mut state = state;
+        state.connected = Some(true);
         CloudIIWirelessDTS { state }
     }
 
     pub fn new() -> Result<Self, DeviceError> {
-        let state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
+        let mut state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
+        state.connected = Some(true);
         Ok(CloudIIWirelessDTS { state })
     }
 }
