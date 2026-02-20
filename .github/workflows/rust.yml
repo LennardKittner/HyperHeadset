@@ -33,3 +33,26 @@ jobs:
         run: cargo build --verbose
       - name: test
         run:  cargo test
+
+  publish-aur:
+      runs-on: ubuntu-latest
+      needs: [build-linux, build-macos]
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      steps:
+        - uses: actions/checkout@v3
+ 
+        - name: Clone AUR repo
+          run: git clone https://aur.archlinux.org/hyperheadset-git.git aur-pkg
+
+        - name: Publish to AUR
+          uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
+
+          with:
+            pkgname: hyperheadset-git
+            pkgbuild: ./aur-pkg/PKGBUILD 
+            commit_username: ${{ secrets.AUR_USERNAME }}
+            commit_email: ${{ secrets.AUR_EMAIL }}
+            ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+            commit_message: Automatic update to latest
+            updpkgsums: false
+            allow_empty_commits: false
