@@ -148,7 +148,7 @@ Options:
       --mute_playback <mute_playback>
           Mute or unmute playback. [possible values: true, false]
       --activate_noise_gate <activate_noise_gate>
-          Activates nose gate. [possible values: true, false]
+          Activates noise gate. [possible values: true, false]
   -h, --help
           Print help
   -V, --version
