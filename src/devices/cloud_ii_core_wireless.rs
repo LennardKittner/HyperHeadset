@@ -6,7 +6,7 @@ use std::time::Duration;
 
 const HP: u16 = 0x03F0;
 pub const VENDOR_IDS: [u16; 1] = [HP];
-pub const PRODUCT_IDS: [u16; 1] = [0x0aa0];
+pub const PRODUCT_IDS: [u16; 1] = [0x069F];
 
 const BASE_PACKET: [u8; 64] = {
     let mut packet = [0; 64];
