@@ -3,6 +3,8 @@ use std::time::Duration;
 use clap::{Arg, Command};
 use hyper_headset::devices::connect_compatible_device;
 
+const SHOW_ALL_OPTIONS: bool = false;
+
 fn main() {
     let mut device = match connect_compatible_device() {
         Ok(device) => device,
@@ -24,7 +26,8 @@ fn main() {
                 .help(
                     "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
                 )
-                    .hide(!device.can_set_automatic_shutdown())
+                    .hide(!SHOW_ALL_OPTIONS
+                    && !device.can_set_automatic_shutdown())
                 .value_parser(clap::value_parser!(u8)),
         )
         .arg(
@@ -32,7 +35,8 @@ fn main() {
                 .long("mute")
                 .required(false)
                 .help("Mute or unmute the headset.")
-                .hide(!device.can_set_mute())
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device.can_set_mute())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -40,7 +44,8 @@ fn main() {
                 .long("enable_side_tone")
                 .required(false)
                 .help("Enable or disable side tone.")
-                .hide(!device.can_set_side_tone())
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device.can_set_side_tone())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -48,7 +53,8 @@ fn main() {
                 .long("side_tone_volume")
                 .required(false)
                 .help("Set the side tone volume.")
-                .hide(!device.can_set_side_tone_volume())
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device.can_set_side_tone_volume())
                 .value_parser(clap::value_parser!(u8)),
         )
         .arg(
@@ -56,7 +62,8 @@ fn main() {
                 .long("enable_voice_prompt")
                 .required(false)
                 .help("Enable voice prompt. This may not be supported on your device.")
-                .hide(!device.can_set_voice_prompt())
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device.can_set_voice_prompt())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -64,7 +71,8 @@ fn main() {
                 .long("surround_sound")
                 .required(false)
                 .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
-                .hide(!device.can_set_surround_sound())
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device.can_set_surround_sound())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -72,7 +80,17 @@ fn main() {
                 .long("mute_playback")
                 .required(false)
                 .help("Mute or unmute playback.")
-                .hide(!device.can_set_silent_mode())
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device.can_set_silent_mode())
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("activate_noise_gate")
+                .long("activate_noise_gate")
+                .required(false)
+                .help("Activates nose gate.")
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device.can_set_silent_mode())
                 .value_parser(clap::value_parser!(bool)),
         )
         .get_matches();
@@ -168,6 +186,19 @@ fn main() {
             }
         } else {
             eprintln!("ERROR: Playback mute control is not supported on this device");
+            std::process::exit(1);
+        }
+    }
+
+    if let Some(activate) = matches.get_one::<bool>("activate_noise_gate") {
+        if let Some(packet) = device.set_noise_gate_packet(*activate) {
+            device.prepare_write();
+            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+                eprintln!("Failed to activate noise gate with error: {:?}", err);
+                std::process::exit(1);
+            }
+        } else {
+            eprintln!("ERROR: Activating noise gate is not supported on this device");
             std::process::exit(1);
         }
     }
