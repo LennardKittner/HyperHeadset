@@ -17,6 +17,7 @@ const BASE_PACKET: [u8; 64] = {
 const GET_CHARGING_CMD_ID: u8 = 138;
 const CHARGING_RESPONSE_ID: u8 = 12;
 const GET_MIC_CONNECTED_CMD_ID: u8 = 140;
+const MIC_CONNECTED_RESPONSE_ID: u8 = 7;
 const GET_BATTERY_CMD_ID: u8 = 137;
 const BATTERY_RESPONSE_ID: u8 = 13;
 const GET_AUTO_SHUTDOWN_CMD_ID: u8 = 133;
@@ -201,7 +202,8 @@ impl Device for CloudIICoreWireless {
             (GET_CHARGING_CMD_ID, status, _, _) | (CHARGING_RESPONSE_ID, status, _, _) => {
                 Some(vec![DeviceEvent::Charging(ChargingStatus::from(status))])
             }
-            (GET_MIC_CONNECTED_CMD_ID, status, _, _) => {
+            (GET_MIC_CONNECTED_CMD_ID, status, _, _)
+            | (MIC_CONNECTED_RESPONSE_ID, status, _, _) => {
                 Some(vec![DeviceEvent::MicConnected(status == 1)])
             }
             (GET_BATTERY_CMD_ID, b2, b3, level) | (BATTERY_RESPONSE_ID, b2, b3, level) => {
