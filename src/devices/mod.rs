@@ -563,7 +563,7 @@ pub trait Device {
         self.set_equalizer_band_packet(0, 0.0).is_some()
     }
     fn can_set_noise_gate(&self) -> bool {
-        self.set_noise_gate_packet(true).is_none()
+        self.set_noise_gate_packet(true).is_some()
     }
 
     // Initialize capability flags in device state
