@@ -17,6 +17,7 @@ However, the tray application is only functional on Linux.
 **Supported Headsets**:
 - HyperX Cloud II Wireless HP vendorID
 - HyperX Cloud II Wireless HyperX vendorID
+- HyperX Cloud II Core Wireless
 - HyperX Cloud III Wireless
 - HyperX Cloud III S Wireless
 - HyperX Cloud Stinger 2 Wireless
@@ -103,6 +104,7 @@ SUBSYSTEMS=="usb", ATTRS{idProduct}=="0c9d", ATTRS{idVendor}=="03f0", MODE="0666
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="098d", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="1765", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="1743", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="0aa0", ATTRS{idVendor}=="03f0", MODE="0666"
 
 KERNEL=="hidraw*", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666"
@@ -116,6 +118,7 @@ KERNEL=="hidraw*", ATTRS{idProduct}=="0c9d", ATTRS{idVendor}=="03f0", MODE="0666
 KERNEL=="hidraw*", ATTRS{idProduct}=="098d", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="1765", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="1743", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="0aa0", ATTRS{idVendor}=="03f0", MODE="0666"
 ```
 
 Once created, replug the wireless dongle.

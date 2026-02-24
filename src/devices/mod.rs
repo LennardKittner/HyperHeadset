@@ -1,4 +1,5 @@
 pub mod cloud_alpha_wireless;
+pub mod cloud_ii_core_wireless;
 pub mod cloud_ii_wireless;
 pub mod cloud_ii_wireless_dts;
 pub mod cloud_iii_s_wireless;
@@ -7,9 +8,9 @@ pub mod cloud_iii_wireless;
 use crate::{
     debug_println,
     devices::{
-        cloud_alpha_wireless::CloudAlphaWireless, cloud_ii_wireless::CloudIIWireless,
-        cloud_ii_wireless_dts::CloudIIWirelessDTS, cloud_iii_s_wireless::CloudIIISWireless,
-        cloud_iii_wireless::CloudIIIWireless,
+        cloud_alpha_wireless::CloudAlphaWireless, cloud_ii_core_wireless::CloudIICoreWireless,
+        cloud_ii_wireless::CloudIIWireless, cloud_ii_wireless_dts::CloudIIWirelessDTS,
+        cloud_iii_s_wireless::CloudIIISWireless, cloud_iii_wireless::CloudIIIWireless,
     },
 };
 use hidapi::{HidApi, HidDevice, HidError};
@@ -49,6 +50,11 @@ const DEVICE_REGISTER: &[DeviceEntry] = &[
         vendor_ids: &cloud_alpha_wireless::VENDOR_IDS,
         product_ids: &cloud_alpha_wireless::PRODUCT_IDS,
         factory: |s| Box::new(CloudAlphaWireless::new_from_state(s)),
+    },
+    DeviceEntry {
+        vendor_ids: &cloud_ii_core_wireless::VENDOR_IDS,
+        product_ids: &cloud_ii_core_wireless::PRODUCT_IDS,
+        factory: |s| Box::new(CloudIICoreWireless::new_from_state(s)),
     },
 ];
 
@@ -103,6 +109,7 @@ pub struct DeviceState {
     pub voice_prompt_on: Option<bool>,
     pub connected: Option<bool>,
     pub silent: Option<bool>,
+    pub noise_gate_active: Option<bool>,
     // Capability flags - set once during device initialization
     pub can_set_mute: bool,
     pub can_set_surround_sound: bool,
@@ -112,6 +119,7 @@ pub struct DeviceState {
     pub can_set_voice_prompt: bool,
     pub can_set_silent_mode: bool,
     pub can_set_equalizer: bool,
+    pub can_set_noise_gate: bool,
 }
 
 impl Display for DeviceState {
@@ -208,6 +216,7 @@ impl DeviceState {
             voice_prompt_on: None,
             connected: None,
             silent: None,
+            noise_gate_active: None,
             // Capability flags - will be set by init_capabilities()
             can_set_mute: false,
             can_set_surround_sound: false,
@@ -217,6 +226,7 @@ impl DeviceState {
             can_set_voice_prompt: false,
             can_set_silent_mode: false,
             can_set_equalizer: false,
+            can_set_noise_gate: false,
         })
     }
 
@@ -290,16 +300,22 @@ impl DeviceState {
                 !self.can_set_voice_prompt,
             ),
             (
-                "Connected:",
-                self.connected.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            (
                 "Playback muted:",
                 self.silent.map(|c| c.to_string()),
                 "",
                 !self.can_set_silent_mode,
+            ),
+            (
+                "Noise gate active:",
+                self.noise_gate_active.map(|c| c.to_string()),
+                "",
+                !self.can_set_noise_gate,
+            ),
+            (
+                "Connected:",
+                self.connected.map(|c| c.to_string()),
+                "",
+                false,
             ),
         ]
     }
@@ -351,8 +367,9 @@ impl DeviceState {
             DeviceEvent::WirelessConnected(connected) => self.connected = Some(*connected),
             DeviceEvent::Silent(silent) => self.silent = Some(*silent),
             DeviceEvent::RequireSIRKReset(reset) => {
-                println!("requested SIRK reset {reset}")
+                debug_println!("requested SIRK reset {reset}");
             }
+            DeviceEvent::NoiseGateActive(on) => self.noise_gate_active = Some(*on),
         };
     }
 
@@ -370,6 +387,7 @@ impl DeviceState {
         self.voice_prompt_on = None;
         self.connected = None;
         self.silent = None;
+        self.noise_gate_active = None;
     }
 }
 
@@ -403,6 +421,7 @@ pub enum DeviceEvent {
     SurroundSound(bool),
     Silent(bool),
     RequireSIRKReset(bool),
+    NoiseGateActive(bool),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -504,6 +523,12 @@ pub trait Device {
     fn set_equalizer_band_packet(&self, _band_index: u8, _db_value: f32) -> Option<Vec<u8>> {
         None
     }
+    fn get_noise_gate_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn set_noise_gate_packet(&self, _enable: bool) -> Option<Vec<u8>> {
+        None
+    }
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
     fn get_device_state(&self) -> &DeviceState;
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
@@ -537,6 +562,9 @@ pub trait Device {
     fn can_set_equalizer(&self) -> bool {
         self.set_equalizer_band_packet(0, 0.0).is_some()
     }
+    fn can_set_noise_gate(&self) -> bool {
+        self.set_noise_gate_packet(true).is_none()
+    }
 
     // Initialize capability flags in device state
     fn init_capabilities(&mut self) {
@@ -549,6 +577,7 @@ pub trait Device {
         let can_set_voice_prompt = self.can_set_voice_prompt();
         let can_set_silent_mode = self.can_set_silent_mode();
         let can_set_equalizer = self.can_set_equalizer();
+        let can_set_noise_gate = self.can_set_noise_gate();
 
         // Now set them in device state
         let state = self.get_device_state_mut();
@@ -560,6 +589,7 @@ pub trait Device {
         state.can_set_voice_prompt = can_set_voice_prompt;
         state.can_set_silent_mode = can_set_silent_mode;
         state.can_set_equalizer = can_set_equalizer;
+        state.can_set_noise_gate = can_set_noise_gate;
     }
 
     fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
@@ -597,6 +627,7 @@ pub trait Device {
             self.get_voice_prompt_packet(),
             self.get_sirk_packet(),
             self.get_silent_mode_packet(),
+            self.get_noise_gate_packet(),
         ];
 
         self.execute_headset_specific_functionality()?;
