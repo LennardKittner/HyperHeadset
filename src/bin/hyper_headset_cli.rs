@@ -88,7 +88,7 @@ fn main() {
             Arg::new("activate_noise_gate")
                 .long("activate_noise_gate")
                 .required(false)
-                .help("Activates nose gate.")
+                .help("Activates noise gate.")
                 .hide(!SHOW_ALL_OPTIONS
                     && !device.can_set_silent_mode())
                 .value_parser(clap::value_parser!(bool)),
