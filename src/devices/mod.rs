@@ -647,6 +647,7 @@ pub trait Device {
             if !matches!(self.get_device_state().connected, Some(true)) {
                 break;
             }
+            std::thread::sleep(Duration::from_secs(4));
         }
 
         if responded {
