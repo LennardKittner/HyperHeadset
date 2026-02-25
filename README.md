@@ -160,19 +160,32 @@ Help only lists commands supported by this headset.
 
 ```
 hyper_headset --help
-A CLI tray application for monitoring HyperX headsets.
+A tray application for monitoring HyperX headsets.
 
 Usage: hyper_headset [OPTIONS]
 
 Options:
-      --refresh_interval <refresh_interval>  Set the refresh interval (in seconds)
-  -h, --help                                 Print help
-  -V, --version                              Print version
+      --refresh_interval <refresh_interval>
+          Set the refresh interval (in seconds) [default: 3]
+      --press_mute_key_on_headset_mute <press_mute_key_on_headset_mute>
+          The app will simulate pressing the microphone key whoever the headsets is muted or unmuted. [default: true] [possible values: true, false]
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 ```
 
 `hyper_headset` without any arguments will start the tray application with a 3s refresh interval.
 Once it's open, hover over the headset icon in the system tray or right-click to view details such as the battery level.
 You can also exit via the right-clock menu.
+By default, the tray app sends a MicMute key press whenever the headset is muted or unmuted.
+This allows applications such as Discord to react when the hardware mute button on the headset is pressed.
+
+To set this up, start the tray app, open Discord, and create a new keybind via **User Settings** -> **Keybinds** -> **Add a Keybind**.
+For the action, select *Toggle Mute*, then click *Record Keybind* and press the headset's mute button while recording.
+
+Discord should now automatically mute and unmute when the headset does.
+Because the action only toggles Discord's state, you may need to synchronize it once by manually muting or unmuting Discord.
 
 ## Contributing / TODOs
 
