@@ -17,6 +17,8 @@ use hidapi::{HidApi, HidDevice, HidError};
 use std::{collections::HashSet, fmt::Display, time::Duration};
 use thistermination::TerminationFull;
 
+const PASSIVE_REFRESH_TIME_OUT: Duration = Duration::from_secs(2);
+
 type DeviceFactory = fn(DeviceState) -> Box<dyn Device>;
 
 struct DeviceEntry {
@@ -660,7 +662,7 @@ pub trait Device {
     /// Only the battery level is actively queried because it is not communicated by the device on its own
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
         if self.allow_passive_refresh() {
-            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+            if let Some(events) = self.wait_for_updates(PASSIVE_REFRESH_TIME_OUT) {
                 for event in events {
                     self.get_device_state_mut().update_self_with_event(&event);
                 }
