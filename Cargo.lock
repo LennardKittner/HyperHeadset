@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "hyper_headset"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "clap 4.5.58",
  "enigo",
