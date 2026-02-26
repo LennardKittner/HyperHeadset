@@ -20,10 +20,10 @@ fn main() {
                 .value_parser(clap::value_parser!(u64)),
         )
         .arg(
-            Arg::new("press_mute_key_on_headset_mute")
-                .long("press_mute_key_on_headset_mute")
+            Arg::new("press_mute_key")
+                .long("press_mute_key")
                 .required(false)
-                .help("The app will simulate pressing the microphone key whoever the headsets is muted or unmuted.")
+                .help("The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted.")
                 .default_value("true")
                 .value_parser(clap::value_parser!(bool)),
         )
@@ -31,9 +31,7 @@ fn main() {
 
     let mut enigo = Enigo::new(&Settings::default()).unwrap();
     let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
-    let press_mute_key = *matches
-        .get_one::<bool>("press_mute_key_on_headset_mute")
-        .unwrap_or(&true);
+    let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
     let refresh_interval = Duration::from_secs(refresh_interval);
     let tray_handler = TrayHandler::new(StatusTray::new());
     loop {
