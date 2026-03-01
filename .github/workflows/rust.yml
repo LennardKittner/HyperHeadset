@@ -48,7 +48,7 @@ jobs:
 
         - name: Compute and update pkgver
           run: |
-            PKGVER=$(git describe --long --abbrev=7 | sed 's/\([^-]*-g\)/r\1/;s/-/./g')
+            PKGVER=$(git describe --long --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g')
             sed -i "s/^pkgver=.*/pkgver=$PKGVER/" aur-pkg/PKGBUILD
             sed -i "s/^pkgrel=.*/pkgrel=1/" aur-pkg/PKGBUILD
 
