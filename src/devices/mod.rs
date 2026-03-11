@@ -4,6 +4,7 @@ pub mod cloud_ii_wireless;
 pub mod cloud_ii_wireless_dts;
 pub mod cloud_iii_s_wireless;
 pub mod cloud_iii_wireless;
+pub mod cloud_jet_wireless;
 
 use crate::{
     debug_println,
@@ -11,6 +12,7 @@ use crate::{
         cloud_alpha_wireless::CloudAlphaWireless, cloud_ii_core_wireless::CloudIICoreWireless,
         cloud_ii_wireless::CloudIIWireless, cloud_ii_wireless_dts::CloudIIWirelessDTS,
         cloud_iii_s_wireless::CloudIIISWireless, cloud_iii_wireless::CloudIIIWireless,
+        cloud_jet_wireless::CloudJetWireless,
     },
 };
 use hidapi::{HidApi, HidDevice, HidError};
@@ -57,6 +59,11 @@ const DEVICE_REGISTER: &[DeviceEntry] = &[
         vendor_ids: &cloud_ii_core_wireless::VENDOR_IDS,
         product_ids: &cloud_ii_core_wireless::PRODUCT_IDS,
         factory: |s| Box::new(CloudIICoreWireless::new_from_state(s)),
+    },
+    DeviceEntry {
+        vendor_ids: &cloud_jet_wireless::VENDOR_IDS,
+        product_ids: &cloud_jet_wireless::PRODUCT_IDS,
+        factory: |s| Box::new(CloudJetWireless::new_from_state(s)),
     },
 ];
 
