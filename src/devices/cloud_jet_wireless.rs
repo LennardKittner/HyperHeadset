@@ -1,6 +1,6 @@
 use crate::{
     debug_println,
-    devices::{Device, DeviceError, DeviceEvent, DeviceState},
+    devices::{Device, DeviceEvent, DeviceState},
 };
 use std::time::Duration;
 
@@ -23,12 +23,6 @@ impl CloudJetWireless {
         let mut state = state;
         state.connected = Some(true);
         CloudJetWireless { state }
-    }
-
-    pub fn new() -> Result<Self, DeviceError> {
-        let mut state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
-        state.connected = Some(true);
-        Ok(CloudJetWireless { state })
     }
 }
 

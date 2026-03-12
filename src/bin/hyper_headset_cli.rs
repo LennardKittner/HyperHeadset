@@ -101,7 +101,7 @@ fn main() {
             device.set_automatic_shut_down_packet(Duration::from_secs(delay * 60u64))
         {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+            if let Err(err) = device.get_device_state().write_hid_report(&packet) {
                 eprintln!("Failed to set automatic shutdown with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -114,7 +114,7 @@ fn main() {
     if let Some(mute) = matches.get_one::<bool>("mute") {
         if let Some(packet) = device.set_mute_packet(*mute) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+            if let Err(err) = device.get_device_state().write_hid_report(&packet) {
                 eprintln!("Failed to mute with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -127,7 +127,7 @@ fn main() {
     if let Some(enable) = matches.get_one::<bool>("enable_side_tone") {
         if let Some(packet) = device.set_side_tone_packet(*enable) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+            if let Err(err) = device.get_device_state().write_hid_report(&packet) {
                 eprintln!("Failed to enable side tone with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -140,7 +140,7 @@ fn main() {
     if let Some(volume) = matches.get_one::<u8>("side_tone_volume") {
         if let Some(packet) = device.set_side_tone_volume_packet(*volume) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+            if let Err(err) = device.get_device_state().write_hid_report(&packet) {
                 eprintln!("Failed to set side tone volume with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -153,7 +153,7 @@ fn main() {
     if let Some(enable) = matches.get_one::<bool>("enable_voice_prompt") {
         if let Some(packet) = device.set_voice_prompt_packet(*enable) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+            if let Err(err) = device.get_device_state().write_hid_report(&packet) {
                 eprintln!("Failed to enable voice prompt with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -166,7 +166,7 @@ fn main() {
     if let Some(surround_sound) = matches.get_one::<bool>("surround_sound") {
         if let Some(packet) = device.set_surround_sound_packet(*surround_sound) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+            if let Err(err) = device.get_device_state().write_hid_report(&packet) {
                 eprintln!("Failed to set surround sound with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -180,7 +180,7 @@ fn main() {
     if let Some(mute_playback) = matches.get_one::<bool>("mute_playback") {
         if let Some(packet) = device.set_silent_mode_packet(*mute_playback) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+            if let Err(err) = device.get_device_state().write_hid_report(&packet) {
                 eprintln!("Failed to mute playback with error: {:?}", err);
                 std::process::exit(1);
             }
@@ -193,7 +193,7 @@ fn main() {
     if let Some(activate) = matches.get_one::<bool>("activate_noise_gate") {
         if let Some(packet) = device.set_noise_gate_packet(*activate) {
             device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+            if let Err(err) = device.get_device_state().write_hid_report(&packet) {
                 eprintln!("Failed to activate noise gate with error: {:?}", err);
                 std::process::exit(1);
             }

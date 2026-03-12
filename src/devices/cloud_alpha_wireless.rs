@@ -1,6 +1,6 @@
 use crate::{
     debug_println,
-    devices::{ChargingStatus, Color, Device, DeviceError, DeviceEvent, DeviceState},
+    devices::{ChargingStatus, Color, Device, DeviceEvent, DeviceState},
 };
 use std::time::Duration;
 
@@ -47,11 +47,6 @@ pub struct CloudAlphaWireless {
 impl CloudAlphaWireless {
     pub fn new_from_state(state: DeviceState) -> Self {
         CloudAlphaWireless { state }
-    }
-
-    pub fn new() -> Result<Self, DeviceError> {
-        let state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
-        Ok(CloudAlphaWireless { state })
     }
 }
 

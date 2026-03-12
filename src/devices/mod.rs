@@ -79,24 +79,71 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
         .iter()
         .flat_map(|e| e.vendor_ids.iter().copied())
         .collect();
-    let state = DeviceState::new(&all_product_ids, &all_vendor_ids)?;
+    let states = DeviceState::new(&all_product_ids, &all_vendor_ids)?;
     debug_println!("Found device selecting handler");
-    let name = state
-        .hid_device
-        .get_product_string()?
-        .ok_or(DeviceError::NoDeviceFound())?;
-    println!("Connecting to {}", name);
-    let entry = DEVICE_REGISTER
-        .iter()
-        .find(|e| {
-            e.vendor_ids.contains(&state.vendor_id) && e.product_ids.contains(&state.product_id)
-        })
-        .ok_or(DeviceError::NoDeviceFound())?;
 
-    let mut device = (entry.factory)(state);
-    device.init_capabilities();
+    // On Linux and MacOS we can just take the first
+    #[cfg(not(target_os = "windows"))]
+    {
+        let state = states
+            .into_iter()
+            .next()
+            .ok_or(DeviceError::NoDeviceFound())?;
+        println!(
+            "Connecting to {}",
+            state.device_name.clone().unwrap_or("???".to_string())
+        );
+        let entry = DEVICE_REGISTER
+            .iter()
+            .find(|e| {
+                e.vendor_ids.contains(&state.vendor_id) && e.product_ids.contains(&state.product_id)
+            })
+            .ok_or(DeviceError::NoDeviceFound())?;
 
-    Ok(device)
+        let mut device = (entry.factory)(state);
+        device.init_capabilities();
+        Ok(device)
+    }
+    // On Windows we have to check which interface can be used
+    #[cfg(target_os = "windows")]
+    {
+        let mut device = None;
+        for state in states {
+            println!(
+                "Try to connecting to {}",
+                state.device_name.clone().unwrap_or("???".to_string())
+            );
+            let entry = DEVICE_REGISTER
+                .iter()
+                .find(|e| {
+                    e.vendor_ids.contains(&state.vendor_id)
+                        && e.product_ids.contains(&state.product_id)
+                })
+                .ok_or(DeviceError::NoDeviceFound())?;
+
+            let mut test_device = (entry.factory)(state);
+            test_device.init_capabilities();
+
+            let probe_packet = test_device
+                .get_query_packets()
+                .into_iter()
+                .next()
+                .expect("Why is there a device without packets ???");
+
+            test_device.prepare_write();
+            if test_device
+                .get_device_state()
+                .write_hid_report(&probe_packet)
+                .is_err()
+            {
+                continue;
+            } else {
+                device = Some(test_device);
+                break;
+            }
+        }
+        device.ok_or(DeviceError::NoDeviceFound())
+    }
 }
 
 #[derive(Debug)]
@@ -138,9 +185,10 @@ impl Display for DeviceState {
 }
 
 impl DeviceState {
-    pub fn new(product_ids: &[u16], vendor_ids: &[u16]) -> Result<Self, DeviceError> {
+    pub fn new(product_ids: &[u16], vendor_ids: &[u16]) -> Result<Vec<Self>, DeviceError> {
         let hid_api = HidApi::new()?;
         let mut potential_devices = HashSet::new();
+        let mut error = Ok(());
         debug_println!(
             "Devices: {:?}",
             hid_api
@@ -149,9 +197,9 @@ impl DeviceState {
                 .map(|d| { (d.vendor_id(), d.product_id(), d.product_string()) })
                 .collect::<Vec<(u16, u16, Option<&str>)>>()
         );
-        let device_lookup_result = hid_api
+        let device_candidates: Vec<(HidDevice, u16, u16)> = hid_api
             .device_list()
-            .find_map(|info| {
+            .filter_map(|info| {
                 if product_ids.contains(&info.product_id())
                     && vendor_ids.contains(&info.vendor_id())
                 {
@@ -161,11 +209,20 @@ impl DeviceState {
                         info.product_id(),
                         info.product_string()
                     );
-                    Some((
-                        hid_api.open(info.vendor_id(), info.product_id()),
-                        info.product_id(),
-                        info.vendor_id(),
-                    ))
+                    match hid_api.open(info.vendor_id(), info.product_id()) {
+                        Ok(device) => Some((device, info.product_id(), info.vendor_id())),
+                        Err(e) => {
+                            debug_println!(
+                                "Failed to open: {:x}:{:x} {:?}: {:?}",
+                                info.vendor_id(),
+                                info.product_id(),
+                                info.product_string(),
+                                e
+                            );
+                            error = Err(e);
+                            None
+                        }
+                    }
                 } else {
                     if let Some(name) = info.product_string() {
                         if name.contains("HyperX") {
@@ -179,64 +236,104 @@ impl DeviceState {
                     None
                 }
             })
-            .ok_or(DeviceError::NoDeviceFound());
-        let (hid_device, product_id, vendor_id) = match device_lookup_result {
-            Ok(value) => value,
-            Err(DeviceError::NoDeviceFound()) => {
-                if !potential_devices.is_empty() {
-                    let names = potential_devices
-                        .iter()
-                        .map(|e| {
-                            format!(
-                                "    vendorID: 0x{:04X} productID: 0x{:04X} name: {}",
-                                e.0,
-                                e.1,
-                                e.2.unwrap_or("Unknown")
-                            )
-                        })
-                        .collect::<Vec<String>>()
-                        .join(",\n");
-                    println!(
-                        "Found the following HyperX device{}: [\n{}\n]\nHowever, either {} not supported or the product ID is not yet known.",
-                        if potential_devices.len() > 1 { "s" } else { "" }, names, if potential_devices.len() > 1 { "they are" } else { "it is" }
-                    )
-                }
-                return Err(DeviceError::NoDeviceFound());
+            .collect();
+
+        if device_candidates.is_empty() {
+            if !potential_devices.is_empty() {
+                let names = potential_devices
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            "    vendorID: 0x{:04X} productID: 0x{:04X} name: {}",
+                            e.0,
+                            e.1,
+                            e.2.unwrap_or("Unknown")
+                        )
+                    })
+                    .collect::<Vec<String>>()
+                    .join(",\n");
+                println!(
+                    "Found the following HyperX device{}: [\n{}\n]\nHowever, either {} not supported or the product ID is not yet known.",
+                    if potential_devices.len() > 1 { "s" } else { "" }, names, if potential_devices.len() > 1 { "they are" } else { "it is" }
+                );
             }
-            Err(e) => return Err(e),
-        };
-        let hid_device = hid_device?;
-        let device_name = hid_device.get_product_string()?;
-        Ok(DeviceState {
-            hid_device,
-            product_id,
-            vendor_id,
-            device_name,
-            charging: None,
-            battery_level: None,
-            muted: None,
-            surround_sound: None,
-            mic_connected: None,
-            automatic_shutdown_after: None,
-            pairing_info: None,
-            product_color: None,
-            side_tone_on: None,
-            side_tone_volume: None,
-            voice_prompt_on: None,
-            connected: None,
-            silent: None,
-            noise_gate_active: None,
-            // Capability flags - will be set by init_capabilities()
-            can_set_mute: false,
-            can_set_surround_sound: false,
-            can_set_side_tone: false,
-            can_set_automatic_shutdown: false,
-            can_set_side_tone_volume: false,
-            can_set_voice_prompt: false,
-            can_set_silent_mode: false,
-            can_set_equalizer: false,
-            can_set_noise_gate: false,
-        })
+            error?;
+            return Err(DeviceError::NoDeviceFound());
+        }
+
+        Ok(device_candidates
+            .into_iter()
+            .map(|(hid_device, product_id, vendor_id)| {
+                let device_name = hid_device.get_product_string().ok().flatten();
+                DeviceState {
+                    hid_device,
+                    product_id,
+                    vendor_id,
+                    device_name,
+                    charging: None,
+                    battery_level: None,
+                    muted: None,
+                    surround_sound: None,
+                    mic_connected: None,
+                    automatic_shutdown_after: None,
+                    pairing_info: None,
+                    product_color: None,
+                    side_tone_on: None,
+                    side_tone_volume: None,
+                    voice_prompt_on: None,
+                    connected: None,
+                    silent: None,
+                    noise_gate_active: None,
+                    // Capability flags - will be set by init_capabilities()
+                    can_set_mute: false,
+                    can_set_surround_sound: false,
+                    can_set_side_tone: false,
+                    can_set_automatic_shutdown: false,
+                    can_set_side_tone_volume: false,
+                    can_set_voice_prompt: false,
+                    can_set_silent_mode: false,
+                    can_set_equalizer: false,
+                    can_set_noise_gate: false,
+                }
+            })
+            .collect())
+    }
+
+    /// Write a HID report to the device.
+    ///
+    /// On Windows, some HyperX dongles expose commands as **Feature reports** only.
+    /// In that case, `hidapi::HidDevice::write()` fails with:
+    /// `WriteFile: (0x00000001) Incorrect function.`
+    ///
+    /// Linux/macOS hidraw paths often accept the same bytes via output reports, so this can look
+    /// "Windows-exclusive". We transparently fall back to `send_feature_report` when we detect
+    /// this specific failure.
+    /// Adapted from PR #20 by @navrozashvili
+    /// Source: https://github.com/LennardKittner/HyperHeadset/pull/20
+    pub fn write_hid_report(&self, packet: &[u8]) -> Result<(), HidError> {
+        match self.hid_device.write(packet) {
+            Ok(_) => Ok(()),
+            Err(write_err) => {
+                #[cfg(target_os = "windows")]
+                {
+                    if let HidError::HidApiError { message } = &write_err {
+                        // Windows HID stack returns ERROR_INVALID_FUNCTION (0x1) when the device
+                        // doesn't support output reports / interrupt OUT.
+                        if message.contains("Incorrect function")
+                            || message.contains("(0x00000001)")
+                        {
+                            // If the feature report also fails, prefer returning the original
+                            // write() error since that's what callers attempted.
+                            if let Err(_feature_err) = self.hid_device.send_feature_report(packet) {
+                                return Err(write_err);
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
+                Err(write_err)
+            }
+        }
     }
 
     fn get_display_data(&self) -> Vec<(&str, Option<String>, &str, bool)> {
@@ -619,9 +716,8 @@ pub trait Device {
         self.get_event_from_device_response(&buf)
     }
 
-    /// Refreshes the state by querying all available information
-    fn active_refresh_state(&mut self) -> Result<(), DeviceError> {
-        let packets = vec![
+    fn get_query_packets(&self) -> Vec<Vec<u8>> {
+        vec![
             self.get_wireless_connected_status_packet(),
             self.get_charging_packet(),
             self.get_battery_packet(),
@@ -637,15 +733,22 @@ pub trait Device {
             self.get_sirk_packet(),
             self.get_silent_mode_packet(),
             self.get_noise_gate_packet(),
-        ];
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
 
+    /// Refreshes the state by querying all available information
+    fn active_refresh_state(&mut self) -> Result<(), DeviceError> {
+        let packets = self.get_query_packets();
         self.execute_headset_specific_functionality()?;
 
         let mut responded = false;
-        for packet in packets.into_iter().flatten() {
+        for packet in packets.into_iter() {
             self.prepare_write();
             debug_println!("Write packet: {packet:?}");
-            self.get_device_state().hid_device.write(&packet)?;
+            self.get_device_state().write_hid_report(&packet)?;
             std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
@@ -677,7 +780,7 @@ pub trait Device {
         }
         if let Some(batter_packet) = self.get_battery_packet() {
             self.prepare_write();
-            self.get_device_state().hid_device.write(&batter_packet)?;
+            self.get_device_state().write_hid_report(&batter_packet)?;
             std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
