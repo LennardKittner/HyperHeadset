@@ -53,7 +53,7 @@ fn main() {
             // with the default refresh_interval the state is only actively queried every 3min
             // querying the device to frequently can lead to instability
 
-            let mute_state = device.get_device_state().muted.clone();
+            let mute_state = device.get_device_state().muted;
             match if run_counter % 30 == 0 {
                 device.active_refresh_state()
             } else {
