@@ -5,118 +5,15 @@ use std::{
 };
 
 use clap::{Arg, Command};
-use hyper_headset::{debug_println, devices::connect_compatible_device};
-use std::process::Command as CommandShell;
+use hyper_headset::{
+    check_rule, debug_println, devices::connect_compatible_device, prompt_user_for_udev_rule,
+    update_rule, RuleState, UDEV_RULES, UDEV_RULE_PATH_SYSTEM, UDEV_RULE_PATH_USER,
+};
 
 const SHOW_ALL_OPTIONS: bool = false;
 
-const UDEV_RULE_PATH_SYSTEM: &str = "/etc/udev/rules.d/99-HyperHeadset.rules";
-const UDEV_RULE_PATH_USER: &str = "/usr/lib/udev/rules.d/99-HyperHeadset.rules";
-const UDEV_RULES: &str = include_str!("./../../99-HyperHeadset.rules");
-
-#[derive(Debug)]
-pub enum RuleState {
-    RuleExists(bool),
-    RuleMatch(bool),
-}
-
-pub fn check_rule(path: &str, rules: &str) -> RuleState {
-    let mut rule_state;
-
-    if !fs::exists(path).unwrap_or(false) {
-        rule_state = RuleState::RuleExists(false);
-    } else {
-        rule_state = RuleState::RuleExists(true);
-        if let Ok(content) = fs::read_to_string(path) {
-            if content.trim() != rules.trim() {
-                rule_state = RuleState::RuleMatch(false);
-            } else {
-                rule_state = RuleState::RuleMatch(true);
-            }
-        }
-    }
-    rule_state
-}
-
-pub fn update_rule(path: &str, rules: &str) {
-    let status = CommandShell::new("sudo")
-        .arg("sh")
-        .arg("-c")
-        .arg(format!(
-            "echo {} > {}",
-            shell_escape::escape(rules.into()),
-            path
-        ))
-        .status();
-
-    match status {
-        Ok(exit_status) if exit_status.success() => {
-            println!("created rule at {path}.\nYou may need to replug your headset for the udev rules to take effect.");
-        }
-        Ok(e) => {
-            println!("Failed to create rule at {path}: {}", e);
-            println!("Your headset may not be recognized without the correct udev rules.");
-        }
-        Err(e) => {
-            println!("Failed to create rule at {path}: {}", e);
-            println!("Your headset may not be recognized without the correct udev rules.");
-        }
-    }
-}
-
 fn main() {
-    let user_rule_state = check_rule(UDEV_RULE_PATH_USER, UDEV_RULES);
-    let system_rule_state = check_rule(UDEV_RULE_PATH_SYSTEM, UDEV_RULES);
-
-    if users::get_current_uid() != 0 {
-        debug_println!("user rule: {user_rule_state:?}, system rule: {system_rule_state:?}");
-        match (user_rule_state, system_rule_state) {
-            (RuleState::RuleMatch(true), _) => (),
-            (_, RuleState::RuleMatch(true)) => (),
-
-            (RuleState::RuleMatch(false), _) | (RuleState::RuleExists(true), _) => {
-                print!(
-                    "Udev rules at {UDEV_RULE_PATH_USER} do not have the expected value. Do you want to recreate them? (y/N): "
-                );
-                io::Write::flush(&mut io::stdout()).unwrap();
-                let mut input = String::new();
-                io::stdin().read_line(&mut input).unwrap();
-                if matches!(input.trim(), "y" | "Y") {
-                    update_rule(UDEV_RULE_PATH_USER, UDEV_RULES);
-                } else {
-                    println!("Your headset may not be recognized without the correct udev rules.");
-                }
-            }
-            (RuleState::RuleExists(false), RuleState::RuleMatch(false))
-            | (RuleState::RuleExists(false), RuleState::RuleExists(true)) => {
-                print!(
-                    "Udev rules at {UDEV_RULE_PATH_SYSTEM} do not have the expected value. Do you want to recreate them? (y/N): "
-                );
-                io::Write::flush(&mut io::stdout()).unwrap();
-                let mut input = String::new();
-                io::stdin().read_line(&mut input).unwrap();
-                if matches!(input.trim(), "y" | "Y") {
-                    update_rule(UDEV_RULE_PATH_SYSTEM, UDEV_RULES);
-                } else {
-                    println!("Your headset may not be recognized without the correct udev rules.");
-                }
-            }
-
-            (RuleState::RuleExists(false), RuleState::RuleExists(false)) => {
-                print!("No udev rules found. Do you want to create {UDEV_RULE_PATH_USER}? (y/N): ");
-                io::Write::flush(&mut io::stdout()).unwrap();
-                let mut input = String::new();
-                io::stdin().read_line(&mut input).unwrap();
-                if matches!(input.trim(), "y" | "Y") {
-                    update_rule(UDEV_RULE_PATH_USER, UDEV_RULES);
-                } else {
-                    println!(
-                        "Without udev rules your headset can only be accessed when running as root."
-                    );
-                }
-            }
-        }
-    }
+    prompt_user_for_udev_rule();
     let mut device = match connect_compatible_device() {
         Ok(device) => device,
         Err(error) => {

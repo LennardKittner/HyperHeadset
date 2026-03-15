@@ -12,5 +12,4 @@ hidapi = { path = "vendor/hidapi" }
 thistermination = "1.0.0"
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = "0.2.0"
-users = "0.11"
 shell-escape = "0.1.5"

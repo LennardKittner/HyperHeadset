@@ -3,10 +3,11 @@ use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use std::time::Duration;
 
 mod status_tray;
-use hyper_headset::devices::connect_compatible_device;
+use hyper_headset::{devices::connect_compatible_device, prompt_user_for_udev_rule};
 use status_tray::{StatusTray, TrayHandler};
 
 fn main() {
+    prompt_user_for_udev_rule();
     let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
