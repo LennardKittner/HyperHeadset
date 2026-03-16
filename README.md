@@ -184,6 +184,7 @@ Because the action only toggles Discord's state, you may need to synchronize it 
 - [ ] Menu bar app for MacOS.
 - [ ] Windows support
 - [ ] Update ksni
+- [ ] Allow configuration via tray app
 - [x] Actively configure the headset.
 - [x] Query device state instead of only relying on events.
 
