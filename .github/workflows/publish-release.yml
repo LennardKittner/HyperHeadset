@@ -84,7 +84,7 @@ jobs:
         run: echo "tag=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Clone AUR bin repo
-        run: git clone https://aur.archlinux.org/hyperheadset-bin.git aur-bin-pkg
+        run: git clone https://aur.archlinux.org/hyper-headset-bin.git aur-bin-pkg
 
       - name: Update pkgver and pkgrel
         run: |
