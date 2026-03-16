@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "hyper_headset"
-version = "1.5.2"
+version = "1.5.3"
 dependencies = [
  "clap 4.5.58",
  "dialog",
