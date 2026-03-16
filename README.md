@@ -1,5 +1,6 @@
 # HyperHeadset
-[![AUR Version](https://img.shields.io/aur/version/hyperheadset-git)](https://aur.archlinux.org/packages/hyperheadset-git)
+[![AUR Git Version](https://img.shields.io/aur/version/hyper-headset-git)](https://aur.archlinux.org/packages/hyper-headset-git)
+[![AUR Bin Version](https://img.shields.io/aur/version/hyper-headset-bin)](https://aur.archlinux.org/packages/hyper-headset-bin)
 [![GitHub Release](https://img.shields.io/github/v/release/LennardKittner/HyperHeadset)](https://github.com/LennardKittner/HyperHeadset/releases)
 [![GitHub Downloads](https://img.shields.io/github/downloads/LennardKittner/HyperHeadset/total.svg?label=GitHub%20Downloads)](https://github.com/LennardKittner/HyperHeadset/releases)
 [![Sponsor](https://img.shields.io/badge/-Sponsor-green?style=flat&logo=github)](https://github.com/sponsors/LennardKittner)
