@@ -79,6 +79,16 @@ jobs:
             dist/hyper_headset_Linux.zip
             dist/hyper_headset_MacOS.zip
 
+      - name: Compute checksums
+        id: checksums
+        run: |
+          SHA256_ZIP=$(sha256sum dist/hyper_headset_Linux.zip | awk '{print $1}')
+          SHA256_RULES=$(sha256sum 99-HyperHeadset.rules | awk '{print $1}')
+          SHA256_DESKTOP=$(sha256sum hyper-headset.desktop | awk '{print $1}')
+          echo "zip=$SHA256_ZIP" >> $GITHUB_OUTPUT
+          echo "rules=$SHA256_RULES" >> $GITHUB_OUTPUT
+          echo "desktop=$SHA256_DESKTOP" >> $GITHUB_OUTPUT
+
       - name: Get tag version
         id: version
         run: echo "tag=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
@@ -89,7 +99,8 @@ jobs:
       - name: Update pkgver and pkgrel
         run: |
           sed -i "s/^pkgver=.*/pkgver=${{ steps.version.outputs.tag }}/" aur-bin-pkg/PKGBUILD
-          sed -i "s/^pkgrel=.*/pkgrel=1/" aur-bin-pkg/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=3/" aur-bin-pkg/PKGBUILD
+          sed -i "/sha256sums=/,/^)/c\sha256sums=(\n  '${{ steps.checksums.outputs.zip }}'\n  '${{ steps.checksums.outputs.rules }}'\n  '${{ steps.checksums.outputs.desktop }}')" aur-bin-pkg/PKGBUILD
 
       - name: Publish to AUR
         uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
@@ -100,5 +111,5 @@ jobs:
           commit_email: ${{ secrets.AUR_EMAIL }}
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: Update to ${{ steps.version.outputs.tag }}
-          updpkgsums: true
+          updpkgsums: false 
           allow_empty_commits: false
