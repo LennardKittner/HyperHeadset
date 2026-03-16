@@ -44,7 +44,7 @@ jobs:
             fetch-depth: 0  # needed to get full commit history for rev-list
 
         - name: Clone AUR repo
-          run: git clone https://aur.archlinux.org/hyperheadset-git.git aur-pkg
+          run: git clone https://aur.archlinux.org/hyper-headset-git.git aur-pkg
 
         - name: Compute and update pkgver
           run: |
@@ -56,7 +56,7 @@ jobs:
           uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
 
           with:
-            pkgname: hyperheadset-git
+            pkgname: hyper-headset-git
             pkgbuild: ./aur-pkg/PKGBUILD 
             commit_username: ${{ secrets.AUR_USERNAME }}
             commit_email: ${{ secrets.AUR_EMAIL }}
