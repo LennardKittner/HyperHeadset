@@ -1,11 +1,23 @@
+#[cfg(target_os = "linux")]
 use clap::{Arg, Command};
+#[cfg(target_os = "linux")]
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
+#[cfg(target_os = "linux")]
 mod status_tray;
+#[cfg(target_os = "linux")]
 use hyper_headset::devices::connect_compatible_device;
+#[cfg(target_os = "linux")]
 use status_tray::{StatusTray, TrayHandler};
 
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!("The tray app currently only supports Linux. Please use hyper_headset_cli instead.");
+}
+
+#[cfg(target_os = "linux")]
 fn main() {
     #[cfg(target_os = "linux")]
     {

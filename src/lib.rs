@@ -1,6 +1,7 @@
 #[cfg(target_os = "linux")]
 use std::{fs, io, process::Command, time::Duration};
 
+#[cfg(target_os = "linux")]
 use dialog::{Choice, DialogBox};
 
 // #![warn(missing_docs)]
