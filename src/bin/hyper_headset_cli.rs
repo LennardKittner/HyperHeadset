@@ -1,19 +1,27 @@
-use std::{
-    fs,
-    io::{self},
-    time::Duration,
-};
+use std::time::Duration;
 
 use clap::{Arg, Command};
-use hyper_headset::{
-    check_rule, debug_println, devices::connect_compatible_device, prompt_user_for_udev_rule,
-    update_rule, RuleState, UDEV_RULES, UDEV_RULE_PATH_SYSTEM, UDEV_RULE_PATH_USER,
-};
+use hyper_headset::devices::connect_compatible_device;
 
 const SHOW_ALL_OPTIONS: bool = false;
 
 fn main() {
-    prompt_user_for_udev_rule();
+    #[cfg(target_os = "linux")]
+    {
+        use hyper_headset::act_as_askpass_handler;
+        use hyper_headset::prompt_user_for_udev_rule;
+
+        if let Ok(name) = std::env::current_exe() {
+            if let Some(name) = name.to_str() {
+                if let Ok(askpass) = std::env::var("SUDO_ASKPASS") {
+                    if name == askpass {
+                        act_as_askpass_handler();
+                    }
+                }
+            }
+        }
+        prompt_user_for_udev_rule();
+    }
     let mut device = match connect_compatible_device() {
         Ok(device) => device,
         Err(error) => {

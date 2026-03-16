@@ -3,11 +3,26 @@ use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use std::time::Duration;
 
 mod status_tray;
-use hyper_headset::{devices::connect_compatible_device, prompt_user_for_udev_rule};
+use hyper_headset::devices::connect_compatible_device;
 use status_tray::{StatusTray, TrayHandler};
 
 fn main() {
-    prompt_user_for_udev_rule();
+    #[cfg(target_os = "linux")]
+    {
+        use hyper_headset::act_as_askpass_handler;
+        use hyper_headset::prompt_user_for_udev_rule;
+
+        if let Ok(name) = std::env::current_exe() {
+            if let Some(name) = name.to_str() {
+                if let Ok(askpass) = std::env::var("SUDO_ASKPASS") {
+                    if name == askpass {
+                        act_as_askpass_handler();
+                    }
+                }
+            }
+        }
+        prompt_user_for_udev_rule();
+    }
     let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
@@ -54,7 +69,7 @@ fn main() {
             // with the default refresh_interval the state is only actively queried every 3min
             // querying the device to frequently can lead to instability
 
-            let mute_state = device.get_device_state().muted.clone();
+            let mute_state = device.get_device_state().muted;
             match if run_counter % 30 == 0 {
                 device.active_refresh_state()
             } else {
