@@ -38,11 +38,14 @@ yay -S hyperheadset-git
 
 Download from [GitHub releases](https://github.com/LennardKittner/HyperHeadset/releases).
 
-⚠️ Linux users must manually install the udev rule (see Prerequisites below).
+⚠️**Linux Only**: The required udev rules will be installed automatically when the program is launched if they are missing.
+You will be prompted to allow the installation.
+
+If automatic installation fails, you can install them manually (see Prerequisites -> Udev below)
 
 ## Build from Source
 
-This project uses git submodules, so before building you have to initialize them via:
+This project uses git submodules, so before building, you have to initialize them via:
 `git submodule update --init --recursive`
 
 To only build the CLI app on MacOS, use:
@@ -51,27 +54,12 @@ To only build the CLI app on MacOS, use:
 To build both applications on Linux, use:
 `cargo build --release`
 
-See prerequisites below for installing dependencies and adding the udev rule.
+See prerequisites below for installing dependencies.
+If the required udev rules are missing on Linux, the program will prompt you to install them automatically.
 
 ## Prerequisites (Binary Releases / Building from Source Only)
 
-### Hidraw
-
-Make sure you have hidraw installed on your system.
-
-Debian/Ubuntu:
-
-`sudo apt install libhidapi-hidraw0`
-
-Arch:
-
-`sudo pacman -S hidapi`
-
-MacOS:
-
-`brew install hidapi`
-
-### Other Dependencies
+### Dependencies
 
 These dependencies are probably already installed.
 
@@ -89,7 +77,9 @@ MacOS:
 
 ### Udev (Linux only)
 
-Create a new file, e.g., `/etc/udev/rules.d/99-HyperHeadset.rules` with the following content inside:
+Normally the program installs the required udev rules automatically on first launch.
+
+If that fails, create the file: `/etc/udev/rules.d/99-HyperHeadset.rules` with the following content inside:
 
 ```
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666"
@@ -179,7 +169,7 @@ Options:
 
 `hyper_headset` without any arguments will start the tray application with a 3s refresh interval.
 Once it's open, hover over the headset icon in the system tray or right-click to view details such as the battery level.
-You can also exit via the right-clock menu.
+You can also exit via the right-click menu.
 By default, the tray app sends a MicMute key press whenever the headset is muted or unmuted.
 This allows applications such as Discord to react when the hardware mute button on the headset is pressed.
 
