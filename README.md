@@ -31,7 +31,11 @@ If your headset is not supported, feel free to open an issue.
 ### Arch Linux (AUR)
 No manual setup required (dependencies and udev rules are handled automatically):
 ```bash
-yay -S hyperheadset-git
+yay -S hyper-headset-git
+```
+or 
+```bash
+yay -S hyper-headset-bin
 ```
 
 ### Prebuilt Binary (Linux/MacOS)
