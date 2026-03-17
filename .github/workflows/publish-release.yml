@@ -99,8 +99,8 @@ jobs:
       - name: Update pkgver and pkgrel
         run: |
           sed -i "s/^pkgver=.*/pkgver=${{ steps.version.outputs.tag }}/" aur-bin-pkg/PKGBUILD
-          sed -i "s/^pkgrel=.*/pkgrel=3/" aur-bin-pkg/PKGBUILD
-          sed -i "/sha256sums=/,/^)/c\sha256sums=(\n  '${{ steps.checksums.outputs.zip }}'\n  '${{ steps.checksums.outputs.rules }}'\n  '${{ steps.checksums.outputs.desktop }}')" aur-bin-pkg/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" aur-bin-pkg/PKGBUILD
+          sed -i "/sha256sums=/,/^)/c\sha256sums=(\n  '${{ steps.checksums.outputs.zip }}'\n  '${{ steps.checksums.outputs.rules }}'\n  '${{ steps.checksums.outputs.desktop }}'\n)" aur-bin-pkg/PKGBUILD
 
       - name: Publish to AUR
         uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
