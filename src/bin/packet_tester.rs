@@ -1,8 +1,10 @@
+use std::time::Duration;
+
 use hidapi::{DeviceInfo, HidApi};
+use rusb::{Context, DeviceHandle, UsbContext};
 
 const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
-// Possible Cloud II Wireless product IDs
-const PRODUCT_IDS: [u16; 3] = [0x1718, 0x018B, 0x0b92];
+const PRODUCT_IDS: [u16; 4] = [0x1718, 0x018B, 0x0b92, 0x03C0];
 
 const BASE_PACKET: [u8; 62] = {
     let mut tmp = [0u8; 62];
@@ -131,10 +133,104 @@ const PACKETS: [&[u8]; 12] = [
 ];
 
 fn main() {
+    test_non_hid();
+
     let hidapi = HidApi::new().unwrap();
     for device in hidapi.device_list() {
         if VENDOR_IDS.contains(&device.vendor_id()) && PRODUCT_IDS.contains(&device.product_id()) {
             test_device(device);
+        }
+    }
+}
+const ENDPOINT_OUT: u8 = 0x01; // Bulk OUT
+const ENDPOINT_IN: u8 = 0x82; // Bulk IN (endpoint 2, IN flag set)
+const INTERFACE: u8 = 0x00;
+const TIMEOUT: Duration = Duration::from_secs(2);
+
+fn build_cbw() -> [u8; 31] {
+    let mut cbw = [0u8; 31];
+
+    // Signature: "USBC"
+    cbw[0..4].copy_from_slice(&[0x55, 0x53, 0x42, 0x43]);
+    // Tag (arbitrary, must match CSW response)
+    cbw[4..8].copy_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+    // Transfer length: 16 bytes (little-endian)
+    cbw[8..12].copy_from_slice(&[0x10, 0x00, 0x00, 0x00]);
+    // Flags: 0x80 = Data-In (device → host)
+    cbw[12] = 0x80;
+    // LUN: 0
+    cbw[13] = 0x00;
+    // Command block length: 6
+    cbw[14] = 0x06;
+    // Command block: vendor command 0xF0, sub-param 0x09
+    cbw[15] = 0xF0;
+    cbw[16] = 0x09;
+    // Remaining command bytes are already 0x00
+
+    cbw
+}
+
+fn parse_battery(data: &[u8]) -> Option<u8> {
+    if data.len() >= 4 {
+        Some(data[3])
+    } else {
+        None
+    }
+}
+
+fn read_battery(handle: &DeviceHandle<impl UsbContext>) -> u8 {
+    let cbw = build_cbw();
+    let written = handle.write_bulk(ENDPOINT_OUT, &cbw, TIMEOUT).unwrap();
+    println!("CBW sent: {} bytes", written);
+
+    let mut data = [0u8; 16];
+    let read = handle.read_bulk(ENDPOINT_IN, &mut data, TIMEOUT).unwrap();
+    println!("Data received ({} bytes): {:02x?}", read, &data[..read]);
+
+    let mut csw = [0u8; 13];
+    let csw_read = handle.read_bulk(ENDPOINT_IN, &mut csw, TIMEOUT).unwrap();
+    println!(
+        "CSW received ({} bytes): {:02x?}",
+        csw_read,
+        &csw[..csw_read]
+    );
+
+    if &csw[0..4] != b"USBS" {
+        eprintln!("Invalid CSW signature!");
+        return 0;
+    }
+    if csw[12] != 0x00 {
+        eprintln!("CSW status error: 0x{:02x}", csw[12]);
+        return 0;
+    }
+
+    parse_battery(&data).unwrap()
+}
+
+fn test_non_hid() {
+    let context = Context::new().unwrap();
+
+    for device in context.devices().unwrap().iter() {
+        if device
+            .device_descriptor()
+            .map(|desc| {
+                VENDOR_IDS.contains(&desc.vendor_id()) && PRODUCT_IDS.contains(&desc.product_id())
+            })
+            .unwrap_or(false)
+        {
+            let handle = device.open().unwrap();
+            #[cfg(target_os = "linux")]
+            if handle.kernel_driver_active(INTERFACE).unwrap() {
+                handle.detach_kernel_driver(INTERFACE).unwrap();
+                println!("Kernel driver detached");
+            }
+            handle.claim_interface(INTERFACE).unwrap();
+
+            println!("Battery level: {:?}", read_battery(&handle));
+            handle.release_interface(INTERFACE).unwrap();
+
+            #[cfg(target_os = "linux")]
+            handle.attach_kernel_driver(INTERFACE).unwrap();
         }
     }
 }
