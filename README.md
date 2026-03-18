@@ -174,7 +174,7 @@ Options:
 
 `hyper_headset` without any arguments will start the tray application with a 3s refresh interval.
 Once it's open, hover over the headset icon in the system tray or right-click to view details such as the battery level.
-You can also exit via the right-click menu.
+You can also change device properties or exit via the right-click menu.
 By default, the tray app sends a MicMute key press whenever the headset is muted or unmuted.
 This allows applications such as Discord to react when the hardware mute button on the headset is pressed.
 
@@ -189,7 +189,7 @@ Because the action only toggles Discord's state, you may need to synchronize it 
 - [ ] Menu bar app for MacOS.
 - [ ] Windows support
 - [ ] Update ksni
-- [ ] Allow configuration via tray app
+- [x] Allow configuration via tray app
 - [x] Actively configure the headset.
 - [x] Query device state instead of only relying on events.
 
