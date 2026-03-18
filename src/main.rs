@@ -1,16 +1,5 @@
 #[cfg(target_os = "linux")]
-use clap::{Arg, Command};
-#[cfg(target_os = "linux")]
-use enigo::{Direction, Enigo, Key, Keyboard, Settings};
-#[cfg(target_os = "linux")]
-use std::time::Duration;
-
-#[cfg(target_os = "linux")]
 mod status_tray;
-#[cfg(target_os = "linux")]
-use hyper_headset::devices::connect_compatible_device;
-#[cfg(target_os = "linux")]
-use status_tray::{StatusTray, TrayHandler};
 
 #[cfg(not(target_os = "linux"))]
 fn main() {
@@ -19,6 +8,14 @@ fn main() {
 
 #[cfg(target_os = "linux")]
 fn main() {
+    use clap::{Arg, Command};
+    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use hyper_headset::devices::connect_compatible_device;
+    use status_tray::{StatusTray, TrayHandler};
+
     #[cfg(target_os = "linux")]
     {
         use hyper_headset::act_as_askpass_handler;
@@ -61,7 +58,8 @@ fn main() {
     let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
     let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
     let refresh_interval = Duration::from_secs(refresh_interval);
-    let tray_handler = TrayHandler::new(StatusTray::new());
+    let (tx, rx) = mpsc::channel();
+    let tray_handler = TrayHandler::new(StatusTray::new(tx));
     loop {
         let mut device = loop {
             match connect_compatible_device() {
@@ -77,11 +75,7 @@ fn main() {
         // Run loop
         let mut run_counter = 0;
         loop {
-            std::thread::sleep(refresh_interval);
-            // with the default refresh_interval the state is only actively queried every 3min
-            // querying the device to frequently can lead to instability
-
-            let mute_state = device.get_device_state().muted;
+            let mute_state = device.get_device_state().device_properties.muted;
             match if run_counter % 30 == 0 {
                 device.active_refresh_state()
             } else {
@@ -94,12 +88,24 @@ fn main() {
                     break; // try to reconnect
                 }
             };
-            if mute_state.is_some() && mute_state != device.get_device_state().muted {
+            if mute_state.is_some()
+                && mute_state != device.get_device_state().device_properties.muted
+            {
                 //TODO: macOS and windows have to use another key
                 if press_mute_key {
                     enigo.key(Key::MicMute, Direction::Click).unwrap();
                 }
             }
+
+            // with the default refresh_interval the state is only actively queried every 3min
+            // querying the device to frequently can lead to instability
+            let first = rx.recv_timeout(refresh_interval);
+            for command in first.into_iter().chain(rx.try_iter()) {
+                let _ = device.try_apply(command);
+                std::thread::sleep(hyper_headset::devices::RESPONSE_DELAY);
+                let _ = device.active_refresh_state();
+            }
+
             tray_handler.update(device.get_device_state());
             run_counter += 1;
         }

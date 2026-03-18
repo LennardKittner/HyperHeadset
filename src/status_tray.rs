@@ -1,11 +1,17 @@
-use hyper_headset::devices::DeviceState;
-use ksni::{menu::StandardItem, Handle, MenuItem, ToolTip, Tray, TrayService};
+use std::sync::mpsc::Sender;
+
+use hyper_headset::devices::{DeviceEvent, DeviceProperties, DeviceState, PropertyType};
+use ksni::{
+    menu::{StandardItem, SubMenu},
+    Handle, MenuItem, ToolTip, Tray, TrayService,
+};
 
 pub struct TrayHandler {
     handle: Handle<StatusTray>,
 }
 
 const NO_COMPATIBLE_DEVICE: &str = "No compatible device found.\nIs the dongle plugged in?\nIf you are using Linux did you\nadd the Udev rules?";
+const HEADSET_NOT_CONNECTED: &str = "Headset is not connected";
 
 impl TrayHandler {
     pub fn new(tray: StatusTray) -> Self {
@@ -16,41 +22,28 @@ impl TrayHandler {
     }
 
     pub fn update(&self, device_state: &DeviceState) {
-        let (message, name) = match device_state.connected {
-            None => (NO_COMPATIBLE_DEVICE.to_string(), None),
-            Some(false) => (
-                "Headset is not connected".to_string(),
-                device_state.device_name.clone(),
-            ),
-            Some(true) => (
-                device_state.to_string_with_padding(0),
-                device_state.device_name.clone(),
-            ),
-        };
         self.handle.update(|tray| {
-            tray.message = message;
-            tray.device_name = name;
+            tray.device_properties = Some(device_state.device_properties.clone());
         })
     }
 
     pub fn clear_state(&self) {
         self.handle.update(|tray| {
-            tray.message = NO_COMPATIBLE_DEVICE.to_string();
-            tray.device_name = None;
+            tray.device_properties = None;
         })
     }
 }
 
 pub struct StatusTray {
-    device_name: Option<String>,
-    message: String,
+    device_properties: Option<DeviceProperties>,
+    update_sender: Sender<DeviceEvent>,
 }
 
 impl StatusTray {
-    pub fn new() -> Self {
+    pub fn new(update_sender: Sender<DeviceEvent>) -> Self {
         StatusTray {
-            device_name: None,
-            message: NO_COMPATIBLE_DEVICE.to_string(),
+            device_properties: None,
+            update_sender,
         }
     }
 }
@@ -59,43 +52,183 @@ impl Tray for StatusTray {
     fn id(&self) -> String {
         env!("CARGO_PKG_NAME").into()
     }
+
     fn icon_name(&self) -> String {
         "audio-headset".into()
     }
+
     fn tool_tip(&self) -> ToolTip {
-        let description = self
-            .message
-            .lines()
-            .filter(|l| !l.contains("Unknown"))
-            .collect::<Vec<&str>>()
-            .join("\n");
+        let Some(device_properties) = self.device_properties.as_ref() else {
+            return ToolTip {
+                title: "Unknown".to_string(),
+                description: NO_COMPATIBLE_DEVICE.to_string(),
+                icon_name: "audio-headset".into(),
+                icon_pixmap: Vec::new(),
+            };
+        };
+        let description = if device_properties.connected.unwrap_or(false) {
+            device_properties
+                .to_string_with_padding(0)
+                .lines()
+                .filter(|l| !l.contains("Unknown"))
+                .collect::<Vec<&str>>()
+                .join("\n")
+        } else {
+            HEADSET_NOT_CONNECTED.to_string()
+        };
+
         ToolTip {
-            title: self.device_name.clone().unwrap_or("Unknown".to_string()),
+            title: device_properties
+                .device_name
+                .clone()
+                .unwrap_or("Unknown".to_string()),
             description,
             icon_name: "audio-headset".into(),
             icon_pixmap: Vec::new(),
         }
     }
+
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        let mut state_items: Vec<MenuItem<Self>> = self
-            .message
-            .lines()
-            .map(|line| {
-                StandardItem {
-                    label: line.to_string(),
-                    enabled: false,
-                    ..Default::default()
-                }
-                .into()
-            })
-            .collect();
-        let exit = StandardItem {
+        let make_exit = || StandardItem {
             label: "Exit".into(),
             icon_name: "application-exit".into(),
             activate: Box::new(|_| std::process::exit(0)),
             ..Default::default()
         };
-        state_items.push(exit.into());
-        state_items
+        let mut menu_items: Vec<MenuItem<Self>> = Vec::new();
+
+        let Some(device_properties) = self.device_properties.as_ref() else {
+            menu_items.push(
+                StandardItem {
+                    label: NO_COMPATIBLE_DEVICE.to_string(),
+                    enabled: false,
+                    ..Default::default()
+                }
+                .into(),
+            );
+            menu_items.push(make_exit().into());
+            return menu_items;
+        };
+
+        if !device_properties.connected.unwrap_or(false) {
+            menu_items.push(
+                StandardItem {
+                    label: HEADSET_NOT_CONNECTED.to_string(),
+                    enabled: false,
+                    ..Default::default()
+                }
+                .into(),
+            );
+            menu_items.push(make_exit().into());
+            return menu_items;
+        }
+        for property in device_properties.get_properties() {
+            match property {
+                hyper_headset::devices::PropertyDescriptorWrapper::Int(property, []) => {
+                    let Some(current_value) = property.data else {
+                        continue;
+                    };
+                    let create_event = property.create_event;
+                    menu_items.push(
+                        StandardItem {
+                            label: format!(
+                                "{} {}{}",
+                                property.prefix, current_value, property.suffix
+                            ),
+                            enabled: false,
+                            activate: Box::new(move |_| {
+                                let _ = (create_event)(!current_value);
+                            }),
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
+                hyper_headset::devices::PropertyDescriptorWrapper::Int(property, options) => {
+                    let Some(current_value) = property.data else {
+                        continue;
+                    };
+                    let create_event = property.create_event;
+                    let sub_menu = options
+                        .iter()
+                        .map(|val| {
+                            let update_sender = self.update_sender.clone();
+                            StandardItem {
+                                label: format!("{}{}", val, property.suffix),
+                                enabled: property.property_type == PropertyType::ReadWrite
+                                    && property.data.is_some(),
+                                activate: Box::new(move |_| {
+                                    if let Some(command) = (create_event)(*val) {
+                                        let _ = update_sender.send(command);
+                                    }
+                                }),
+                                ..Default::default()
+                            }
+                            .into()
+                        })
+                        .collect();
+                    menu_items.push(
+                        SubMenu {
+                            label: format!(
+                                "{} {}{}",
+                                property.prefix, current_value, property.suffix
+                            ),
+                            enabled: property.property_type == PropertyType::ReadWrite
+                                && property.data.is_some(),
+                            submenu: sub_menu,
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
+                hyper_headset::devices::PropertyDescriptorWrapper::Bool(property) => {
+                    let Some(current_value) = property.data else {
+                        continue;
+                    };
+                    let create_event = property.create_event;
+                    let update_sender = self.update_sender.clone();
+                    menu_items.push(
+                        StandardItem {
+                            label: format!(
+                                "{} {}{}",
+                                property.prefix, current_value, property.suffix
+                            ),
+                            enabled: property.property_type == PropertyType::ReadWrite
+                                && property.data.is_some(),
+                            activate: Box::new(move |_| {
+                                if let Some(command) = (create_event)(!current_value) {
+                                    let _ = update_sender.send(command);
+                                }
+                            }),
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
+                hyper_headset::devices::PropertyDescriptorWrapper::String(property) => {
+                    let Some(current_value) = property.data else {
+                        continue;
+                    };
+                    let create_event = property.create_event;
+                    menu_items.push(
+                        StandardItem {
+                            label: format!(
+                                "{} {}{}",
+                                property.prefix, current_value, property.suffix
+                            ),
+                            enabled: false,
+                            activate: Box::new(move |_| {
+                                let _ = (create_event)(String::new());
+                            }),
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
+            }
+        }
+
+        menu_items.push(make_exit().into());
+        menu_items
     }
 }

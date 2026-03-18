@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use clap::{Arg, Command};
-use hyper_headset::devices::connect_compatible_device;
+use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
 
 const SHOW_ALL_OPTIONS: bool = false;
 
@@ -111,110 +111,45 @@ fn main() {
         )
         .get_matches();
 
+    let mut commands = Vec::new();
     if let Some(delay) = matches.get_one::<u8>("automatic_shutdown") {
         let delay = *delay as u64;
-        if let Some(packet) =
-            device.set_automatic_shut_down_packet(Duration::from_secs(delay * 60u64))
-        {
-            device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                eprintln!("Failed to set automatic shutdown with error: {:?}", err);
-                std::process::exit(1);
-            }
-        } else {
-            eprintln!("ERROR: Automatic shutdown is not supported on this device");
-            std::process::exit(1);
-        }
+        commands.push(DeviceEvent::AutomaticShutdownAfter(Duration::from_secs(
+            delay * 60u64,
+        )));
     }
 
     if let Some(mute) = matches.get_one::<bool>("mute") {
-        if let Some(packet) = device.set_mute_packet(*mute) {
-            device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                eprintln!("Failed to mute with error: {:?}", err);
-                std::process::exit(1);
-            }
-        } else {
-            eprintln!("ERROR: Microphone mute control is not supported on this device (hardware button only)");
-            std::process::exit(1);
-        }
+        commands.push(DeviceEvent::Muted(*mute));
     }
 
     if let Some(enable) = matches.get_one::<bool>("enable_side_tone") {
-        if let Some(packet) = device.set_side_tone_packet(*enable) {
-            device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                eprintln!("Failed to enable side tone with error: {:?}", err);
-                std::process::exit(1);
-            }
-        } else {
-            eprintln!("ERROR: Side tone control is not supported on this device");
-            std::process::exit(1);
-        }
+        commands.push(DeviceEvent::SideToneOn(*enable));
     }
 
     if let Some(volume) = matches.get_one::<u8>("side_tone_volume") {
-        if let Some(packet) = device.set_side_tone_volume_packet(*volume) {
-            device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                eprintln!("Failed to set side tone volume with error: {:?}", err);
-                std::process::exit(1);
-            }
-        } else {
-            eprintln!("ERROR: Side tone volume control is not supported on this device");
-            std::process::exit(1);
-        }
+        commands.push(DeviceEvent::SideToneVolume(*volume));
     }
 
     if let Some(enable) = matches.get_one::<bool>("enable_voice_prompt") {
-        if let Some(packet) = device.set_voice_prompt_packet(*enable) {
-            device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                eprintln!("Failed to enable voice prompt with error: {:?}", err);
-                std::process::exit(1);
-            }
-        } else {
-            eprintln!("ERROR: Voice prompt control is not supported on this device");
-            std::process::exit(1);
-        }
+        commands.push(DeviceEvent::VoicePrompt(*enable));
     }
 
     if let Some(surround_sound) = matches.get_one::<bool>("surround_sound") {
-        if let Some(packet) = device.set_surround_sound_packet(*surround_sound) {
-            device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                eprintln!("Failed to set surround sound with error: {:?}", err);
-                std::process::exit(1);
-            }
-        } else {
-            eprintln!("ERROR: Surround sound control is not supported on this device");
-            eprintln!("       Use the physical headset button or Windows audio settings to toggle surround sound.");
-            std::process::exit(1);
-        }
+        commands.push(DeviceEvent::SurroundSound(*surround_sound));
     }
 
     if let Some(mute_playback) = matches.get_one::<bool>("mute_playback") {
-        if let Some(packet) = device.set_silent_mode_packet(*mute_playback) {
-            device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                eprintln!("Failed to mute playback with error: {:?}", err);
-                std::process::exit(1);
-            }
-        } else {
-            eprintln!("ERROR: Playback mute control is not supported on this device");
-            std::process::exit(1);
-        }
+        commands.push(DeviceEvent::Silent(*mute_playback));
     }
 
     if let Some(activate) = matches.get_one::<bool>("activate_noise_gate") {
-        if let Some(packet) = device.set_noise_gate_packet(*activate) {
-            device.prepare_write();
-            if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                eprintln!("Failed to activate noise gate with error: {:?}", err);
-                std::process::exit(1);
-            }
-        } else {
-            eprintln!("ERROR: Activating noise gate is not supported on this device");
+        commands.push(DeviceEvent::NoiseGateActive(*activate));
+    }
+
+    for command in commands {
+        if let Err(e) = device.try_apply(command) {
+            eprintln!("{e}");
             std::process::exit(1);
         }
     }
@@ -233,5 +168,5 @@ fn main() {
         eprintln!("{error}");
         std::process::exit(1);
     };
-    println!("{}", device.get_device_state());
+    println!("{}", device.get_device_state().device_properties);
 }

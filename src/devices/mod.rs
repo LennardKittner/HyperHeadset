@@ -14,7 +14,11 @@ use crate::{
     },
 };
 use hidapi::{HidApi, HidDevice, HidError};
-use std::{collections::HashSet, fmt::Display, time::Duration};
+use std::{
+    collections::HashSet,
+    fmt::{Debug, Display},
+    time::Duration,
+};
 use thistermination::TerminationFull;
 
 const PASSIVE_REFRESH_TIME_OUT: Duration = Duration::from_secs(2);
@@ -61,7 +65,7 @@ const DEVICE_REGISTER: &[DeviceEntry] = &[
 ];
 
 const RESPONSE_BUFFER_SIZE: usize = 256;
-const RESPONSE_DELAY: Duration = Duration::from_millis(50);
+pub const RESPONSE_DELAY: Duration = Duration::from_millis(50);
 
 pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     let all_product_ids: Vec<u16> = DEVICE_REGISTER
@@ -82,7 +86,8 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     let entry = DEVICE_REGISTER
         .iter()
         .find(|e| {
-            e.vendor_ids.contains(&state.vendor_id) && e.product_ids.contains(&state.product_id)
+            e.vendor_ids.contains(&state.device_properties.vendor_id)
+                && e.product_ids.contains(&state.device_properties.product_id)
         })
         .ok_or(DeviceError::NoDeviceFound())?;
 
@@ -95,6 +100,11 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
 #[derive(Debug)]
 pub struct DeviceState {
     pub hid_device: HidDevice,
+    pub device_properties: DeviceProperties,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeviceProperties {
     pub product_id: u16,
     pub vendor_id: u16,
     pub device_name: Option<String>,
@@ -124,7 +134,7 @@ pub struct DeviceState {
     pub can_set_noise_gate: bool,
 }
 
-impl Display for DeviceState {
+impl Display for DeviceProperties {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_string_with_readonly_info(25))
     }
@@ -202,24 +212,98 @@ impl DeviceState {
         let device_name = hid_device.get_product_string()?;
         Ok(DeviceState {
             hid_device,
+            device_properties: DeviceProperties::new(product_id, vendor_id, device_name),
+        })
+    }
+
+    fn update_self_with_event(&mut self, event: &DeviceEvent) {
+        match event {
+            DeviceEvent::BatterLevel(level) => self.device_properties.battery_level = Some(*level),
+            DeviceEvent::Charging(status) => self.device_properties.charging = Some(*status),
+            DeviceEvent::Muted(status) => self.device_properties.muted = Some(*status),
+            DeviceEvent::MicConnected(status) => {
+                self.device_properties.mic_connected = Some(*status)
+            }
+            DeviceEvent::AutomaticShutdownAfter(duration) => {
+                self.device_properties.automatic_shutdown_after = Some(*duration)
+            }
+            DeviceEvent::PairingInfo(info) => self.device_properties.pairing_info = Some(*info),
+            DeviceEvent::ProductColor(color) => self.device_properties.product_color = Some(*color),
+            DeviceEvent::SideToneOn(side) => self.device_properties.side_tone_on = Some(*side),
+            DeviceEvent::SideToneVolume(volume) => {
+                self.device_properties.side_tone_volume = Some(*volume)
+            }
+            DeviceEvent::SurroundSound(status) => {
+                self.device_properties.surround_sound = Some(*status)
+            }
+            DeviceEvent::VoicePrompt(on) => self.device_properties.voice_prompt_on = Some(*on),
+            DeviceEvent::WirelessConnected(connected) => {
+                self.device_properties.connected = Some(*connected)
+            }
+            DeviceEvent::Silent(silent) => self.device_properties.silent = Some(*silent),
+            DeviceEvent::RequireSIRKReset(_reset) => {
+                debug_println!("requested SIRK reset {_reset}");
+            }
+            DeviceEvent::NoiseGateActive(on) => {
+                self.device_properties.noise_gate_active = Some(*on)
+            }
+        };
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum PropertyType {
+    ReadOnly,
+    AlwaysReadOnly,
+    ReadWrite,
+}
+
+#[derive(Debug)]
+pub enum PropertyDescriptorWrapper {
+    Int(PropertyDescriptor<u8>, &'static [u8]),
+    Bool(PropertyDescriptor<bool>),
+    String(PropertyDescriptor<String>),
+}
+
+pub struct PropertyDescriptor<T: 'static> {
+    pub prefix: &'static str,
+    pub data: Option<T>,
+    pub suffix: &'static str,
+    pub property_type: PropertyType,
+    pub create_event: &'static dyn Fn(T) -> Option<DeviceEvent>,
+}
+
+impl<T: Debug> Debug for PropertyDescriptor<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PropertyDescriptor")
+            .field("prefix", &self.prefix)
+            .field("data", &self.data)
+            .field("suffix", &self.suffix)
+            .field("property_type", &self.property_type)
+            .finish()
+    }
+}
+
+impl DeviceProperties {
+    pub fn new(product_id: u16, vendor_id: u16, device_name: Option<String>) -> DeviceProperties {
+        DeviceProperties {
             product_id,
             vendor_id,
             device_name,
-            charging: None,
             battery_level: None,
+            charging: None,
             muted: None,
-            surround_sound: None,
             mic_connected: None,
             automatic_shutdown_after: None,
             pairing_info: None,
             product_color: None,
             side_tone_on: None,
             side_tone_volume: None,
+            surround_sound: None,
             voice_prompt_on: None,
             connected: None,
             silent: None,
             noise_gate_active: None,
-            // Capability flags - will be set by init_capabilities()
             can_set_mute: false,
             can_set_surround_sound: false,
             can_set_side_tone: false,
@@ -229,103 +313,183 @@ impl DeviceState {
             can_set_silent_mode: false,
             can_set_equalizer: false,
             can_set_noise_gate: false,
-        })
+        }
     }
 
-    fn get_display_data(&self) -> Vec<(&str, Option<String>, &str, bool)> {
+    pub fn get_properties(&self) -> Vec<PropertyDescriptorWrapper> {
         vec![
-            (
-                "Battery level:",
-                self.battery_level.map(|l| l.to_string()),
-                "%",
-                false,
+            PropertyDescriptorWrapper::String(PropertyDescriptor {
+                prefix: "Charging status:",
+                data: self.charging.map(|c| c.to_string()),
+                suffix: "",
+                property_type: PropertyType::AlwaysReadOnly,
+                create_event: &|_| None,
+            }),
+            PropertyDescriptorWrapper::Int(
+                PropertyDescriptor {
+                    prefix: "Battery level:",
+                    data: self.battery_level,
+                    suffix: "%",
+                    property_type: PropertyType::AlwaysReadOnly,
+                    create_event: &|_| None,
+                },
+                &[],
             ),
-            (
-                "Charging status:",
-                self.charging.map(|c| c.to_string()),
-                "",
-                false,
+            PropertyDescriptorWrapper::Bool(PropertyDescriptor {
+                prefix: "Muted:",
+                data: self.muted,
+                suffix: "",
+                property_type: if self.can_set_mute {
+                    PropertyType::ReadWrite
+                } else {
+                    PropertyType::ReadOnly
+                },
+                create_event: &move |mute| Some(DeviceEvent::Muted(mute)),
+            }),
+            PropertyDescriptorWrapper::Bool(PropertyDescriptor {
+                prefix: "Mic connected:",
+                data: self.mic_connected,
+                suffix: "",
+                property_type: PropertyType::AlwaysReadOnly,
+                create_event: &|_| None,
+            }),
+            PropertyDescriptorWrapper::Int(
+                PropertyDescriptor {
+                    prefix: "Automatic shutdown after:",
+                    data: self
+                        .automatic_shutdown_after
+                        .map(|t| (t.as_secs() / 60) as u8),
+                    suffix: "min",
+                    property_type: if self.can_set_mute {
+                        PropertyType::ReadWrite
+                    } else {
+                        PropertyType::ReadOnly
+                    },
+                    create_event: &|t| {
+                        Some(DeviceEvent::AutomaticShutdownAfter(Duration::from_secs(
+                            t as u64 * 60,
+                        )))
+                    },
+                },
+                &[0, 5, 10, 15, 20, 30, 40, 60],
             ),
-            (
-                "Muted:",
-                self.muted.map(|c| c.to_string()),
-                "",
-                !self.can_set_mute,
+            PropertyDescriptorWrapper::Int(
+                PropertyDescriptor {
+                    prefix: "Pairing info:",
+                    data: self.pairing_info,
+                    suffix: "",
+                    property_type: PropertyType::AlwaysReadOnly,
+                    create_event: &|_| None,
+                },
+                &[],
             ),
-            (
-                "Mic connected:",
-                self.mic_connected.map(|c| c.to_string()),
-                "",
-                false,
+            PropertyDescriptorWrapper::String(PropertyDescriptor {
+                prefix: "Product color:",
+                data: self.product_color.map(|c| c.to_string()),
+                suffix: "",
+                property_type: PropertyType::AlwaysReadOnly,
+                create_event: &|_| None,
+            }),
+            PropertyDescriptorWrapper::Bool(PropertyDescriptor {
+                prefix: "Side tone:",
+                data: self.side_tone_on,
+                suffix: "",
+                property_type: if self.can_set_side_tone {
+                    PropertyType::ReadWrite
+                } else {
+                    PropertyType::ReadOnly
+                },
+                create_event: &move |enable| Some(DeviceEvent::SideToneOn(enable)),
+            }),
+            PropertyDescriptorWrapper::Int(
+                PropertyDescriptor {
+                    prefix: "Side tone volume:",
+                    data: self.side_tone_volume,
+                    suffix: "",
+                    property_type: if self.can_set_side_tone_volume {
+                        PropertyType::ReadWrite
+                    } else {
+                        PropertyType::ReadOnly
+                    },
+                    create_event: &|v| Some(DeviceEvent::SideToneVolume(v)),
+                },
+                &[0, 25, 50, 75, 100, 125, 150, 175, 200, 225, 250],
             ),
-            (
-                "Automatic shutdown after:",
-                self.automatic_shutdown_after
-                    .map(|c| (c.as_secs() / 60).to_string()),
-                "min",
-                !self.can_set_automatic_shutdown,
-            ),
-            (
-                "Pairing info:",
-                self.pairing_info.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            (
-                "Product color:",
-                self.product_color.map(|c| c.to_string()),
-                "",
-                false,
-            ),
-            (
-                "Side tone:",
-                self.side_tone_on.map(|c| c.to_string()),
-                "",
-                !self.can_set_side_tone,
-            ),
-            (
-                "Side tone volume:",
-                self.side_tone_volume.map(|c| c.to_string()),
-                "",
-                !self.can_set_side_tone_volume,
-            ),
-            (
-                "Surround sound:",
-                self.surround_sound.map(|c| c.to_string()),
-                "",
-                !self.can_set_surround_sound,
-            ),
-            (
-                "Voice prompt:",
-                self.voice_prompt_on.map(|c| c.to_string()),
-                "",
-                !self.can_set_voice_prompt,
-            ),
-            (
-                "Playback muted:",
-                self.silent.map(|c| c.to_string()),
-                "",
-                !self.can_set_silent_mode,
-            ),
-            (
-                "Noise gate active:",
-                self.noise_gate_active.map(|c| c.to_string()),
-                "",
-                !self.can_set_noise_gate,
-            ),
-            (
-                "Connected:",
-                self.connected.map(|c| c.to_string()),
-                "",
-                false,
-            ),
+            PropertyDescriptorWrapper::Bool(PropertyDescriptor {
+                prefix: "Surround sound:",
+                data: self.surround_sound,
+                suffix: "",
+                property_type: if self.can_set_surround_sound {
+                    PropertyType::ReadWrite
+                } else {
+                    PropertyType::ReadOnly
+                },
+                create_event: &move |enable| Some(DeviceEvent::SurroundSound(enable)),
+            }),
+            PropertyDescriptorWrapper::Bool(PropertyDescriptor {
+                prefix: "Voice prompt:",
+                data: self.voice_prompt_on,
+                suffix: "",
+                property_type: if self.can_set_voice_prompt {
+                    PropertyType::ReadWrite
+                } else {
+                    PropertyType::ReadOnly
+                },
+                create_event: &move |enable| Some(DeviceEvent::VoicePrompt(enable)),
+            }),
+            PropertyDescriptorWrapper::Bool(PropertyDescriptor {
+                prefix: "Playback muted:",
+                data: self.silent,
+                suffix: "",
+                property_type: if self.can_set_silent_mode {
+                    PropertyType::ReadWrite
+                } else {
+                    PropertyType::ReadOnly
+                },
+                create_event: &move |enable| Some(DeviceEvent::Silent(enable)),
+            }),
+            PropertyDescriptorWrapper::Bool(PropertyDescriptor {
+                prefix: "Noise gate active:",
+                data: self.noise_gate_active,
+                suffix: "",
+                property_type: if self.can_set_noise_gate {
+                    PropertyType::ReadWrite
+                } else {
+                    PropertyType::ReadOnly
+                },
+                create_event: &move |enable| Some(DeviceEvent::NoiseGateActive(enable)),
+            }),
+            PropertyDescriptorWrapper::Bool(PropertyDescriptor {
+                prefix: "Connected:",
+                data: self.connected,
+                suffix: "",
+                property_type: PropertyType::AlwaysReadOnly,
+                create_event: &|_| None,
+            }),
         ]
     }
 
     pub fn to_string_with_padding(&self, padding: usize) -> String {
-        self.get_display_data()
+        self.get_properties()
             .iter()
-            .filter_map(|(prefix, data, suffix, _)| {
+            .filter_map(|prop| {
+                let (prefix, data, suffix) = match prop {
+                    PropertyDescriptorWrapper::Int(property_descriptor, _) => (
+                        property_descriptor.prefix,
+                        &property_descriptor.data.map(|v| v.to_string()),
+                        property_descriptor.suffix,
+                    ),
+                    PropertyDescriptorWrapper::Bool(property_descriptor) => (
+                        property_descriptor.prefix,
+                        &property_descriptor.data.map(|v| v.to_string()),
+                        property_descriptor.suffix,
+                    ),
+                    PropertyDescriptorWrapper::String(property_descriptor) => (
+                        property_descriptor.prefix,
+                        &property_descriptor.data,
+                        property_descriptor.suffix,
+                    ),
+                };
                 data.as_ref()
                     .map(|data| format!("{:<padding$} {}{}", prefix, data, suffix))
             })
@@ -334,62 +498,41 @@ impl DeviceState {
     }
 
     pub fn to_string_with_readonly_info(&self, padding: usize) -> String {
-        self.get_display_data()
+        self.get_properties()
             .iter()
-            .filter_map(|(prefix, data, suffix, readonly)| {
-                if let Some(data) = data {
-                    let readonly_marker = if *readonly { " (read-only)" } else { "" };
-                    Some(format!(
-                        "{:<padding$} {}{}{}",
-                        prefix, data, suffix, readonly_marker
-                    ))
-                } else {
-                    None
-                }
+            .filter_map(|prop| {
+                let (prefix, data, suffix, property_type) = match prop {
+                    PropertyDescriptorWrapper::Int(property_descriptor, _) => (
+                        property_descriptor.prefix,
+                        &property_descriptor.data.map(|v| v.to_string()),
+                        property_descriptor.suffix,
+                        property_descriptor.property_type,
+                    ),
+                    PropertyDescriptorWrapper::Bool(property_descriptor) => (
+                        property_descriptor.prefix,
+                        &property_descriptor.data.map(|v| v.to_string()),
+                        property_descriptor.suffix,
+                        property_descriptor.property_type,
+                    ),
+                    PropertyDescriptorWrapper::String(property_descriptor) => (
+                        property_descriptor.prefix,
+                        &property_descriptor.data,
+                        property_descriptor.suffix,
+                        property_descriptor.property_type,
+                    ),
+                };
+
+                data.as_ref().map(|data| {
+                    let readonly_marker = if property_type == PropertyType::ReadOnly {
+                        " (read-only)"
+                    } else {
+                        ""
+                    };
+                    format!("{:<padding$} {}{}{}", prefix, data, suffix, readonly_marker)
+                })
             })
             .collect::<Vec<String>>()
             .join("\n")
-    }
-
-    fn update_self_with_event(&mut self, event: &DeviceEvent) {
-        match event {
-            DeviceEvent::BatterLevel(level) => self.battery_level = Some(*level),
-            DeviceEvent::Charging(status) => self.charging = Some(*status),
-            DeviceEvent::Muted(status) => self.muted = Some(*status),
-            DeviceEvent::MicConnected(status) => self.mic_connected = Some(*status),
-            DeviceEvent::AutomaticShutdownAfter(duration) => {
-                self.automatic_shutdown_after = Some(*duration)
-            }
-            DeviceEvent::PairingInfo(info) => self.pairing_info = Some(*info),
-            DeviceEvent::ProductColor(color) => self.product_color = Some(*color),
-            DeviceEvent::SideToneOn(side) => self.side_tone_on = Some(*side),
-            DeviceEvent::SideToneVolume(volume) => self.side_tone_volume = Some(*volume),
-            DeviceEvent::SurroundSound(status) => self.surround_sound = Some(*status),
-            DeviceEvent::VoicePrompt(on) => self.voice_prompt_on = Some(*on),
-            DeviceEvent::WirelessConnected(connected) => self.connected = Some(*connected),
-            DeviceEvent::Silent(silent) => self.silent = Some(*silent),
-            DeviceEvent::RequireSIRKReset(reset) => {
-                debug_println!("requested SIRK reset {reset}");
-            }
-            DeviceEvent::NoiseGateActive(on) => self.noise_gate_active = Some(*on),
-        };
-    }
-
-    pub fn clear_state(&mut self) {
-        self.charging = None;
-        self.battery_level = None;
-        self.muted = None;
-        self.surround_sound = None;
-        self.mic_connected = None;
-        self.automatic_shutdown_after = None;
-        self.pairing_info = None;
-        self.product_color = None;
-        self.side_tone_on = None;
-        self.side_tone_volume = None;
-        self.voice_prompt_on = None;
-        self.connected = None;
-        self.silent = None;
-        self.noise_gate_active = None;
     }
 }
 
@@ -460,7 +603,7 @@ impl From<u8> for Color {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ChargingStatus {
     NotCharging,
     Charging,
@@ -583,20 +726,21 @@ pub trait Device {
 
         // Now set them in device state
         let state = self.get_device_state_mut();
-        state.can_set_mute = can_set_mute;
-        state.can_set_surround_sound = can_set_surround_sound;
-        state.can_set_side_tone = can_set_side_tone;
-        state.can_set_automatic_shutdown = can_set_automatic_shutdown;
-        state.can_set_side_tone_volume = can_set_side_tone_volume;
-        state.can_set_voice_prompt = can_set_voice_prompt;
-        state.can_set_silent_mode = can_set_silent_mode;
-        state.can_set_equalizer = can_set_equalizer;
-        state.can_set_noise_gate = can_set_noise_gate;
+        state.device_properties.can_set_mute = can_set_mute;
+        state.device_properties.can_set_surround_sound = can_set_surround_sound;
+        state.device_properties.can_set_side_tone = can_set_side_tone;
+        state.device_properties.can_set_automatic_shutdown = can_set_automatic_shutdown;
+        state.device_properties.can_set_side_tone_volume = can_set_side_tone_volume;
+        state.device_properties.can_set_voice_prompt = can_set_voice_prompt;
+        state.device_properties.can_set_silent_mode = can_set_silent_mode;
+        state.device_properties.can_set_equalizer = can_set_equalizer;
+        state.device_properties.can_set_noise_gate = can_set_noise_gate;
     }
 
     fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
         Ok(())
     }
+
     fn wait_for_updates(&mut self, duration: Duration) -> Option<Vec<DeviceEvent>> {
         let mut buf = self.get_response_buffer();
         let res = self
@@ -646,7 +790,10 @@ pub trait Device {
                 }
                 responded = true;
             }
-            if !matches!(self.get_device_state().connected, Some(true)) {
+            if !matches!(
+                self.get_device_state().device_properties.connected,
+                Some(true)
+            ) {
                 break;
             }
         }
@@ -680,5 +827,122 @@ pub trait Device {
         }
 
         Ok(())
+    }
+
+    fn try_apply(&mut self, command: DeviceEvent) -> Result<(), String> {
+        match command {
+            DeviceEvent::AutomaticShutdownAfter(delay) => {
+                if let Some(packet) = self.set_automatic_shut_down_packet(delay) {
+                    self.prepare_write();
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        Err(format!(
+                            "Failed to set automatic shutdown with error: {:?}",
+                            err
+                        ))?;
+                    }
+                } else {
+                    Err("ERROR: Automatic shutdown is not supported on this device".to_string())?;
+                }
+            }
+            DeviceEvent::Muted(mute) => {
+                if let Some(packet) = self.set_mute_packet(mute) {
+                    self.prepare_write();
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        Err(format!("Failed to mute with error: {:?}", err))?;
+                    }
+                } else {
+                    Err("ERROR: Microphone mute control is not supported on this device (hardware button only)")?;
+                }
+            }
+            DeviceEvent::SideToneOn(enable) => {
+                if let Some(packet) = self.set_side_tone_packet(enable) {
+                    self.prepare_write();
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        Err(format!("Failed to enable side tone with error: {:?}", err))?;
+                    }
+                } else {
+                    Err("ERROR: Side tone control is not supported on this device".to_string())?;
+                }
+            }
+            DeviceEvent::SideToneVolume(volume) => {
+                if let Some(packet) = self.set_side_tone_volume_packet(volume) {
+                    self.prepare_write();
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        Err(format!(
+                            "Failed to set side tone volume with error: {:?}",
+                            err
+                        ))?;
+                    }
+                } else {
+                    Err(
+                        "ERROR: Side tone volume control is not supported on this device"
+                            .to_string(),
+                    )?;
+                }
+            }
+            DeviceEvent::VoicePrompt(enable) => {
+                if let Some(packet) = self.set_voice_prompt_packet(enable) {
+                    self.prepare_write();
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        Err(format!(
+                            "Failed to enable voice prompt with error: {:?}",
+                            err
+                        ))?;
+                    }
+                } else {
+                    Err("ERROR: Voice prompt control is not supported on this device")?;
+                }
+            }
+            DeviceEvent::SurroundSound(surround_sound) => {
+                if let Some(packet) = self.set_surround_sound_packet(surround_sound) {
+                    self.prepare_write();
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        Err(format!(
+                            "Failed to set surround sound with error: {:?}",
+                            err
+                        ))?;
+                    }
+                } else {
+                    Err("ERROR: Surround sound control is not supported on this device")?;
+                }
+            }
+            DeviceEvent::Silent(mute_playback) => {
+                if let Some(packet) = self.set_silent_mode_packet(mute_playback) {
+                    self.prepare_write();
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        Err(format!("Failed to mute playback with error: {:?}", err))?;
+                    }
+                } else {
+                    Err("ERROR: Playback mute control is not supported on this device")?;
+                }
+            }
+            DeviceEvent::NoiseGateActive(activate) => {
+                if let Some(packet) = self.set_noise_gate_packet(activate) {
+                    self.prepare_write();
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        Err(format!(
+                            "Failed to activate noise gate with error: {:?}",
+                            err
+                        ))?;
+                    }
+                } else {
+                    Err("ERROR: Activating noise gate is not supported on this device")?;
+                }
+            }
+            _ => (),
+        }
+        Ok(())
+    }
+
+    fn clear_state(&mut self) {
+        let product_id = self.get_device_state().device_properties.product_id;
+        let vendor_id = self.get_device_state().device_properties.vendor_id;
+        let device_name = self
+            .get_device_state()
+            .device_properties
+            .device_name
+            .clone();
+        self.get_device_state_mut().device_properties =
+            DeviceProperties::new(product_id, vendor_id, device_name)
     }
 }
