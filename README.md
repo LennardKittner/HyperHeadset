@@ -209,3 +209,6 @@ Once you have set the filters, you can perform various actions and review the pa
 ## Other Projects
 
 This project was inspired by [hyperx-cloud-flight](https://github.com/kondinskis/hyperx-cloud-flight).
+
+## Attribution
+<a href="https://www.flaticon.com/free-icons/headphones" title="headphones icons">Headphones icons created by sonnycandra - Flaticon</a>

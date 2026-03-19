@@ -20,6 +20,15 @@ fn placeholder_icon() -> tray_icon::menu::Icon {
     tray_icon::menu::Icon::from_rgba(vec![0, 0, 0, 0], 1, 1).unwrap()
 }
 
+#[cfg(target_os = "windows")]
+fn create_tray_icon() -> tray_icon::Icon {
+    // embed a headset .ico/.png at compile time — no file needed at runtime
+    let bytes = include_bytes!("../assets/headphone.png");
+    let img = image::load_from_memory(bytes).unwrap().into_rgba8();
+    let (w, h) = img.dimensions();
+    tray_icon::Icon::from_rgba(img.into_raw(), w, h).unwrap()
+}
+
 type CallbackMap = Arc<Mutex<HashMap<MenuId, Box<dyn Fn() + Send + Sync>>>>;
 
 pub struct TrayApp {
@@ -34,14 +43,28 @@ pub struct TrayApp {
 impl ApplicationHandler<Option<DeviceProperties>> for TrayApp {
     fn new_events(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, cause: StartCause) {
         if cause == StartCause::Init {
-            self.tray_icon = Some(
-                TrayIconBuilder::new()
-                    .with_menu(Box::new(Menu::new()))
-                    .with_title("🎧")
-                    .with_tooltip(NO_COMPATIBLE_DEVICE)
-                    .build()
-                    .unwrap(),
-            );
+            #[cfg(target_os = "windows")]
+            {
+                self.tray_icon = Some(
+                    TrayIconBuilder::new()
+                        .with_menu(Box::new(Menu::new()))
+                        .with_icon(create_tray_icon())
+                        .with_tooltip(NO_COMPATIBLE_DEVICE)
+                        .build()
+                        .unwrap(),
+                );
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                self.tray_icon = Some(
+                    TrayIconBuilder::new()
+                        .with_menu(Box::new(Menu::new()))
+                        .with_title("🎧")
+                        .with_tooltip(NO_COMPATIBLE_DEVICE)
+                        .build()
+                        .unwrap(),
+                );
+            }
 
             self.update(None);
         }
@@ -117,6 +140,7 @@ impl TrayApp {
 
         let Some(device_properties) = device_properties else {
             let _ = tray.set_tooltip(Some(NO_COMPATIBLE_DEVICE));
+            #[cfg(not(target_os = "windows"))]
             tray.set_title(Some(&format!("🎧?")));
             let status_item =
                 IconMenuItem::new(NO_COMPATIBLE_DEVICE, false, Some(placeholder_icon()), None);
@@ -132,6 +156,7 @@ impl TrayApp {
 
         if !device_properties.connected.unwrap_or(false) {
             let _ = tray.set_tooltip(Some(HEADSET_NOT_CONNECTED));
+            #[cfg(not(target_os = "windows"))]
             tray.set_title(Some(&format!("🎧?")));
             let status_item =
                 IconMenuItem::new(HEADSET_NOT_CONNECTED, false, Some(placeholder_icon()), None);
@@ -145,6 +170,7 @@ impl TrayApp {
             return;
         }
 
+        #[cfg(not(target_os = "windows"))]
         let _ = tray.set_tooltip(Some(
             device_properties
                 .to_string_with_padding(0)
@@ -154,6 +180,18 @@ impl TrayApp {
                 .join("\n"),
         ));
 
+        #[cfg(target_os = "windows")]
+        let _ = tray.set_tooltip(Some(
+            device_properties
+                .to_string_with_padding(0)
+                .lines()
+                .take(2)
+                .filter(|l| !l.contains("Unknown"))
+                .collect::<Vec<&str>>()
+                .join("\n"),
+        ));
+
+        #[cfg(not(target_os = "windows"))]
         if let Some(battery_level) = device_properties.battery_level {
             tray.set_title(Some(&format!("🎧 {battery_level}%")));
         }
