@@ -2,8 +2,112 @@
 mod status_tray;
 
 #[cfg(not(target_os = "linux"))]
+mod status_tray_not_linux;
+
+#[cfg(not(target_os = "linux"))]
 fn main() {
-    eprintln!("The tray app currently only supports Linux. Please use hyper_headset_cli instead.");
+    use std::sync::mpsc;
+
+    use hyper_headset::devices::{DeviceEvent, DeviceProperties};
+    use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy};
+
+    use crate::status_tray_not_linux::TrayApp;
+
+    let event_loop: EventLoop<Option<DeviceProperties>> =
+        EventLoop::with_user_event().build().unwrap();
+    let proxy: EventLoopProxy<Option<DeviceProperties>> = event_loop.create_proxy();
+    event_loop.set_control_flow(ControlFlow::Wait);
+
+    let (tx, rx) = mpsc::channel::<DeviceEvent>();
+
+    std::thread::spawn(move || {
+        use std::time::Duration;
+
+        use clap::{Arg, Command};
+        use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+
+        use hyper_headset::devices::connect_compatible_device;
+
+        let matches = Command::new(env!("CARGO_PKG_NAME"))
+        .version(env!("CARGO_PKG_VERSION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about("A tray application for monitoring HyperX headsets.")
+        .arg(
+            Arg::new("refresh_interval")
+                .long("refresh_interval")
+                .required(false)
+                .help("Set the refresh interval (in seconds)")
+                .default_value("3")
+                .value_parser(clap::value_parser!(u64)),
+        )
+        .arg(
+            Arg::new("press_mute_key")
+                .long("press_mute_key")
+                .required(false)
+                .help("The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted.")
+                .default_value("true")
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .get_matches();
+
+        let mut enigo = Enigo::new(&Settings::default()).unwrap();
+        let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
+        let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
+        let refresh_interval = Duration::from_secs(refresh_interval);
+
+        loop {
+            let mut device = loop {
+                match connect_compatible_device() {
+                    Ok(d) => break d,
+                    Err(e) => {
+                        let _ = proxy.send_event(None);
+                        eprintln!("Connecting failed with error: {e}")
+                    }
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            };
+
+            // Run loop
+            let mut run_counter = 0;
+            loop {
+                let mute_state = device.get_device_state().device_properties.muted;
+                match if run_counter % 30 == 0 {
+                    device.active_refresh_state()
+                } else {
+                    device.passive_refresh_state()
+                } {
+                    Ok(()) => (),
+                    Err(error) => {
+                        eprintln!("{error}");
+                        let _ = proxy
+                            .send_event(Some(device.get_device_state().device_properties.clone()));
+                        break; // try to reconnect
+                    }
+                };
+                if mute_state.is_some()
+                    && mute_state != device.get_device_state().device_properties.muted
+                {
+                    if press_mute_key {
+                        enigo.key(Key::F20, Direction::Click).unwrap();
+                    }
+                }
+
+                // with the default refresh_interval the state is only actively queried every 3min
+                // querying the device to frequently can lead to instability
+                let first = rx.recv_timeout(refresh_interval);
+                for command in first.into_iter().chain(rx.try_iter()) {
+                    let _ = device.try_apply(command);
+                    std::thread::sleep(hyper_headset::devices::RESPONSE_DELAY);
+                    let _ = device.active_refresh_state();
+                }
+
+                let _ = proxy.send_event(Some(device.get_device_state().device_properties.clone()));
+                run_counter += 1;
+            }
+        }
+    });
+
+    event_loop.run_app(&mut TrayApp::new(tx)).unwrap();
 }
 
 #[cfg(target_os = "linux")]
@@ -16,22 +120,19 @@ fn main() {
     use hyper_headset::devices::connect_compatible_device;
     use status_tray::{StatusTray, TrayHandler};
 
-    #[cfg(target_os = "linux")]
-    {
-        use hyper_headset::act_as_askpass_handler;
-        use hyper_headset::prompt_user_for_udev_rule;
+    use hyper_headset::act_as_askpass_handler;
+    use hyper_headset::prompt_user_for_udev_rule;
 
-        if let Ok(name) = std::env::current_exe() {
-            if let Some(name) = name.to_str() {
-                if let Ok(askpass) = std::env::var("SUDO_ASKPASS") {
-                    if name == askpass {
-                        act_as_askpass_handler();
-                    }
+    if let Ok(name) = std::env::current_exe() {
+        if let Some(name) = name.to_str() {
+            if let Ok(askpass) = std::env::var("SUDO_ASKPASS") {
+                if name == askpass {
+                    act_as_askpass_handler();
                 }
             }
         }
-        prompt_user_for_udev_rule();
     }
+    prompt_user_for_udev_rule();
     let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
@@ -91,7 +192,6 @@ fn main() {
             if mute_state.is_some()
                 && mute_state != device.get_device_state().device_properties.muted
             {
-                //TODO: macOS and windows have to use another key
                 if press_mute_key {
                     enigo.key(Key::MicMute, Direction::Click).unwrap();
                 }

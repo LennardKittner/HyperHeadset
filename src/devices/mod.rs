@@ -158,7 +158,7 @@ pub struct DeviceState {
     pub device_properties: DeviceProperties,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceProperties {
     pub product_id: u16,
     pub vendor_id: u16,
@@ -376,7 +376,7 @@ pub struct PropertyDescriptor<T: 'static> {
     pub data: Option<T>,
     pub suffix: &'static str,
     pub property_type: PropertyType,
-    pub create_event: &'static dyn Fn(T) -> Option<DeviceEvent>,
+    pub create_event: &'static (dyn Fn(T) -> Option<DeviceEvent> + Send + Sync),
 }
 
 impl<T: Debug> Debug for PropertyDescriptor<T> {
@@ -675,7 +675,7 @@ pub enum DeviceEvent {
     NoiseGateActive(bool),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Color {
     BlackBlack,
     WhiteWhite,
