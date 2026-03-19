@@ -5,20 +5,13 @@ use std::{
 
 use hyper_headset::devices::{DeviceEvent, DeviceProperties, PropertyType};
 use tray_icon::{
-    menu::{IconMenuItem, Menu, MenuEvent, MenuId, Submenu},
+    menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu},
     TrayIcon, TrayIconBuilder,
 };
-use winit::{application::ApplicationHandler, event::StartCause, event_loop::ControlFlow};
-
-//TODO: maybe use MenuItem instead of IconMenuItem but than I probably have to patch Muda because
-//it crashes sometimes when trying to handle an image with zero size
+use winit::{application::ApplicationHandler, event::StartCause};
 
 const NO_COMPATIBLE_DEVICE: &str = "No compatible device found. Is the dongle plugged in?";
 const HEADSET_NOT_CONNECTED: &str = "Headset is not connected";
-
-fn placeholder_icon() -> tray_icon::menu::Icon {
-    tray_icon::menu::Icon::from_rgba(vec![0, 0, 0, 0], 1, 1).unwrap()
-}
 
 #[cfg(target_os = "windows")]
 fn create_tray_icon() -> tray_icon::Icon {
@@ -36,8 +29,6 @@ pub struct TrayApp {
     pub sender: Sender<DeviceEvent>,
     callbacks: CallbackMap,
     current_state: Option<Option<DeviceProperties>>,
-    //TODO: maybe not needed anymore?
-    pending_update: Option<Option<DeviceProperties>>,
 }
 
 impl ApplicationHandler<Option<DeviceProperties>> for TrayApp {
@@ -54,7 +45,7 @@ impl ApplicationHandler<Option<DeviceProperties>> for TrayApp {
                         .unwrap(),
                 );
             }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(target_os = "macos")]
             {
                 self.tray_icon = Some(
                     TrayIconBuilder::new()
@@ -72,21 +63,10 @@ impl ApplicationHandler<Option<DeviceProperties>> for TrayApp {
 
     fn user_event(
         &mut self,
-        el: &winit::event_loop::ActiveEventLoop,
+        _el: &winit::event_loop::ActiveEventLoop,
         device_properties: Option<DeviceProperties>,
     ) {
-        // Don't call set_menu here — macOS menu is still active at this point.
-        // Buffer the update and apply it once the event loop is idle.
-        self.pending_update = Some(device_properties);
-        el.set_control_flow(ControlFlow::Poll); // wake about_to_wait immediately
-    }
-
-    // Called once the event loop has drained all pending events — menu is closed by now
-    fn about_to_wait(&mut self, el: &winit::event_loop::ActiveEventLoop) {
-        if let Some(props) = self.pending_update.take() {
-            self.update(props);
-        }
-        el.set_control_flow(ControlFlow::Wait); // go back to sleeping
+        self.update(device_properties);
     }
 
     fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
@@ -120,7 +100,6 @@ impl TrayApp {
             sender,
             callbacks,
             current_state: None,
-            pending_update: None,
         }
     }
 
@@ -134,19 +113,18 @@ impl TrayApp {
             return;
         };
 
-        let quit_item = IconMenuItem::new("Quit", true, Some(placeholder_icon()), None);
         let menu = Menu::new();
         let mut new_callbacks: HashMap<MenuId, Box<dyn Fn() + Send + Sync>> = HashMap::new();
 
         let Some(device_properties) = device_properties else {
             let _ = tray.set_tooltip(Some(NO_COMPATIBLE_DEVICE));
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(target_os = "macos")]
             tray.set_title(Some(&format!("🎧?")));
-            let status_item =
-                IconMenuItem::new(NO_COMPATIBLE_DEVICE, false, Some(placeholder_icon()), None);
+            let status_item = MenuItem::new(NO_COMPATIBLE_DEVICE, false, None);
             menu.append(&status_item).unwrap();
-            menu.append(&quit_item).unwrap();
-            new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
+            menu.append(&PredefinedMenuItem::separator()).unwrap();
+            menu.append(&PredefinedMenuItem::quit(Some("Quit")))
+                .unwrap();
 
             *self.callbacks.lock().unwrap() = new_callbacks;
             tray.set_menu(Some(Box::new(menu)));
@@ -156,13 +134,13 @@ impl TrayApp {
 
         if !device_properties.connected.unwrap_or(false) {
             let _ = tray.set_tooltip(Some(HEADSET_NOT_CONNECTED));
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(target_os = "macos")]
             tray.set_title(Some(&format!("🎧?")));
-            let status_item =
-                IconMenuItem::new(HEADSET_NOT_CONNECTED, false, Some(placeholder_icon()), None);
+            let status_item = MenuItem::new(HEADSET_NOT_CONNECTED, false, None);
             menu.append(&status_item).unwrap();
-            menu.append(&quit_item).unwrap();
-            new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
+            menu.append(&PredefinedMenuItem::separator()).unwrap();
+            menu.append(&PredefinedMenuItem::quit(Some("Quit")))
+                .unwrap();
 
             *self.callbacks.lock().unwrap() = new_callbacks;
             tray.set_menu(Some(Box::new(menu)));
@@ -170,7 +148,7 @@ impl TrayApp {
             return;
         }
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "macos")]
         let _ = tray.set_tooltip(Some(
             device_properties
                 .to_string_with_padding(0)
@@ -191,7 +169,7 @@ impl TrayApp {
                 .join("\n"),
         ));
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "macos")]
         if let Some(battery_level) = device_properties.battery_level {
             tray.set_title(Some(&format!("🎧 {battery_level}%")));
         }
@@ -202,10 +180,9 @@ impl TrayApp {
                     let Some(current_value) = property.data else {
                         continue;
                     };
-                    let menu_item = IconMenuItem::new(
+                    let menu_item = MenuItem::new(
                         format!("{} {}{}", property.prefix, current_value, property.suffix),
                         false,
-                        Some(placeholder_icon()),
                         None,
                     );
                     let _ = menu.append(&menu_item);
@@ -220,12 +197,8 @@ impl TrayApp {
                     );
 
                     for item_value in items {
-                        let entry = IconMenuItem::new(
-                            format!("{}{}", item_value, property.suffix),
-                            true,
-                            Some(placeholder_icon()),
-                            None,
-                        );
+                        let entry =
+                            MenuItem::new(format!("{}{}", item_value, property.suffix), true, None);
                         submenu.append(&entry).unwrap();
 
                         let create_event = property.create_event;
@@ -249,11 +222,10 @@ impl TrayApp {
                     };
                     let create_event = property.create_event;
                     let update_sender = self.sender.clone();
-                    let menu_item = IconMenuItem::new(
+                    let menu_item = MenuItem::new(
                         format!("{} {}{}", property.prefix, current_value, property.suffix),
                         property.property_type == PropertyType::ReadWrite
                             && property.data.is_some(),
-                        Some(placeholder_icon()),
                         None,
                     );
                     let _ = menu.append(&menu_item);
@@ -271,10 +243,9 @@ impl TrayApp {
                     let Some(current_value) = property.data else {
                         continue;
                     };
-                    let menu_item = IconMenuItem::new(
+                    let menu_item = MenuItem::new(
                         format!("{} {}{}", property.prefix, current_value, property.suffix),
                         false,
-                        Some(placeholder_icon()),
                         None,
                     );
                     let _ = menu.append(&menu_item);
@@ -282,8 +253,9 @@ impl TrayApp {
             }
         }
 
-        menu.append(&quit_item).unwrap();
-        new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
+        menu.append(&PredefinedMenuItem::separator()).unwrap();
+        menu.append(&PredefinedMenuItem::quit(Some("Quit")))
+            .unwrap();
 
         *self.callbacks.lock().unwrap() = new_callbacks;
         tray.set_menu(Some(Box::new(menu)));
