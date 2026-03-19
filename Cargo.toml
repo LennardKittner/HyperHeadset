@@ -9,13 +9,15 @@ description = "A CLI and tray application for monitoring and managing HyperX hea
 clap = { version = "4.5.32", features = ["derive"] }
 enigo = "0.6.1"
 hidapi = { path = "vendor/hidapi" }
-[target.'cfg(target_os = "windows")'.dependencies]
-image = "0.25.10"
 thistermination = "1.0.0"
-[target.'cfg(not(target_os = "linux"))'.dependencies]
-tray-icon = "0.21.3"
-winit = "0.30.13"
 [target.'cfg(target_os = "linux")'.dependencies]
 dialog = "0.3.0"
 ksni = "0.2.0"
 shell-escape = "0.1.5"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = "0.21.3"
+winit = "0.30.13"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+image = "0.25.10"
