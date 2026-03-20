@@ -137,11 +137,11 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
                 .expect("Why is there a device without packets ???");
 
             test_device.prepare_write();
-            if let Err(e) = test_device
+            if let Err(_e) = test_device
                 .get_device_state()
                 .write_hid_report(&probe_packet)
             {
-                debug_println!("Failed to open: {e:?}");
+                debug_println!("Failed to open: {_e:?}");
                 continue;
             } else {
                 device = Some(test_device);

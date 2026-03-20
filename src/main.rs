@@ -86,10 +86,9 @@ fn main() {
                 };
                 if mute_state.is_some()
                     && mute_state != device.get_device_state().device_properties.muted
+                    && press_mute_key
                 {
-                    if press_mute_key {
-                        enigo.key(Key::F20, Direction::Click).unwrap();
-                    }
+                    enigo.key(Key::F20, Direction::Click).unwrap();
                 }
 
                 // with the default refresh_interval the state is only actively queried every 3min
