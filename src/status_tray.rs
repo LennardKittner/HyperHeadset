@@ -90,7 +90,7 @@ impl Tray for StatusTray {
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let make_exit = || StandardItem {
-            label: "Exit".into(),
+            label: "Quit".into(),
             icon_name: "application-exit".into(),
             activate: Box::new(|_| std::process::exit(0)),
             ..Default::default()
