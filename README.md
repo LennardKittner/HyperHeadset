@@ -7,17 +7,20 @@
 
 A CLI and tray application for monitoring and managing HyperX headsets.
 
-<img src=./screenshots/tray_app.png alt="tray_app" width="400">
+| OS | Tooltip | Context Menu |
+|:---:|:---:|:---:|
+| **Linux** | <img src=./screenshots/tray_linux.png width="280"> | <img src=./screenshots/tray_linux_2.png width="280"> |
+| **macOS** | <img src=./screenshots/tray_macOS.png width="280"> | <img src=./screenshots/tray_macOS_2.png width="280"> |
+| **Windows** | <img src=./screenshots/tray_windows.png width="280"> | <img src=./screenshots/tray_windows_2.png width="280"> |
 
 This project is not affiliated with, endorsed by, or associated with HyperX or its parent company in any way. All trademarks and brand names belong to their respective owners.
 
 ## Compatibility
-The CLI application is compatible with both Linux and MacOS operating systems.
-However, the tray application is only functional on Linux.
+Both the CLI and tray applications are compatible with Linux, MacOS, and Windows.
 
 **Supported Headsets**:
-- HyperX Cloud II Wireless HP vendorID
-- HyperX Cloud II Wireless HyperX vendorID
+- HyperX Cloud II Wireless HP vendor ID
+- HyperX Cloud II Wireless HyperX vendor ID
 - HyperX Cloud II Core Wireless
 - HyperX Cloud III Wireless
 - HyperX Cloud III S Wireless
@@ -25,7 +28,7 @@ However, the tray application is only functional on Linux.
 - HyperX Cloud Flight S
 - HyperX Cloud Alpha Wireless
 
-If your headset is not supported, feel free to open an issue.
+If your headset is not supported, feel free to open an issue; be sure to include the name, product ID, and vendor ID.
 
 ## Installation
 
@@ -39,7 +42,7 @@ or
 yay -S hyper-headset-bin
 ```
 
-### Prebuilt Binary (Linux/MacOS)
+### Prebuilt Binary (Linux/MacOS/Windows)
 
 Download from [GitHub releases](https://github.com/LennardKittner/HyperHeadset/releases).
 
@@ -53,16 +56,13 @@ If automatic installation fails, you can install them manually (see Prerequisite
 This project uses git submodules, so before building, you have to initialize them via:
 `git submodule update --init --recursive`
 
-To only build the CLI app on MacOS, use:
-`cargo build --release --bin hyper_headset_cli`
-
-To build both applications on Linux, use:
+To build both applications, use:
 `cargo build --release`
 
 See prerequisites below for installing dependencies.
 If the required udev rules are missing on Linux, the program will prompt you to install them automatically.
 
-## Prerequisites (Binary Releases / Building from Source Only)
+## Prerequisites 
 
 ### Dependencies
 
@@ -176,6 +176,7 @@ Options:
 Once it's open, hover over the headset icon in the system tray or right-click to view details such as the battery level.
 You can also change device properties or exit via the right-click menu.
 By default, the tray app sends a MicMute key press whenever the headset is muted or unmuted.
+Since there is no MicMute key on Windows and MacOS f20 is used instead.
 This allows applications such as Discord to react when the hardware mute button on the headset is pressed.
 
 To set this up, start the tray app, open Discord, and create a new keybind via **User Settings** -> **Keybinds** -> **Add a Keybind**.
@@ -186,9 +187,9 @@ Because the action only toggles Discord's state, you may need to synchronize it 
 
 ## Contributing / TODOs
 
-- [ ] Menu bar app for MacOS.
-- [ ] Windows support
 - [ ] Update ksni
+- [x] Menu bar app for MacOS.
+- [x] Windows support
 - [x] Allow configuration via tray app
 - [x] Actively configure the headset.
 - [x] Query device state instead of only relying on events.
