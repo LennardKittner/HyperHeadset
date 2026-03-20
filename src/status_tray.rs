@@ -106,6 +106,7 @@ impl Tray for StatusTray {
                 }
                 .into(),
             );
+            menu_items.push(MenuItem::Separator);
             menu_items.push(make_exit().into());
             return menu_items;
         };
@@ -119,6 +120,7 @@ impl Tray for StatusTray {
                 }
                 .into(),
             );
+            menu_items.push(MenuItem::Separator);
             menu_items.push(make_exit().into());
             return menu_items;
         }
@@ -228,6 +230,7 @@ impl Tray for StatusTray {
             }
         }
 
+        menu_items.push(MenuItem::Separator);
         menu_items.push(make_exit().into());
         menu_items
     }
