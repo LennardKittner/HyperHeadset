@@ -35,12 +35,18 @@ impl ApplicationHandler<Option<DeviceProperties>> for TrayApp {
     fn new_events(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, cause: StartCause) {
         if cause == StartCause::Init {
             #[cfg(target_os = "windows")]
+            unsafe {
+                enable_dark_context_menus();
+            }
+
+            #[cfg(target_os = "windows")]
             {
                 self.tray_icon = Some(
                     TrayIconBuilder::new()
                         .with_menu(Box::new(Menu::new()))
                         .with_icon(create_tray_icon())
                         .with_tooltip(NO_COMPATIBLE_DEVICE)
+                        .with_menu_on_left_click(true)
                         .build()
                         .unwrap(),
                 );
@@ -52,6 +58,7 @@ impl ApplicationHandler<Option<DeviceProperties>> for TrayApp {
                         .with_menu(Box::new(Menu::new()))
                         .with_title("🎧")
                         .with_tooltip(NO_COMPATIBLE_DEVICE)
+                        .with_menu_on_left_click(true)
                         .build()
                         .unwrap(),
                 );
@@ -113,6 +120,9 @@ impl TrayApp {
             return;
         };
 
+        #[cfg(target_os = "windows")]
+        let quit_item = MenuItem::new("Quit", true, None);
+
         let menu = Menu::new();
         let mut new_callbacks: HashMap<MenuId, Box<dyn Fn() + Send + Sync>> = HashMap::new();
 
@@ -123,6 +133,14 @@ impl TrayApp {
             let status_item = MenuItem::new(NO_COMPATIBLE_DEVICE, false, None);
             menu.append(&status_item).unwrap();
             menu.append(&PredefinedMenuItem::separator()).unwrap();
+
+            #[cfg(target_os = "windows")]
+            {
+                menu.append(&quit_item).unwrap();
+                new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
+            }
+
+            #[cfg(target_os = "macos")]
             menu.append(&PredefinedMenuItem::quit(Some("Quit")))
                 .unwrap();
 
@@ -139,6 +157,14 @@ impl TrayApp {
             let status_item = MenuItem::new(HEADSET_NOT_CONNECTED, false, None);
             menu.append(&status_item).unwrap();
             menu.append(&PredefinedMenuItem::separator()).unwrap();
+
+            #[cfg(target_os = "windows")]
+            {
+                menu.append(&quit_item).unwrap();
+                new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
+            }
+
+            #[cfg(target_os = "macos")]
             menu.append(&PredefinedMenuItem::quit(Some("Quit")))
                 .unwrap();
 
@@ -254,11 +280,42 @@ impl TrayApp {
         }
 
         menu.append(&PredefinedMenuItem::separator()).unwrap();
+
+        #[cfg(target_os = "windows")]
+        {
+            menu.append(&quit_item).unwrap();
+            new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
+        }
+
+        #[cfg(target_os = "macos")]
         menu.append(&PredefinedMenuItem::quit(Some("Quit")))
             .unwrap();
 
         *self.callbacks.lock().unwrap() = new_callbacks;
         tray.set_menu(Some(Box::new(menu)));
         self.current_state = Some(Some(device_properties));
+    }
+}
+
+#[cfg(target_os = "windows")]
+/// Dark magic to set dark mode
+unsafe fn enable_dark_context_menus() {
+    use windows::core::PCSTR;
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+
+    let uxtheme = LoadLibraryW(windows::core::w!("uxtheme.dll")).unwrap();
+
+    // SetPreferredAppMode is ordinal 135 (undocumented, no name export)
+    type SetPreferredAppMode = unsafe extern "system" fn(i32) -> i32;
+    if let Some(func) = GetProcAddress(uxtheme, PCSTR(135 as *const u8)) {
+        let set_mode: SetPreferredAppMode = std::mem::transmute(func);
+        set_mode(1); // 1 = AllowDark (follows system theme)
+    }
+
+    // FlushMenuThemes is ordinal 136 — applies the change immediately
+    type FlushMenuThemes = unsafe extern "system" fn();
+    if let Some(func) = GetProcAddress(uxtheme, PCSTR(136 as *const u8)) {
+        let flush: FlushMenuThemes = std::mem::transmute(func);
+        flush();
     }
 }
