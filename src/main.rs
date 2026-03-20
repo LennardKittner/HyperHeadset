@@ -50,9 +50,19 @@ fn main() {
         )
         .get_matches();
 
-        let mut enigo = Enigo::new(&Settings::default()).unwrap();
-        let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
         let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
+        let mut enigo = if press_mute_key {
+            match Enigo::new(&Settings::default()) {
+                Ok(enigo) => Some(enigo),
+                Err(e) => {
+                    eprintln!("Virtual mute key failed to initialize: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
         let refresh_interval = Duration::from_secs(refresh_interval);
 
         loop {
@@ -86,9 +96,12 @@ fn main() {
                 };
                 if mute_state.is_some()
                     && mute_state != device.get_device_state().device_properties.muted
-                    && press_mute_key
                 {
-                    enigo.key(Key::F20, Direction::Click).unwrap();
+                    if let Some(enigo) = &mut enigo {
+                        if let Err(e) = enigo.key(Key::F20, Direction::Click) {
+                            eprintln!("Failed to press key on mute: {e}");
+                        }
+                    }
                 }
 
                 // with the default refresh_interval the state is only actively queried every 3min
@@ -154,9 +167,19 @@ fn main() {
         )
         .get_matches();
 
-    let mut enigo = Enigo::new(&Settings::default()).unwrap();
-    let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
     let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
+    let mut enigo = if press_mute_key {
+        match Enigo::new(&Settings::default()) {
+            Ok(enigo) => Some(enigo),
+            Err(e) => {
+                eprintln!("Virtual mute key failed to initialize: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
     let refresh_interval = Duration::from_secs(refresh_interval);
     let (tx, rx) = mpsc::channel();
     let tray_handler = TrayHandler::new(StatusTray::new(tx));
@@ -191,8 +214,10 @@ fn main() {
             if mute_state.is_some()
                 && mute_state != device.get_device_state().device_properties.muted
             {
-                if press_mute_key {
-                    enigo.key(Key::MicMute, Direction::Click).unwrap();
+                if let Some(enigo) = &mut enigo {
+                    if let Err(e) = enigo.key(Key::MicMute, Direction::Click) {
+                        eprintln!("Failed to press key on mute: {e}");
+                    }
                 }
             }
 
