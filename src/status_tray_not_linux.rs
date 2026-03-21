@@ -5,13 +5,25 @@ use std::{
 
 use hyper_headset::devices::{DeviceEvent, DeviceProperties, PropertyType};
 use tray_icon::{
-    menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu},
     TrayIcon, TrayIconBuilder,
 };
 use winit::{application::ApplicationHandler, event::StartCause};
+#[cfg(target_os = "windows")]
+use winreg::{
+    enums::{RegType, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE},
+    RegKey, RegValue,
+};
 
 const NO_COMPATIBLE_DEVICE: &str = "No compatible device found. Is the dongle plugged in?";
 const HEADSET_NOT_CONNECTED: &str = "Headset is not connected";
+#[cfg(target_os = "windows")]
+const RUN_KEY_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+#[cfg(target_os = "windows")]
+const STARTUP_APPROVED_RUN_KEY_PATH: &str =
+    r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+#[cfg(target_os = "windows")]
+const STARTUP_VALUE_NAME: &str = "HyperHeadset";
 
 #[cfg(target_os = "windows")]
 fn create_tray_icon() -> tray_icon::Icon {
@@ -136,6 +148,7 @@ impl TrayApp {
 
             #[cfg(target_os = "windows")]
             {
+                append_startup_toggle(&menu, &mut new_callbacks);
                 menu.append(&quit_item).unwrap();
                 new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
             }
@@ -160,6 +173,7 @@ impl TrayApp {
 
             #[cfg(target_os = "windows")]
             {
+                append_startup_toggle(&menu, &mut new_callbacks);
                 menu.append(&quit_item).unwrap();
                 new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
             }
@@ -283,6 +297,7 @@ impl TrayApp {
 
         #[cfg(target_os = "windows")]
         {
+            append_startup_toggle(&menu, &mut new_callbacks);
             menu.append(&quit_item).unwrap();
             new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
         }
@@ -295,6 +310,113 @@ impl TrayApp {
         tray.set_menu(Some(Box::new(menu)));
         self.current_state = Some(Some(device_properties));
     }
+}
+
+#[cfg(target_os = "windows")]
+fn append_startup_toggle(
+    menu: &Menu,
+    callbacks: &mut HashMap<MenuId, Box<dyn Fn() + Send + Sync>>,
+) {
+    let startup_enabled = is_start_with_windows_enabled();
+    let startup_item = CheckMenuItem::new("Start with Windows", true, startup_enabled, None);
+    let _ = menu.append(&startup_item);
+    callbacks.insert(
+        startup_item.id().clone(),
+        Box::new(|| {
+            let currently_enabled = is_start_with_windows_enabled();
+            if let Err(error) = set_start_with_windows_enabled(!currently_enabled) {
+                eprintln!("Failed to update startup setting: {error}");
+            }
+        }),
+    );
+}
+
+#[cfg(target_os = "windows")]
+fn startup_command_line() -> std::io::Result<String> {
+    let exe_path = std::env::current_exe()?;
+    Ok(format!("\"{}\"", exe_path.display()))
+}
+
+#[cfg(target_os = "windows")]
+fn open_run_key_with_access(access: u32) -> std::io::Result<RegKey> {
+    RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(RUN_KEY_PATH, access)
+}
+
+#[cfg(target_os = "windows")]
+fn open_or_create_run_key_with_access(access: u32) -> std::io::Result<RegKey> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (run_key, _) = hkcu.create_subkey_with_flags(RUN_KEY_PATH, access)?;
+    Ok(run_key)
+}
+
+#[cfg(target_os = "windows")]
+fn open_startup_approved_key_with_access(access: u32) -> std::io::Result<RegKey> {
+    RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(STARTUP_APPROVED_RUN_KEY_PATH, access)
+}
+
+#[cfg(target_os = "windows")]
+fn open_or_create_startup_approved_key_with_access(access: u32) -> std::io::Result<RegKey> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = hkcu.create_subkey_with_flags(STARTUP_APPROVED_RUN_KEY_PATH, access)?;
+    Ok(key)
+}
+
+#[cfg(target_os = "windows")]
+fn startup_approved_state() -> Option<bool> {
+    let Ok(key) = open_startup_approved_key_with_access(KEY_READ) else {
+        return None;
+    };
+    let Ok(value) = key.get_raw_value(STARTUP_VALUE_NAME) else {
+        return None;
+    };
+    match value.bytes.first().copied() {
+        Some(0x02) => Some(true),
+        Some(0x03) => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_startup_approved_state(enabled: bool) -> std::io::Result<()> {
+    let key = open_or_create_startup_approved_key_with_access(KEY_SET_VALUE)?;
+    // 0x02 => enabled, 0x03 => disabled (same convention used by Startup Apps)
+    let state = if enabled { 0x02u8 } else { 0x03u8 };
+    key.set_raw_value(
+        STARTUP_VALUE_NAME,
+        &RegValue {
+            vtype: RegType::REG_BINARY,
+            bytes: vec![state, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        },
+    )?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn is_start_with_windows_enabled() -> bool {
+    let Ok(run_key) = open_run_key_with_access(KEY_READ) else {
+        return false;
+    };
+    if run_key.get_value::<String, _>(STARTUP_VALUE_NAME).is_err() {
+        return false;
+    }
+
+    startup_approved_state().unwrap_or(true)
+}
+
+#[cfg(target_os = "windows")]
+fn set_start_with_windows_enabled(enabled: bool) -> std::io::Result<()> {
+    let run_key = open_or_create_run_key_with_access(KEY_SET_VALUE)?;
+    if enabled {
+        run_key.set_value(STARTUP_VALUE_NAME, &startup_command_line()?)?;
+        set_startup_approved_state(true)?;
+    } else {
+        // Keep the Run entry so Windows Startup Apps can manage the toggle too.
+        if run_key.get_value::<String, _>(STARTUP_VALUE_NAME).is_err() {
+            run_key.set_value(STARTUP_VALUE_NAME, &startup_command_line()?)?;
+        }
+        set_startup_approved_state(false)?;
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
