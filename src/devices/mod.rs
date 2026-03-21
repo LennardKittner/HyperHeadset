@@ -66,6 +66,31 @@ const DEVICE_REGISTER: &[DeviceEntry] = &[
 
 const RESPONSE_BUFFER_SIZE: usize = 256;
 pub const RESPONSE_DELAY: Duration = Duration::from_millis(50);
+#[cfg(target_os = "windows")]
+const WINDOWS_CONNECT_SETTLE_DELAY: Duration = Duration::from_millis(120);
+#[cfg(target_os = "windows")]
+const WINDOWS_PROBE_DELAY: Duration = Duration::from_millis(30);
+
+#[cfg(target_os = "windows")]
+fn probe_windows_interface(device: &mut Box<dyn Device>) -> bool {
+    // Release builds can run fast enough to probe before the dongle interface
+    // is ready right after open; add a small fixed settle delay.
+    std::thread::sleep(WINDOWS_CONNECT_SETTLE_DELAY);
+    // Some devices/interfaces reject specific query packets on Windows.
+    // Treat the interface as usable as soon as any query packet can be written.
+    for probe_packet in device.get_query_packets() {
+        device.prepare_write();
+        if device
+            .get_device_state()
+            .write_hid_report(&probe_packet)
+            .is_ok()
+        {
+            return true;
+        }
+        std::thread::sleep(WINDOWS_PROBE_DELAY);
+    }
+    false
+}
 
 pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     let all_product_ids: Vec<u16> = DEVICE_REGISTER
@@ -110,14 +135,17 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     #[cfg(target_os = "windows")]
     {
         let mut device = None;
+        let mut fallback_device = None;
+        let mut selected_name: Option<String> = None;
         for state in states {
+            let display_name = state
+                .device_properties
+                .device_name
+                .clone()
+                .unwrap_or("???".to_string());
             println!(
-                "Try to connecting to {}",
-                state
-                    .device_properties
-                    .device_name
-                    .clone()
-                    .unwrap_or("???".to_string())
+                "Trying to connect to {}",
+                display_name
             );
             let entry = DEVICE_REGISTER
                 .iter()
@@ -129,24 +157,29 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
 
             let mut test_device = (entry.factory)(state);
             test_device.init_capabilities();
-
-            let probe_packet = test_device
-                .get_query_packets()
-                .into_iter()
-                .next()
-                .expect("Why is there a device without packets ???");
-
-            test_device.prepare_write();
-            if let Err(_e) = test_device
-                .get_device_state()
-                .write_hid_report(&probe_packet)
-            {
-                debug_println!("Failed to open: {_e:?}");
+            if fallback_device.is_none() {
+                fallback_device = Some(test_device);
+                // Continue probing using the same device instance we keep as fallback.
+                let test_device = fallback_device.as_mut().expect("fallback just inserted");
+                if probe_windows_interface(test_device) {
+                    device = fallback_device.take();
+                    selected_name = Some(display_name.clone());
+                    break;
+                }
                 continue;
-            } else {
+            }
+
+            if probe_windows_interface(&mut test_device) {
                 device = Some(test_device);
+                selected_name = Some(display_name.clone());
                 break;
             }
+        }
+        if device.is_none() {
+            device = fallback_device;
+        }
+        if let Some(name) = &selected_name {
+            println!("Connected to {}", name);
         }
         device.ok_or(DeviceError::NoDeviceFound())
     }
@@ -288,12 +321,12 @@ impl DeviceState {
     /// Write a HID report to the device.
     ///
     /// On Windows, some HyperX dongles expose commands as **Feature reports** only.
-    /// In that case, `hidapi::HidDevice::write()` fails with:
-    /// `WriteFile: (0x00000001) Incorrect function.`
+    /// In that case, `hidapi::HidDevice::write()` can fail with backend/driver-dependent errors
+    /// (for example `Incorrect function`, but not always that exact message).
     ///
     /// Linux/macOS hidraw paths often accept the same bytes via output reports, so this can look
-    /// "Windows-exclusive". We transparently fall back to `send_feature_report` when we detect
-    /// this specific failure.
+    /// "Windows-exclusive". We transparently fall back to `send_feature_report` after any write
+    /// failure and only return an error if both methods fail.
     /// Adapted from PR #20 by @navrozashvili
     /// Source: https://github.com/LennardKittner/HyperHeadset/pull/20
     pub fn write_hid_report(&self, packet: &[u8]) -> Result<(), HidError> {
@@ -302,21 +335,14 @@ impl DeviceState {
             Err(write_err) => {
                 #[cfg(target_os = "windows")]
                 {
-                    if let HidError::HidApiError { message } = &write_err {
-                        // Windows HID stack returns ERROR_INVALID_FUNCTION (0x1) when the device
-                        // doesn't support output reports / interrupt OUT.
-                        if message.contains("Incorrect function")
-                            || message.contains("(0x00000001)")
-                        {
-                            // If the feature report also fails, prefer returning the original
-                            // write() error since that's what callers attempted.
-                            if let Err(_feature_err) = self.hid_device.send_feature_report(packet) {
-                                return Err(write_err);
-                            }
-                            return Ok(());
-                        }
+                    // If feature report also fails, return the original write() error since that
+                    // was the operation requested by callers.
+                    if let Err(_feature_err) = self.hid_device.send_feature_report(packet) {
+                        return Err(write_err);
                     }
+                    return Ok(());
                 }
+                #[cfg(not(target_os = "windows"))]
                 Err(write_err)
             }
         }
@@ -902,9 +928,12 @@ pub trait Device {
                 }
                 responded = true;
             }
-            if !matches!(
+            // Only stop early when we explicitly know the headset is disconnected.
+            // `None` means "not known yet", and breaking there prevents the rest of
+            // the properties (mute, shutdown timer, side tone, etc.) from being queried.
+            if matches!(
                 self.get_device_state().device_properties.connected,
-                Some(true)
+                Some(false)
             ) {
                 break;
             }

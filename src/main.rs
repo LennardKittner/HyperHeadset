@@ -6,11 +6,38 @@ mod status_tray;
 #[cfg(not(target_os = "linux"))]
 mod status_tray_not_linux;
 
+use std::time::Duration;
+
+use hyper_headset::devices::{Device, DeviceProperties};
+
+fn has_extended_state(properties: &DeviceProperties) -> bool {
+    properties.muted.is_some()
+        || properties.automatic_shutdown_after.is_some()
+        || properties.side_tone_on.is_some()
+        || properties.side_tone_volume.is_some()
+        || properties.voice_prompt_on.is_some()
+        || properties.product_color.is_some()
+        || properties.charging.is_some()
+}
+
+fn prime_device_state_after_connect(device: &mut Box<dyn Device>) {
+    // After reconnect, some dongles initially respond with only a subset of fields.
+    // Prime the state with a few active refresh attempts before entering passive mode.
+    for _ in 0..4 {
+        if device.active_refresh_state().is_ok()
+            && has_extended_state(&device.get_device_state().device_properties)
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
 #[cfg(not(target_os = "linux"))]
 fn main() {
     use std::sync::mpsc;
 
-    use hyper_headset::devices::{DeviceEvent, DeviceProperties};
+    use hyper_headset::devices::DeviceEvent;
     use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy};
 
     use crate::status_tray_not_linux::TrayApp;
@@ -23,8 +50,6 @@ fn main() {
     let (tx, rx) = mpsc::channel::<DeviceEvent>();
 
     std::thread::spawn(move || {
-        use std::time::Duration;
-
         use clap::{Arg, Command};
         use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
@@ -78,6 +103,7 @@ fn main() {
                 }
                 std::thread::sleep(Duration::from_secs(1));
             };
+            prime_device_state_after_connect(&mut device);
 
             // Run loop
             let mut run_counter = 0;
@@ -129,7 +155,6 @@ fn main() {
     use clap::{Arg, Command};
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     use std::sync::mpsc;
-    use std::time::Duration;
 
     use hyper_headset::devices::connect_compatible_device;
     use status_tray::{StatusTray, TrayHandler};
@@ -196,6 +221,7 @@ fn main() {
             }
             std::thread::sleep(Duration::from_secs(1));
         };
+        prime_device_state_after_connect(&mut device);
 
         // Run loop
         let mut run_counter = 0;
