@@ -188,6 +188,11 @@ Because the action only toggles Discord's state, you may need to synchronize it 
 ## Contributing / TODOs
 
 - [ ] Update ksni
+- [ ] Add Docs
+- [ ] Add to crates.io
+- [ ] Let CLI periodically output the state 
+- [ ] Optional CLI output in JSON
+- [ ] Waybar applet
 - [x] Menu bar app for MacOS.
 - [x] Windows support
 - [x] Allow configuration via tray app
