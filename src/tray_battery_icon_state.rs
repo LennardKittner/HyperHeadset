@@ -12,6 +12,7 @@ pub enum TrayBatteryIconState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg(target_os = "windows")]
 pub struct WindowsIconKey {
     pub percent: u8,
     pub charging: bool,
@@ -38,6 +39,7 @@ impl TrayBatteryIconState {
         }
     }
 
+    #[cfg(target_os = "windows")]
     pub fn windows_icon_key(self) -> Option<WindowsIconKey> {
         match self {
             Self::Connected { percent, charging } => Some(WindowsIconKey { percent, charging }),

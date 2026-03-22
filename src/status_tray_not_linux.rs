@@ -12,6 +12,7 @@ use tray_icon::{
 };
 use winit::{application::ApplicationHandler, event::StartCause};
 
+#[cfg(target_os = "windows")]
 use crate::tray_battery_icon_state::{TrayBatteryIconState, WindowsIconKey};
 
 const NO_COMPATIBLE_DEVICE: &str = "No compatible device found. Is the dongle plugged in?";
