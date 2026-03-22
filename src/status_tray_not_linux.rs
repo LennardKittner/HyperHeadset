@@ -385,7 +385,7 @@ fn set_startup_approved_state(enabled: bool) -> std::io::Result<()> {
         STARTUP_VALUE_NAME,
         &RegValue {
             vtype: RegType::REG_BINARY,
-            bytes: vec![state, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            bytes: vec![state, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0].into(),
         },
     )?;
     Ok(())
