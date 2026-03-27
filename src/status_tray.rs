@@ -6,6 +6,8 @@ use ksni::{
     Handle, MenuItem, ToolTip, Tray, TrayService,
 };
 
+use crate::tray_battery_icon_state::TrayBatteryIconState;
+
 #[cfg(feature = "eq-support")]
 use hyper_headset::eq::presets;
 #[cfg(feature = "eq-support")]
@@ -122,7 +124,9 @@ impl Tray for StatusTray {
     }
 
     fn icon_name(&self) -> String {
-        "audio-headset".into()
+        TrayBatteryIconState::from_device_properties(self.device_properties.as_ref())
+            .linux_icon_name()
+            .to_string()
     }
 
     fn tool_tip(&self) -> ToolTip {
@@ -164,7 +168,9 @@ impl Tray for StatusTray {
                 .clone()
                 .unwrap_or("Unknown".to_string()),
             description,
-            icon_name: "audio-headset".into(),
+            icon_name: TrayBatteryIconState::from_device_properties(Some(device_properties))
+                .linux_icon_name()
+                .to_string(),
             icon_pixmap: Vec::new(),
         }
     }

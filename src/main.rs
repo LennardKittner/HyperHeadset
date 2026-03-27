@@ -1,8 +1,12 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 #[cfg(target_os = "linux")]
 mod status_tray;
 
 #[cfg(not(target_os = "linux"))]
 mod status_tray_not_linux;
+
+mod tray_battery_icon_state;
 
 #[cfg(all(target_os = "linux", feature = "eq-support"))]
 use hyper_headset::eq::presets;
