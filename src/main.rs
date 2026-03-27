@@ -8,6 +8,9 @@ mod status_tray_not_linux;
 
 mod tray_battery_icon_state;
 
+#[cfg(all(target_os = "linux", feature = "eq-support"))]
+use hyper_headset::eq::presets;
+
 #[cfg(not(target_os = "linux"))]
 fn main() {
     use std::sync::mpsc;
@@ -154,8 +157,9 @@ fn main() {
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("A tray application for monitoring HyperX headsets.")
         .arg(
-            Arg::new("refresh_interval")
-                .long("refresh_interval")
+            Arg::new("refresh-interval")
+                .long("refresh-interval")
+                .alias("refresh_interval")
                 .required(false)
                 .help("Set the refresh interval (in seconds)")
                 .default_value("3")
@@ -183,10 +187,22 @@ fn main() {
     } else {
         None
     };
-    let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
+    let refresh_interval = *matches.get_one::<u64>("refresh-interval").unwrap_or(&3);
     let refresh_interval = Duration::from_secs(refresh_interval);
+
     let (tx, rx) = mpsc::channel();
     let tray_handler = TrayHandler::new(StatusTray::new(tx));
+
+    // File watcher for preset/settings changes
+    #[cfg(feature = "eq-support")]
+    let (_watcher, watcher_rx) = match presets::watch_config_dir() {
+        Ok(pair) => (Some(pair.0), Some(pair.1)),
+        Err(e) => {
+            eprintln!("Warning: failed to watch config directory: {e}");
+            (None, None)
+        }
+    };
+
     loop {
         let mut device = loop {
             match connect_compatible_device() {
@@ -199,8 +215,25 @@ fn main() {
             std::thread::sleep(Duration::from_secs(1));
         };
 
+        #[cfg(feature = "eq-support")]
+        if device.get_device_state().device_properties.can_set_equalizer {
+            // Seed EQ state from disk so tray shows correct preset immediately
+            let profile = presets::load_selected_profile();
+            let props = &mut device.get_device_state_mut().device_properties;
+            props.active_eq_preset = profile.active_preset;
+            props.eq_synced = Some(profile.synced);
+            tray_handler.reload_presets();
+        }
+
+        #[cfg(not(feature = "eq-support"))]
+        if device.get_device_state().device_properties.can_set_equalizer {
+            eprintln!("This headset supports EQ presets. Rebuild with --features eq-support to enable.");
+        }
+
         // Run loop
         let mut run_counter = 0;
+        #[cfg(feature = "eq-support")]
+        let mut was_connected = device.get_device_state().device_properties.connected == Some(true);
         loop {
             let mute_state = device.get_device_state().device_properties.muted;
             match if run_counter % 30 == 0 {
@@ -225,8 +258,9 @@ fn main() {
                 }
             }
 
+            // Process tray device commands
             // with the default refresh_interval the state is only actively queried every 3min
-            // querying the device to frequently can lead to instability
+            // querying the device too frequently can lead to instability
             let first = rx.recv_timeout(refresh_interval);
             for command in first.into_iter().chain(rx.try_iter()) {
                 let _ = device.try_apply(command);
@@ -234,7 +268,34 @@ fn main() {
                 let _ = device.active_refresh_state();
             }
 
+            // Check for preset file changes
+            #[cfg(feature = "eq-support")]
+            if let Some(ref wrx) = watcher_rx {
+                if wrx.try_recv().is_ok() {
+                    // Drain any additional events
+                    while wrx.try_recv().is_ok() {}
+                    tray_handler.reload_presets();
+                }
+            }
+
             tray_handler.update(device.get_device_state());
+
+            // Sync unsynced profile when headset transitions to connected
+            #[cfg(feature = "eq-support")]
+            {
+                let is_connected = device.get_device_state().device_properties.connected == Some(true);
+                if is_connected && !was_connected && device.get_device_state().device_properties.can_set_equalizer {
+                    let profile = presets::load_selected_profile();
+                    if !profile.synced {
+                        if let Some(ref name) = profile.active_preset {
+                            println!("Syncing EQ preset '{}' to headset...", name);
+                            let _ = device.try_apply(hyper_headset::devices::DeviceEvent::EqualizerPreset(name.clone()));
+                        }
+                    }
+                }
+                was_connected = is_connected;
+            }
+
             run_counter += 1;
         }
     }

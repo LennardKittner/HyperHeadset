@@ -62,7 +62,17 @@ To build both applications, use:
 See prerequisites below for installing dependencies.
 If the required udev rules are missing on Linux, the program will prompt you to install them automatically.
 
-## Prerequisites 
+### Build with features
+
+If your headset supports EQ (e.g. Cloud III S Wireless), add `--features eq-editor` for the full EQ experience (tray presets + TUI editor):
+
+```sh
+cargo build --release --features eq-editor
+```
+
+Use `--features eq-support` instead if you only want tray EQ presets without the TUI editor.
+
+## Prerequisites
 
 ### Dependencies
 
@@ -129,23 +139,39 @@ A CLI application for monitoring and managing HyperX headsets.
 Usage: hyper_headset_cli [OPTIONS]
 
 Options:
-      --automatic_shutdown <automatic_shutdown>
+      --automatic-shutdown <automatic-shutdown>
           Set the delay in minutes after which the headset will automatically shutdown.
           0 will disable automatic shutdown.
       --mute <mute>
           Mute or unmute the headset. [possible values: true, false]
-      --enable_side_tone <enable_side_tone>
+      --enable-side-tone <enable-side-tone>
           Enable or disable side tone. [possible values: true, false]
-      --side_tone_volume <side_tone_volume>
+      --side-tone-volume <side-tone-volume>
           Set the side tone volume.
-      --enable_voice_prompt <enable_voice_prompt>
+      --enable-voice-prompt <enable-voice-prompt>
           Enable voice prompt. This may not be supported on your device. [possible values: true, false]
-      --surround_sound <surround_sound>
+      --surround-sound <surround-sound>
           Enables surround sound. This may be on by default and cannot be changed on your device. [possible values: true, false]
-      --mute_playback <mute_playback>
-          Mute or unmute playback. [possible values: true, false]
-      --activate_noise_gate <activate_noise_gate>
+      --mute-playback <mute-playback>
+          Mute or unmute playback. This may not be supported on your device. [possible values: true, false]
+      --activate-noise-gate <activate-noise-gate>
           Activates noise gate. [possible values: true, false]
+      --eq
+          Open interactive EQ editor (TUI).
+          This may not be supported on your device.
+      --eq-profile <BAND=DB,...>
+          Set full EQ profile. Unspecified bands reset to 0 dB.
+          This may not be supported on your device.
+          BAND: index 0-9 or frequency (1khz, 250hz). Bare integers are indices, not Hz.
+            [0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz]
+          DB: -12.0 to 12.0.
+          Example: --eq-profile 5=-12.0,1khz=3.0,16khz=4.0
+      --eq-band <BAND=DB[,...]>
+          Adjust specific bands. Repeatable, comma-separated (last write wins per band).
+          This may not be supported on your device.
+          Others unchanged. Use alone or with --eq-profile (overrides on top of the profile).
+          See --eq-profile for band/dB reference.
+          Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0
   -h, --help
           Print help
   -V, --version
@@ -153,6 +179,7 @@ Options:
 
 Help only lists commands supported by this headset.
 ```
+
 `hyper_headset_cli` without any arguments will print all available headset information.
 
 ```
@@ -162,7 +189,7 @@ A tray application for monitoring HyperX headsets.
 Usage: hyper_headset [OPTIONS]
 
 Options:
-      --refresh_interval <refresh_interval>
+      --refresh-interval <refresh-interval>
           Set the refresh interval (in seconds) [default: 3]
       --press_mute_key <press_mute_key>
           The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted. [default: true] [possible values: true, false]

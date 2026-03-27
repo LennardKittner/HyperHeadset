@@ -177,6 +177,9 @@ pub struct DeviceProperties {
     pub connected: Option<bool>,
     pub silent: Option<bool>,
     pub noise_gate_active: Option<bool>,
+    // EQ state — managed by the application, not queried from firmware
+    pub active_eq_preset: Option<String>,
+    pub eq_synced: Option<bool>,
     // Capability flags - set once during device initialization
     pub can_set_mute: bool,
     pub can_set_surround_sound: bool,
@@ -353,6 +356,10 @@ impl DeviceState {
             DeviceEvent::NoiseGateActive(on) => {
                 self.device_properties.noise_gate_active = Some(*on)
             }
+            DeviceEvent::EqualizerPreset(ref name) => {
+                self.device_properties.active_eq_preset = Some(name.clone());
+                self.device_properties.eq_synced = Some(true);
+            }
         };
     }
 }
@@ -419,6 +426,8 @@ impl DeviceProperties {
             can_set_silent_mode: false,
             can_set_equalizer: false,
             can_set_noise_gate: false,
+            active_eq_preset: None,
+            eq_synced: None,
         }
     }
 
@@ -656,7 +665,7 @@ pub enum DeviceError {
     UnknownResponse([u8; 8], usize),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum DeviceEvent {
     BatterLevel(u8),
     Muted(bool),
@@ -673,6 +682,7 @@ pub enum DeviceEvent {
     Silent(bool),
     RequireSIRKReset(bool),
     NoiseGateActive(bool),
+    EqualizerPreset(String),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -769,9 +779,10 @@ pub trait Device {
     fn reset_sirk_packet(&self) -> Option<Vec<u8>>;
     fn get_silent_mode_packet(&self) -> Option<Vec<u8>>;
     fn set_silent_mode_packet(&self, silence: bool) -> Option<Vec<u8>>;
-    /// Set equalizer band (0-9) to dB value (-12.0 to +12.0)
+    /// Build EQ packets — one packet per band (firmware only accepts one band per write).
     /// Bands: 0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz
-    fn set_equalizer_band_packet(&self, _band_index: u8, _db_value: f32) -> Option<Vec<u8>> {
+    /// dB values: -12.0 to +12.0
+    fn set_equalizer_bands_packets(&self, _bands: &[(u8, f32)]) -> Option<Vec<Vec<u8>>> {
         None
     }
     fn get_noise_gate_packet(&self) -> Option<Vec<u8>> {
@@ -811,7 +822,7 @@ pub trait Device {
         self.set_silent_mode_packet(false).is_some()
     }
     fn can_set_equalizer(&self) -> bool {
-        self.set_equalizer_band_packet(0, 0.0).is_some()
+        self.set_equalizer_bands_packets(&[(0, 0.0)]).is_some()
     }
     fn can_set_noise_gate(&self) -> bool {
         self.set_noise_gate_packet(true).is_some()
@@ -1053,6 +1064,49 @@ pub trait Device {
                     }
                 } else {
                     Err("ERROR: Activating noise gate is not supported on this device")?;
+                }
+            }
+            #[cfg(feature = "eq-support")]
+            DeviceEvent::EqualizerPreset(ref name) => {
+                use crate::eq::presets;
+
+                let record_eq = |dev: &mut Self, synced: bool| {
+                    let props = &mut dev.get_device_state_mut().device_properties;
+                    props.active_eq_preset = Some(name.clone());
+                    props.eq_synced = Some(synced);
+                    let _ = presets::save_selected_profile(&presets::SelectedProfile {
+                        active_preset: Some(name.clone()),
+                        synced,
+                    });
+                };
+
+                let connected = self.get_device_state().device_properties.connected == Some(true);
+                if !connected {
+                    record_eq(self, false);
+                    return Ok(());
+                }
+
+                let preset = presets::load_preset(name)
+                    .ok_or_else(|| format!("EQ preset '{}' not found", name))?;
+                let pairs: Vec<(u8, f32)> = preset
+                    .bands
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &db)| (i as u8, db))
+                    .collect();
+
+                if let Some(packets) = self.set_equalizer_bands_packets(&pairs) {
+                    for packet in packets {
+                        self.prepare_write();
+                        if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                            record_eq(self, false);
+                            Err(format!("Failed to apply EQ preset '{}': {:?}", name, err))?;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(3));
+                    }
+                    record_eq(self, true);
+                } else {
+                    Err("ERROR: Equalizer control is not supported on this device")?;
                 }
             }
             _ => (),
