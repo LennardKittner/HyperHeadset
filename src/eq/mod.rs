@@ -19,7 +19,3 @@ pub const NUM_BANDS: usize = 10;
 pub const DB_MIN: f32 = -12.0;
 pub const DB_MAX: f32 = 12.0;
 
-/// Commands sent from the tray to the main loop.
-pub enum TrayCommand {
-    ApplyEqPreset(String),
-}

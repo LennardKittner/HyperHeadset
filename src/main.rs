@@ -11,62 +11,6 @@ mod tray_battery_icon_state;
 #[cfg(all(target_os = "linux", feature = "eq-support"))]
 use hyper_headset::eq::presets;
 
-/// Apply the named EQ preset to the device and update sync state.
-/// Updates device_properties.active_eq_preset and eq_synced, and saves to disk.
-#[cfg(all(target_os = "linux", feature = "eq-support"))]
-fn apply_and_sync(
-    device: &mut Box<dyn hyper_headset::devices::Device>,
-    name: &str,
-) {
-    use std::time::Duration;
-
-    let synced = if device.get_device_state().device_properties.connected != Some(true) {
-        eprintln!("Headset not connected, EQ preset '{}' queued for sync.", name);
-        false
-    } else if let Some(preset) = presets::load_preset(name) {
-        let pairs: Vec<(u8, f32)> = preset
-            .bands
-            .iter()
-            .enumerate()
-            .map(|(i, &db)| (i as u8, db))
-            .collect();
-        if let Some(packets) = device.set_equalizer_bands_packets(&pairs) {
-            let mut ok = true;
-            for packet in packets {
-                device.prepare_write();
-                if let Err(err) = device.get_device_state().hid_device.write(&packet) {
-                    eprintln!("Failed to apply EQ preset '{}': {:?}", name, err);
-                    ok = false;
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(3));
-            }
-            if ok {
-                println!("EQ preset '{}' applied.", name);
-            }
-            ok
-        } else {
-            eprintln!("Device does not support EQ");
-            false
-        }
-    } else {
-        eprintln!("EQ preset '{}' not found", name);
-        false
-    };
-
-    // Update device state — tray reads from here on next update()
-    let props = &mut device.get_device_state_mut().device_properties;
-    props.active_eq_preset = Some(name.to_string());
-    props.eq_synced = Some(synced);
-
-    // Persist to disk
-    let profile = presets::SelectedProfile {
-        active_preset: Some(name.to_string()),
-        synced,
-    };
-    let _ = presets::save_selected_profile(&profile);
-}
-
 #[cfg(not(target_os = "linux"))]
 fn main() {
     use std::sync::mpsc;
@@ -198,9 +142,6 @@ fn main() {
     use hyper_headset::act_as_askpass_handler;
     use hyper_headset::prompt_user_for_udev_rule;
 
-    #[cfg(feature = "eq-support")]
-    use hyper_headset::eq::TrayCommand;
-
     if let Ok(name) = std::env::current_exe() {
         if let Some(name) = name.to_str() {
             if let Ok(askpass) = std::env::var("SUDO_ASKPASS") {
@@ -249,16 +190,7 @@ fn main() {
     let refresh_interval = *matches.get_one::<u64>("refresh-interval").unwrap_or(&3);
     let refresh_interval = Duration::from_secs(refresh_interval);
 
-    // Channel for tray → main loop device commands
     let (tx, rx) = mpsc::channel();
-
-    // Channel for tray → main loop EQ commands
-    #[cfg(feature = "eq-support")]
-    let (command_tx, command_rx) = mpsc::channel::<TrayCommand>();
-
-    #[cfg(feature = "eq-support")]
-    let tray_handler = TrayHandler::new(StatusTray::new(tx, command_tx));
-    #[cfg(not(feature = "eq-support"))]
     let tray_handler = TrayHandler::new(StatusTray::new(tx));
 
     // File watcher for preset/settings changes
@@ -336,16 +268,6 @@ fn main() {
                 let _ = device.active_refresh_state();
             }
 
-            // Process tray EQ commands
-            #[cfg(feature = "eq-support")]
-            while let Ok(cmd) = command_rx.try_recv() {
-                match cmd {
-                    TrayCommand::ApplyEqPreset(name) => {
-                        apply_and_sync(&mut device, &name);
-                    }
-                }
-            }
-
             // Check for preset file changes
             #[cfg(feature = "eq-support")]
             if let Some(ref wrx) = watcher_rx {
@@ -367,7 +289,7 @@ fn main() {
                     if !profile.synced {
                         if let Some(ref name) = profile.active_preset {
                             println!("Syncing EQ preset '{}' to headset...", name);
-                            apply_and_sync(&mut device, name);
+                            let _ = device.try_apply(hyper_headset::devices::DeviceEvent::EqualizerPreset(name.clone()));
                         }
                     }
                 }

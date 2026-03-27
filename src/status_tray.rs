@@ -11,8 +11,6 @@ use crate::tray_battery_icon_state::TrayBatteryIconState;
 #[cfg(feature = "eq-support")]
 use hyper_headset::eq::presets;
 #[cfg(feature = "eq-support")]
-use hyper_headset::eq::TrayCommand;
-#[cfg(feature = "eq-support")]
 use ksni::menu::{RadioGroup, RadioItem};
 
 /// Escape underscores for ksni labels (single `_` is an accelerator prefix).
@@ -63,29 +61,19 @@ pub struct StatusTray {
     device_properties: Option<DeviceProperties>,
     update_sender: Sender<DeviceEvent>,
     #[cfg(feature = "eq-support")]
-    command_tx: Sender<TrayCommand>,
-    #[cfg(feature = "eq-support")]
     eq_presets: Vec<String>,
 }
 
 impl StatusTray {
-    #[cfg(feature = "eq-support")]
-    pub fn new(update_sender: Sender<DeviceEvent>, command_tx: Sender<TrayCommand>) -> Self {
-        let all = presets::all_presets();
-        let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
-        StatusTray {
-            device_properties: None,
-            update_sender,
-            command_tx,
-            eq_presets: preset_names,
-        }
-    }
-
-    #[cfg(not(feature = "eq-support"))]
     pub fn new(update_sender: Sender<DeviceEvent>) -> Self {
         StatusTray {
             device_properties: None,
             update_sender,
+            #[cfg(feature = "eq-support")]
+            eq_presets: {
+                let all = presets::all_presets();
+                all.iter().map(|p| p.name.clone()).collect()
+            },
         }
     }
 }
@@ -322,7 +310,7 @@ impl Tray for StatusTray {
                     selected: active_index.unwrap_or(usize::MAX),
                     select: Box::new(|this: &mut Self, index| {
                         if let Some(name) = this.eq_presets.get(index).cloned() {
-                            let _ = this.command_tx.send(TrayCommand::ApplyEqPreset(name));
+                            let _ = this.update_sender.send(DeviceEvent::EqualizerPreset(name));
                         }
                     }),
                     options: radio_options,
