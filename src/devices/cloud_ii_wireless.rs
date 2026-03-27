@@ -7,7 +7,7 @@ use std::time::Duration;
 const HYPERX: u16 = 0x0951;
 pub const VENDOR_IDS: [u16; 1] = [HYPERX];
 // Possible Cloud II Wireless product IDs (and Cloud Flight S)
-pub const PRODUCT_IDS: [u16; 5] = [0x1718, 0x018B, 0x0b92, 0x16EA, 0x16EB];
+pub const PRODUCT_IDS: [u16; 4] = [0x1718, 0x0b92, 0x16EA, 0x16EB];
 
 const BASE_PACKET: [u8; 62] = {
     let mut tmp = [0u8; 62];
@@ -48,14 +48,8 @@ pub struct CloudIIWireless {
 impl CloudIIWireless {
     pub fn new_from_state(state: DeviceState) -> Self {
         let mut tmp_state = state;
-        tmp_state.connected = Some(true);
+        tmp_state.device_properties.connected = Some(true);
         CloudIIWireless { state: tmp_state }
-    }
-
-    pub fn new() -> Result<Self, DeviceError> {
-        let mut state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
-        state.connected = Some(true);
-        Ok(CloudIIWireless { state })
     }
 }
 

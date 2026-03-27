@@ -1,6 +1,6 @@
 use crate::{
     debug_println,
-    devices::{ChargingStatus, Color, Device, DeviceError, DeviceEvent, DeviceState},
+    devices::{ChargingStatus, Color, Device, DeviceEvent, DeviceState},
 };
 use std::time::Duration;
 
@@ -48,12 +48,9 @@ pub struct CloudIIWirelessDTS {
 
 impl CloudIIWirelessDTS {
     pub fn new_from_state(state: DeviceState) -> Self {
+        let mut state = state;
+        state.device_properties.connected = Some(true);
         CloudIIWirelessDTS { state }
-    }
-
-    pub fn new() -> Result<Self, DeviceError> {
-        let state = DeviceState::new(&PRODUCT_IDS, &VENDOR_IDS)?;
-        Ok(CloudIIWirelessDTS { state })
     }
 }
 

@@ -1,0 +1,148 @@
+name: Publish release
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Install Dependencies
+        run: sudo apt update && sudo apt install -y libdbus-1-dev libhidapi-dev libusb-1.0-0-dev libudev-dev
+      - name: Build release binaries
+        run: |
+          cargo build --release --bin hyper_headset_cli
+          cargo build --release --bin hyper_headset
+      - name: Create zip
+        run: |
+          mkdir -p dist
+          cp target/release/hyper_headset dist/
+          cp target/release/hyper_headset_cli dist/
+          cd dist && zip hyper_headset_Linux.zip hyper_headset hyper_headset_cli
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyper_headset_Linux
+          path: dist/hyper_headset_Linux.zip
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+        with: 
+          submodules: recursive
+      - name: Build release binaries
+        run: |
+          cargo build --release --bin hyper_headset_cli
+          cargo build --release --bin hyper_headset
+      - name: Create zip
+        run: |
+          mkdir -p dist
+          cp target/release/hyper_headset dist/
+          cp target/release/hyper_headset_cli dist/
+          cd dist && zip hyper_headset_MacOS.zip hyper_headset hyper_headset_cli
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with: 
+          name: hyper_headset_MacOS
+          path: dist/hyper_headset_MacOS.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+        with: 
+          submodules: recursive
+      - name: Build release binaries
+        run: |
+          cargo build --release --bin hyper_headset_cli
+          cargo build --release --bin hyper_headset
+      - name: Create zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist
+          Copy-Item target/release/hyper_headset.exe dist/
+          Copy-Item target/release/hyper_headset_cli.exe dist/
+          Compress-Archive -Path dist/* -DestinationPath dist/hyper_headset_Windows.zip
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with: 
+          name: hyper_headset_Windows
+          path: dist/hyper_headset_Windows.zip
+
+  publish-aur:
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-macos, build-windows]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download Linux zip artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hyper_headset_Linux
+          path: dist/
+
+      - name: Download MacOS zip artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hyper_headset_MacOS
+          path: dist/
+
+      - name: Download Windows zip artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hyper_headset_Windows
+          path: dist/
+
+      - name: Create GitHub Release and upload zip
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          files: |
+            dist/hyper_headset_Linux.zip
+            dist/hyper_headset_MacOS.zip
+            dist/hyper_headset_Windows.zip
+
+      - name: Compute checksums
+        id: checksums
+        run: |
+          SHA256_ZIP=$(sha256sum dist/hyper_headset_Linux.zip | awk '{print $1}')
+          SHA256_RULES=$(sha256sum 99-HyperHeadset.rules | awk '{print $1}')
+          SHA256_DESKTOP=$(sha256sum hyper-headset.desktop | awk '{print $1}')
+          echo "zip=$SHA256_ZIP" >> $GITHUB_OUTPUT
+          echo "rules=$SHA256_RULES" >> $GITHUB_OUTPUT
+          echo "desktop=$SHA256_DESKTOP" >> $GITHUB_OUTPUT
+
+      - name: Get tag version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Clone AUR bin repo
+        run: git clone https://aur.archlinux.org/hyper-headset-bin.git aur-bin-pkg
+
+      - name: Update pkgver and pkgrel
+        run: |
+          sed -i "s/^pkgver=.*/pkgver=${{ steps.version.outputs.tag }}/" aur-bin-pkg/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" aur-bin-pkg/PKGBUILD
+          sed -i "/sha256sums=/,/^)/c\sha256sums=(\n  '${{ steps.checksums.outputs.zip }}'\n  '${{ steps.checksums.outputs.rules }}'\n  '${{ steps.checksums.outputs.desktop }}'\n)" aur-bin-pkg/PKGBUILD
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
+        with:
+          pkgname: hyper-headset-bin
+          pkgbuild: ./aur-bin-pkg/PKGBUILD
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: Update to ${{ steps.version.outputs.tag }}
+          updpkgsums: false 
+          allow_empty_commits: false

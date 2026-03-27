@@ -410,7 +410,7 @@ impl EqEditor {
                 Span::raw(": Reset band  "),
                 Span::styled("r", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(": Revert  "),
-                Span::styled("⇧0", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("=", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(": Flat"),
             ]),
             Line::from(vec![
@@ -573,8 +573,8 @@ impl EqEditor {
                 self.modified = self.bands != self.original_bands;
                 self.send_all_bands_to_device(device);
             }
-            KeyCode::Char(')') => {
-                // Shift+0: reset all bands to flat
+            KeyCode::Char('=') => {
+                // Reset all bands to flat
                 self.bands = [0.0; NUM_BANDS];
                 self.modified = true;
                 self.active_preset = Some("Flat".to_string());

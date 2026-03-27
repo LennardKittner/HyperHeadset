@@ -1,21 +1,20 @@
-#[cfg(feature = "eq-support")]
 use std::sync::mpsc::Sender;
 
-use hyper_headset::devices::DeviceState;
+use hyper_headset::devices::{DeviceEvent, DeviceProperties, DeviceState, PropertyType};
+use ksni::{
+    menu::{StandardItem, SubMenu},
+    Handle, MenuItem, ToolTip, Tray, TrayService,
+};
+
 #[cfg(feature = "eq-support")]
 use hyper_headset::eq::presets;
 #[cfg(feature = "eq-support")]
 use hyper_headset::eq::TrayCommand;
-use ksni::{
-    menu::StandardItem,
-    Handle, MenuItem, ToolTip, Tray, TrayService,
-};
-#[cfg(feature = "eq-support")]
-use ksni::menu::SubMenu;
 #[cfg(feature = "eq-support")]
 use ksni::menu::{RadioGroup, RadioItem};
 
 /// Escape underscores for ksni labels (single `_` is an accelerator prefix).
+#[cfg(feature = "eq-support")]
 fn escape_label(s: &str) -> String {
     s.replace('_', "__")
 }
@@ -24,7 +23,8 @@ pub struct TrayHandler {
     handle: Handle<StatusTray>,
 }
 
-const NO_COMPATIBLE_DEVICE: &str = "No compatible device found.\nIs the dongle plugged in?\nIf you are using Linux did you add the Udev rules?";
+const NO_COMPATIBLE_DEVICE: &str = "No compatible device found.\nIs the dongle plugged in?\nIf you are using Linux did you\nadd the Udev rules?";
+const HEADSET_NOT_CONNECTED: &str = "Headset is not connected";
 
 impl TrayHandler {
     pub fn new(tray: StatusTray) -> Self {
@@ -35,24 +35,15 @@ impl TrayHandler {
     }
 
     pub fn update(&self, device_state: &DeviceState) {
-        let (message, name) = match device_state.connected {
-            None => (NO_COMPATIBLE_DEVICE.to_string(), None),
-            Some(false) => (
-                "Headset is not connected".to_string(),
-                device_state.device_name.clone(),
-            ),
-            Some(true) => (
-                device_state.to_string_with_padding(0),
-                device_state.device_name.clone(),
-            ),
-        };
-        let can_set_equalizer = device_state.can_set_equalizer;
-        let is_connected = device_state.connected == Some(true);
+        let device_properties = device_state.device_properties.clone();
         self.handle.update(|tray| {
-            tray.message = message;
-            tray.device_name = name;
-            tray.can_set_equalizer = can_set_equalizer;
-            tray.is_connected = is_connected;
+            tray.device_properties = Some(device_properties);
+        })
+    }
+
+    pub fn clear_state(&self) {
+        self.handle.update(|tray| {
+            tray.device_properties = None;
         })
     }
 
@@ -78,16 +69,14 @@ impl TrayHandler {
 }
 
 pub struct StatusTray {
-    device_name: Option<String>,
-    message: String,
+    device_properties: Option<DeviceProperties>,
+    update_sender: Sender<DeviceEvent>,
     #[cfg(feature = "eq-support")]
     command_tx: Sender<TrayCommand>,
     #[cfg(feature = "eq-support")]
     eq_presets: Vec<String>,
     #[cfg(feature = "eq-support")]
     active_eq_preset: Option<usize>,
-    can_set_equalizer: bool,
-    is_connected: bool,
     #[cfg(feature = "eq-support")]
     eq_synced: bool,
     #[cfg(feature = "eq-support")]
@@ -96,7 +85,7 @@ pub struct StatusTray {
 
 impl StatusTray {
     #[cfg(feature = "eq-support")]
-    pub fn new(command_tx: Sender<TrayCommand>) -> Self {
+    pub fn new(update_sender: Sender<DeviceEvent>, command_tx: Sender<TrayCommand>) -> Self {
         let all = presets::all_presets();
         let profile = presets::load_selected_profile();
         let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
@@ -108,25 +97,21 @@ impl StatusTray {
             .and_then(|name| preset_names.iter().position(|n| n == name));
 
         StatusTray {
-            device_name: None,
-            message: NO_COMPATIBLE_DEVICE.to_string(),
+            device_properties: None,
+            update_sender,
             command_tx,
             eq_presets: preset_names,
             active_eq_preset: active_preset,
-            can_set_equalizer: false,
-            is_connected: false,
             eq_synced,
             active_preset_name,
         }
     }
 
     #[cfg(not(feature = "eq-support"))]
-    pub fn new() -> Self {
+    pub fn new(update_sender: Sender<DeviceEvent>) -> Self {
         StatusTray {
-            device_name: None,
-            message: NO_COMPATIBLE_DEVICE.to_string(),
-            can_set_equalizer: false,
-            is_connected: false,
+            device_properties: None,
+            update_sender,
         }
     }
 }
@@ -135,51 +120,202 @@ impl Tray for StatusTray {
     fn id(&self) -> String {
         env!("CARGO_PKG_NAME").into()
     }
+
     fn icon_name(&self) -> String {
         "audio-headset".into()
     }
+
     fn tool_tip(&self) -> ToolTip {
+        let Some(device_properties) = self.device_properties.as_ref() else {
+            return ToolTip {
+                title: "Unknown".to_string(),
+                description: NO_COMPATIBLE_DEVICE.to_string(),
+                icon_name: "audio-headset".into(),
+                icon_pixmap: Vec::new(),
+            };
+        };
         #[allow(unused_mut)]
-        let mut description = self
-            .message
-            .lines()
-            .filter(|l| !l.contains("Unknown"))
-            .collect::<Vec<&str>>()
-            .join("\n");
+        let mut description = if device_properties.connected.unwrap_or(false) {
+            device_properties
+                .to_string_with_padding(0)
+                .lines()
+                .filter(|l| !l.contains("Unknown"))
+                .collect::<Vec<&str>>()
+                .join("\n")
+        } else {
+            HEADSET_NOT_CONNECTED.to_string()
+        };
+
+        // Show EQ info in tooltip only when connected and EQ is supported
         #[cfg(feature = "eq-support")]
-        if let Some(ref name) = self.active_preset_name {
-            if self.eq_synced {
-                description.push_str(&format!("\nEQ: {}", name));
-            } else {
-                description.push_str(&format!("\nEQ: {} (not synced)", name));
+        if device_properties.connected.unwrap_or(false) && device_properties.can_set_equalizer {
+            if let Some(ref name) = self.active_preset_name {
+                if self.eq_synced {
+                    description.push_str(&format!("\nEQ: {}", name));
+                } else {
+                    description.push_str(&format!("\nEQ: {} (not synced)", name));
+                }
             }
         }
+
         ToolTip {
-            title: self.device_name.clone().unwrap_or("Unknown".to_string()),
+            title: device_properties
+                .device_name
+                .clone()
+                .unwrap_or("Unknown".to_string()),
             description,
             icon_name: "audio-headset".into(),
             icon_pixmap: Vec::new(),
         }
     }
+
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        let mut state_items: Vec<MenuItem<Self>> = self
-            .message
-            .lines()
-            .map(|line| {
+        let make_exit = || StandardItem {
+            label: "Quit".into(),
+            icon_name: "application-exit".into(),
+            activate: Box::new(|_| std::process::exit(0)),
+            ..Default::default()
+        };
+        let mut menu_items: Vec<MenuItem<Self>> = Vec::new();
+
+        let Some(device_properties) = self.device_properties.as_ref() else {
+            menu_items.push(
                 StandardItem {
-                    label: escape_label(line),
+                    label: NO_COMPATIBLE_DEVICE.to_string(),
                     enabled: false,
                     ..Default::default()
                 }
-                .into()
-            })
-            .collect();
+                .into(),
+            );
+            menu_items.push(MenuItem::Separator);
+            menu_items.push(make_exit().into());
+            return menu_items;
+        };
 
+        if !device_properties.connected.unwrap_or(false) {
+            menu_items.push(
+                StandardItem {
+                    label: HEADSET_NOT_CONNECTED.to_string(),
+                    enabled: false,
+                    ..Default::default()
+                }
+                .into(),
+            );
+            menu_items.push(MenuItem::Separator);
+            menu_items.push(make_exit().into());
+            return menu_items;
+        }
+        for property in device_properties.get_properties() {
+            match property {
+                hyper_headset::devices::PropertyDescriptorWrapper::Int(property, []) => {
+                    let Some(current_value) = property.data else {
+                        continue;
+                    };
+                    let create_event = property.create_event;
+                    menu_items.push(
+                        StandardItem {
+                            label: format!(
+                                "{} {}{}",
+                                property.prefix, current_value, property.suffix
+                            ),
+                            enabled: false,
+                            activate: Box::new(move |_| {
+                                let _ = (create_event)(!current_value);
+                            }),
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
+                hyper_headset::devices::PropertyDescriptorWrapper::Int(property, options) => {
+                    let Some(current_value) = property.data else {
+                        continue;
+                    };
+                    let create_event = property.create_event;
+                    let sub_menu = options
+                        .iter()
+                        .map(|val| {
+                            let update_sender = self.update_sender.clone();
+                            StandardItem {
+                                label: format!("{}{}", val, property.suffix),
+                                enabled: property.property_type == PropertyType::ReadWrite
+                                    && property.data.is_some(),
+                                activate: Box::new(move |_| {
+                                    if let Some(command) = (create_event)(*val) {
+                                        let _ = update_sender.send(command);
+                                    }
+                                }),
+                                ..Default::default()
+                            }
+                            .into()
+                        })
+                        .collect();
+                    menu_items.push(
+                        SubMenu {
+                            label: format!(
+                                "{} {}{}",
+                                property.prefix, current_value, property.suffix
+                            ),
+                            enabled: property.property_type == PropertyType::ReadWrite
+                                && property.data.is_some(),
+                            submenu: sub_menu,
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
+                hyper_headset::devices::PropertyDescriptorWrapper::Bool(property) => {
+                    let Some(current_value) = property.data else {
+                        continue;
+                    };
+                    let create_event = property.create_event;
+                    let update_sender = self.update_sender.clone();
+                    menu_items.push(
+                        StandardItem {
+                            label: format!(
+                                "{} {}{}",
+                                property.prefix, current_value, property.suffix
+                            ),
+                            enabled: property.property_type == PropertyType::ReadWrite
+                                && property.data.is_some(),
+                            activate: Box::new(move |_| {
+                                if let Some(command) = (create_event)(!current_value) {
+                                    let _ = update_sender.send(command);
+                                }
+                            }),
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
+                hyper_headset::devices::PropertyDescriptorWrapper::String(property) => {
+                    let Some(current_value) = property.data else {
+                        continue;
+                    };
+                    let create_event = property.create_event;
+                    menu_items.push(
+                        StandardItem {
+                            label: format!(
+                                "{} {}{}",
+                                property.prefix, current_value, property.suffix
+                            ),
+                            enabled: false,
+                            activate: Box::new(move |_| {
+                                let _ = (create_event)(String::new());
+                            }),
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
+            }
+        }
+
+        // EQ preset submenu — only when headset supports EQ and is connected
         #[cfg(feature = "eq-support")]
-        if self.can_set_equalizer && !self.eq_presets.is_empty() {
-            state_items.push(MenuItem::Separator);
+        if device_properties.can_set_equalizer && !self.eq_presets.is_empty() {
+            menu_items.push(MenuItem::Separator);
 
-            let is_connected = self.is_connected;
             let applying_name = if !self.eq_synced {
                 self.active_preset_name.as_deref()
             } else {
@@ -196,7 +332,7 @@ impl Tray for StatusTray {
                     };
                     RadioItem {
                         label,
-                        enabled: is_connected,
+                        enabled: true,
                         ..Default::default()
                     }
                 })
@@ -207,7 +343,6 @@ impl Tray for StatusTray {
                     selected: self.active_eq_preset.unwrap_or(usize::MAX),
                     select: Box::new(|this: &mut Self, index| {
                         if let Some(name) = this.eq_presets.get(index).cloned() {
-                            // Save with synced=false — main loop confirms sync
                             let profile = presets::SelectedProfile {
                                 active_preset: Some(name.clone()),
                                 synced: false,
@@ -234,7 +369,7 @@ impl Tray for StatusTray {
                 .into(),
             );
 
-            state_items.push(
+            menu_items.push(
                 SubMenu {
                     label: "EQ Preset".into(),
                     submenu: submenu_items,
@@ -245,9 +380,9 @@ impl Tray for StatusTray {
         }
 
         #[cfg(not(feature = "eq-support"))]
-        if self.can_set_equalizer {
-            state_items.push(MenuItem::Separator);
-            state_items.push(
+        if device_properties.can_set_equalizer {
+            menu_items.push(MenuItem::Separator);
+            menu_items.push(
                 StandardItem {
                     label: "EQ presets available — rebuild with --features eq-support".into(),
                     enabled: false,
@@ -257,13 +392,8 @@ impl Tray for StatusTray {
             );
         }
 
-        let exit = StandardItem {
-            label: "Exit".into(),
-            icon_name: "application-exit".into(),
-            activate: Box::new(|_| std::process::exit(0)),
-            ..Default::default()
-        };
-        state_items.push(exit.into());
-        state_items
+        menu_items.push(MenuItem::Separator);
+        menu_items.push(make_exit().into());
+        menu_items
     }
 }
