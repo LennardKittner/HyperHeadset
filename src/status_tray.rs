@@ -52,20 +52,9 @@ impl TrayHandler {
     #[cfg(feature = "eq-support")]
     pub fn reload_presets(&self) {
         let all = presets::all_presets();
-        let profile = presets::load_selected_profile();
         let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
-        let synced = profile.synced;
-        let active_name = profile.active_preset;
-
-        let active_index = active_name
-            .as_ref()
-            .and_then(|name| preset_names.iter().position(|n| n == name));
-
         self.handle.update(|tray| {
             tray.eq_presets = preset_names;
-            tray.active_eq_preset = active_index;
-            tray.eq_synced = synced;
-            tray.active_preset_name = active_name;
         })
     }
 }
@@ -77,35 +66,18 @@ pub struct StatusTray {
     command_tx: Sender<TrayCommand>,
     #[cfg(feature = "eq-support")]
     eq_presets: Vec<String>,
-    #[cfg(feature = "eq-support")]
-    active_eq_preset: Option<usize>,
-    #[cfg(feature = "eq-support")]
-    eq_synced: bool,
-    #[cfg(feature = "eq-support")]
-    active_preset_name: Option<String>,
 }
 
 impl StatusTray {
     #[cfg(feature = "eq-support")]
     pub fn new(update_sender: Sender<DeviceEvent>, command_tx: Sender<TrayCommand>) -> Self {
         let all = presets::all_presets();
-        let profile = presets::load_selected_profile();
         let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
-
-        let eq_synced = profile.synced;
-        let active_preset_name = profile.active_preset;
-        let active_preset = active_preset_name
-            .as_ref()
-            .and_then(|name| preset_names.iter().position(|n| n == name));
-
         StatusTray {
             device_properties: None,
             update_sender,
             command_tx,
             eq_presets: preset_names,
-            active_eq_preset: active_preset,
-            eq_synced,
-            active_preset_name,
         }
     }
 
@@ -153,8 +125,8 @@ impl Tray for StatusTray {
         // Show EQ info in tooltip only when connected and EQ is supported
         #[cfg(feature = "eq-support")]
         if device_properties.connected.unwrap_or(false) && device_properties.can_set_equalizer {
-            if let Some(ref name) = self.active_preset_name {
-                if self.eq_synced {
+            if let Some(ref name) = device_properties.active_eq_preset {
+                if device_properties.eq_synced == Some(true) {
                     description.push_str(&format!("\nEQ: {}", name));
                 } else {
                     description.push_str(&format!("\nEQ: {} (not synced)", name));
@@ -322,11 +294,12 @@ impl Tray for StatusTray {
         if device_properties.can_set_equalizer && !self.eq_presets.is_empty() {
             menu_items.push(MenuItem::Separator);
 
-            let applying_name = if !self.eq_synced {
-                self.active_preset_name.as_deref()
-            } else {
-                None
-            };
+            let eq_synced = device_properties.eq_synced.unwrap_or(false);
+            let active_preset_name = device_properties.active_eq_preset.as_deref();
+            let active_index = active_preset_name
+                .and_then(|name| self.eq_presets.iter().position(|n| n == name));
+
+            let applying_name = if !eq_synced { active_preset_name } else { None };
             let radio_options: Vec<RadioItem> = self
                 .eq_presets
                 .iter()
@@ -346,18 +319,10 @@ impl Tray for StatusTray {
 
             let mut submenu_items: Vec<MenuItem<Self>> = vec![
                 RadioGroup {
-                    selected: self.active_eq_preset.unwrap_or(usize::MAX),
+                    selected: active_index.unwrap_or(usize::MAX),
                     select: Box::new(|this: &mut Self, index| {
                         if let Some(name) = this.eq_presets.get(index).cloned() {
-                            let profile = presets::SelectedProfile {
-                                active_preset: Some(name.clone()),
-                                synced: false,
-                            };
-                            let _ = presets::save_selected_profile(&profile);
-                            let _ = this.command_tx.send(TrayCommand::ApplyEqPreset(name.clone()));
-                            this.active_eq_preset = Some(index);
-                            this.active_preset_name = Some(name);
-                            this.eq_synced = false;
+                            let _ = this.command_tx.send(TrayCommand::ApplyEqPreset(name));
                         }
                     }),
                     options: radio_options,

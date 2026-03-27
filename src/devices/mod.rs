@@ -177,6 +177,9 @@ pub struct DeviceProperties {
     pub connected: Option<bool>,
     pub silent: Option<bool>,
     pub noise_gate_active: Option<bool>,
+    // EQ state — managed by the application, not queried from firmware
+    pub active_eq_preset: Option<String>,
+    pub eq_synced: Option<bool>,
     // Capability flags - set once during device initialization
     pub can_set_mute: bool,
     pub can_set_surround_sound: bool,
@@ -419,6 +422,8 @@ impl DeviceProperties {
             can_set_silent_mode: false,
             can_set_equalizer: false,
             can_set_noise_gate: false,
+            active_eq_preset: None,
+            eq_synced: None,
         }
     }
 
