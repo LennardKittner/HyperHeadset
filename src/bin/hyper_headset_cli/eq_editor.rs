@@ -65,6 +65,7 @@ pub struct EqEditor {
     save_input: String,
     confirm_quit_selection: ConfirmQuitOption,
     exit_after_preset_save: bool,
+    delete_presets_cache: Vec<EqPreset>,
     conflict_preset_name: Option<String>,
     conflict_preset_bands: Option<[f32; NUM_BANDS]>,
     startup_conflict_selection: StartupConflictOption,
@@ -155,7 +156,8 @@ impl EqEditor {
             save_input: String::new(),
             confirm_quit_selection: ConfirmQuitOption::SaveTui,
             exit_after_preset_save: false,
-            conflict_preset_name: conflict_name.clone(),
+            delete_presets_cache: Vec::new(),
+            conflict_preset_name: conflict_name,
             conflict_preset_bands: conflict_bands,
             startup_conflict_selection: StartupConflictOption::OverwriteTui,
         }
@@ -600,8 +602,8 @@ impl EqEditor {
                     .unwrap_or_default();
             }
             KeyCode::Char('d') => {
-                let user = load_user_presets();
-                if !user.is_empty() {
+                self.delete_presets_cache = load_user_presets();
+                if !self.delete_presets_cache.is_empty() {
                     self.mode = EditorMode::PresetDelete;
                     self.preset_list_state.select(Some(0));
                 }
@@ -710,12 +712,11 @@ impl EqEditor {
     }
 
     fn handle_preset_delete_key(&mut self, key: KeyEvent) {
-        let user_presets = load_user_presets();
-        if user_presets.is_empty() {
+        if self.delete_presets_cache.is_empty() {
             self.mode = EditorMode::Normal;
             return;
         }
-        let len = user_presets.len();
+        let len = self.delete_presets_cache.len();
 
         match key.code {
             KeyCode::Up => {
@@ -729,19 +730,21 @@ impl EqEditor {
             }
             KeyCode::Enter => {
                 if let Some(i) = self.preset_list_state.selected() {
-                    if i < user_presets.len() {
-                        let name = &user_presets[i].name;
-                        delete_preset(name).ok();
-                        if self.active_preset.as_deref() == Some(name) {
+                    if i < self.delete_presets_cache.len() {
+                        let name = self.delete_presets_cache[i].name.clone();
+                        delete_preset(&name).ok();
+                        if self.active_preset.as_deref() == Some(&name) {
                             self.active_preset = None;
                         }
                         self.presets = all_presets();
                     }
                 }
+                self.delete_presets_cache.clear();
                 self.preset_list_state.select(Some(0));
                 self.mode = EditorMode::Normal;
             }
             KeyCode::Esc => {
+                self.delete_presets_cache.clear();
                 self.mode = EditorMode::Normal;
             }
             _ => {}
@@ -953,7 +956,6 @@ impl EqEditor {
     }
 
     fn draw_preset_delete(&mut self, frame: &mut Frame, area: Rect) {
-        let user_presets = load_user_presets();
         let popup = centered_rect(40, 50, area);
         frame.render_widget(Clear, popup);
 
@@ -961,7 +963,7 @@ impl EqEditor {
             .title(" Delete Preset ")
             .borders(Borders::ALL);
 
-        let items: Vec<ListItem> = user_presets
+        let items: Vec<ListItem> = self.delete_presets_cache
             .iter()
             .map(|p| {
                 let suffix = if is_builtin(&p.name) {

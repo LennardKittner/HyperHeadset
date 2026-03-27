@@ -6,6 +6,8 @@ use std::time::Duration;
 use clap::{Arg, ArgAction, Command};
 use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
 
+// Frequency-to-index mapping for CLI band references.
+// Must stay in sync with hyper_headset::eq::EQ_FREQUENCIES.
 const EQ_FREQUENCIES: [(u32, u8); 10] = [
     (32, 0),
     (64, 1),

@@ -54,6 +54,16 @@ fn presets_dir() -> PathBuf {
     config_dir().join("eq_presets")
 }
 
+/// Sanitize a preset name for use as a filename.
+/// Strips path separators and other dangerous characters.
+fn sanitize_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !matches!(c, '/' | '\\' | '\0' | ':'))
+        .collect::<String>()
+        .trim_start_matches('.')
+        .to_string()
+}
+
 fn selected_profile_path() -> PathBuf {
     config_dir().join("selected_profile.json")
 }
@@ -61,7 +71,7 @@ fn selected_profile_path() -> PathBuf {
 /// Load a single preset by name. Checks user presets dir first, then builtins.
 pub fn load_preset(name: &str) -> Option<EqPreset> {
     // Check user preset file first
-    let path = presets_dir().join(format!("{}.json", name));
+    let path = presets_dir().join(format!("{}.json", sanitize_name(name)));
     if path.exists() {
         if let Ok(data) = std::fs::read_to_string(&path) {
             if let Ok(preset) = serde_json::from_str::<EqPreset>(&data) {
@@ -75,16 +85,20 @@ pub fn load_preset(name: &str) -> Option<EqPreset> {
 
 /// Save a single preset to its own file.
 pub fn save_preset(preset: &EqPreset) -> std::io::Result<()> {
+    let safe_name = sanitize_name(&preset.name);
+    if safe_name.is_empty() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid preset name"));
+    }
     let dir = presets_dir();
     std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{}.json", preset.name));
+    let path = dir.join(format!("{}.json", safe_name));
     let data = serde_json::to_string_pretty(preset)?;
     std::fs::write(&path, data)
 }
 
 /// Delete a user preset file.
 pub fn delete_preset(name: &str) -> std::io::Result<()> {
-    let path = presets_dir().join(format!("{}.json", name));
+    let path = presets_dir().join(format!("{}.json", sanitize_name(name)));
     if path.exists() {
         std::fs::remove_file(&path)
     } else {
@@ -130,8 +144,10 @@ pub fn all_presets() -> Vec<EqPreset> {
     presets
 }
 
+const BUILTIN_NAMES: &[&str] = &["Flat", "Bass Boost", "Treble Boost", "V-Shape", "Vocal"];
+
 pub fn is_builtin(name: &str) -> bool {
-    builtin_presets().iter().any(|p| p.name == name)
+    BUILTIN_NAMES.contains(&name)
 }
 
 pub fn load_selected_profile() -> SelectedProfile {
