@@ -467,5 +467,16 @@ fn main() {
         eprintln!("{error}");
         std::process::exit(1);
     };
+
+    // Populate EQ state from disk so it appears in the output
+    #[cfg(feature = "eq-support")]
+    if device.get_device_state().device_properties.can_set_equalizer {
+        use hyper_headset::eq::presets;
+        let profile = presets::load_selected_profile();
+        let props = &mut device.get_device_state_mut().device_properties;
+        props.active_eq_preset = profile.active_preset;
+        props.eq_synced = Some(profile.synced);
+    }
+
     println!("{}", device.get_device_state().device_properties);
 }

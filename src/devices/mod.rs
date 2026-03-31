@@ -180,6 +180,7 @@ pub struct DeviceProperties {
     // EQ state — managed by the application, not queried from firmware
     pub active_eq_preset: Option<String>,
     pub eq_synced: Option<bool>,
+    pub eq_preset_options: Vec<String>,
     // Capability flags - set once during device initialization
     pub can_set_mute: bool,
     pub can_set_surround_sound: bool,
@@ -376,6 +377,10 @@ pub enum PropertyDescriptorWrapper {
     Int(PropertyDescriptor<u8>, &'static [u8]),
     Bool(PropertyDescriptor<bool>),
     String(PropertyDescriptor<String>),
+    Select {
+        descriptor: PropertyDescriptor<String>,
+        options: Vec<String>,
+    },
 }
 
 pub struct PropertyDescriptor<T: 'static> {
@@ -428,6 +433,7 @@ impl DeviceProperties {
             can_set_noise_gate: false,
             active_eq_preset: None,
             eq_synced: None,
+            eq_preset_options: Vec::new(),
         }
     }
 
@@ -581,6 +587,26 @@ impl DeviceProperties {
                 property_type: PropertyType::AlwaysReadOnly,
                 create_event: &|_| None,
             }),
+            PropertyDescriptorWrapper::Select {
+                descriptor: PropertyDescriptor {
+                    prefix: "EQ:",
+                    data: self.active_eq_preset.as_ref().map(|name| {
+                        if self.eq_synced == Some(true) {
+                            name.clone()
+                        } else {
+                            format!("{} (not synced)", name)
+                        }
+                    }),
+                    suffix: "",
+                    property_type: if self.can_set_equalizer {
+                        PropertyType::ReadWrite
+                    } else {
+                        PropertyType::AlwaysReadOnly
+                    },
+                    create_event: &|name| Some(DeviceEvent::EqualizerPreset(name)),
+                },
+                options: self.eq_preset_options.clone(),
+            },
         ]
     }
 
@@ -591,18 +617,23 @@ impl DeviceProperties {
                 let (prefix, data, suffix) = match prop {
                     PropertyDescriptorWrapper::Int(property_descriptor, _) => (
                         property_descriptor.prefix,
-                        &property_descriptor.data.map(|v| v.to_string()),
+                        property_descriptor.data.map(|v| v.to_string()),
                         property_descriptor.suffix,
                     ),
                     PropertyDescriptorWrapper::Bool(property_descriptor) => (
                         property_descriptor.prefix,
-                        &property_descriptor.data.map(|v| v.to_string()),
+                        property_descriptor.data.map(|v| v.to_string()),
                         property_descriptor.suffix,
                     ),
                     PropertyDescriptorWrapper::String(property_descriptor) => (
                         property_descriptor.prefix,
-                        &property_descriptor.data,
+                        property_descriptor.data.clone(),
                         property_descriptor.suffix,
+                    ),
+                    PropertyDescriptorWrapper::Select { descriptor, .. } => (
+                        descriptor.prefix,
+                        descriptor.data.clone(),
+                        descriptor.suffix,
                     ),
                 };
                 data.as_ref()
@@ -619,21 +650,27 @@ impl DeviceProperties {
                 let (prefix, data, suffix, property_type) = match prop {
                     PropertyDescriptorWrapper::Int(property_descriptor, _) => (
                         property_descriptor.prefix,
-                        &property_descriptor.data.map(|v| v.to_string()),
+                        property_descriptor.data.map(|v| v.to_string()),
                         property_descriptor.suffix,
                         property_descriptor.property_type,
                     ),
                     PropertyDescriptorWrapper::Bool(property_descriptor) => (
                         property_descriptor.prefix,
-                        &property_descriptor.data.map(|v| v.to_string()),
+                        property_descriptor.data.map(|v| v.to_string()),
                         property_descriptor.suffix,
                         property_descriptor.property_type,
                     ),
                     PropertyDescriptorWrapper::String(property_descriptor) => (
                         property_descriptor.prefix,
-                        &property_descriptor.data,
+                        property_descriptor.data.clone(),
                         property_descriptor.suffix,
                         property_descriptor.property_type,
+                    ),
+                    PropertyDescriptorWrapper::Select { descriptor, .. } => (
+                        descriptor.prefix,
+                        descriptor.data.clone(),
+                        descriptor.suffix,
+                        descriptor.property_type,
                     ),
                 };
 

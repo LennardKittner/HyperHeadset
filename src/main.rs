@@ -178,7 +178,7 @@ fn main() {
         )
         .get_matches();
 
-    let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
+    let press_mute_key = *matches.get_one::<bool>("press-mute-key").unwrap_or(&true);
     let mut enigo = if press_mute_key {
         match Enigo::new(&Settings::default()) {
             Ok(enigo) => Some(enigo),
@@ -196,16 +196,6 @@ fn main() {
     let (tx, rx) = mpsc::channel();
     let tray_handler = TrayHandler::new(StatusTray::new(tx));
 
-    // File watcher for preset/settings changes
-    #[cfg(feature = "eq-support")]
-    let (_watcher, watcher_rx) = match presets::watch_config_dir() {
-        Ok(pair) => (Some(pair.0), Some(pair.1)),
-        Err(e) => {
-            eprintln!("Warning: failed to watch config directory: {e}");
-            (None, None)
-        }
-    };
-
     loop {
         let mut device = loop {
             match connect_compatible_device() {
@@ -219,14 +209,27 @@ fn main() {
         };
 
         #[cfg(feature = "eq-support")]
-        if device.get_device_state().device_properties.can_set_equalizer {
+        let (_watcher, watcher_rx) = if device.get_device_state().device_properties.can_set_equalizer {
             // Seed EQ state from disk so tray shows correct preset immediately
             let profile = presets::load_selected_profile();
+            let all = presets::all_presets();
+            let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
             let props = &mut device.get_device_state_mut().device_properties;
             props.active_eq_preset = profile.active_preset;
             props.eq_synced = Some(profile.synced);
-            tray_handler.reload_presets();
-        }
+            props.eq_preset_options = preset_names;
+
+            // Start file watcher for preset/settings changes
+            match presets::watch_config_dir() {
+                Ok(pair) => (Some(pair.0), Some(pair.1)),
+                Err(e) => {
+                    eprintln!("Warning: failed to watch config directory: {e}");
+                    (None, None)
+                }
+            }
+        } else {
+            (None, None)
+        };
 
         #[cfg(not(feature = "eq-support"))]
         if device.get_device_state().device_properties.can_set_equalizer {

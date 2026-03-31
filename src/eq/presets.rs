@@ -19,29 +19,22 @@ pub struct SelectedProfile {
     pub synced: bool,
 }
 
+const BUILTIN_PRESETS: &[(&str, [f32; NUM_BANDS])] = &[
+    ("Flat", [0.0; 10]),
+    ("Bass Boost", [6.0, 5.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+    ("Treble Boost", [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 4.0, 5.0, 6.0]),
+    ("V-Shape", [5.0, 4.0, 2.0, 0.0, -2.0, -2.0, 0.0, 2.0, 4.0, 5.0]),
+    ("Vocal", [-2.0, -1.0, 0.0, 2.0, 4.0, 4.0, 3.0, 1.0, 0.0, -1.0]),
+];
+
 pub fn builtin_presets() -> Vec<EqPreset> {
-    vec![
-        EqPreset {
-            name: "Flat".into(),
-            bands: [0.0; 10],
-        },
-        EqPreset {
-            name: "Bass Boost".into(),
-            bands: [6.0, 5.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        },
-        EqPreset {
-            name: "Treble Boost".into(),
-            bands: [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 4.0, 5.0, 6.0],
-        },
-        EqPreset {
-            name: "V-Shape".into(),
-            bands: [5.0, 4.0, 2.0, 0.0, -2.0, -2.0, 0.0, 2.0, 4.0, 5.0],
-        },
-        EqPreset {
-            name: "Vocal".into(),
-            bands: [-2.0, -1.0, 0.0, 2.0, 4.0, 4.0, 3.0, 1.0, 0.0, -1.0],
-        },
-    ]
+    BUILTIN_PRESETS
+        .iter()
+        .map(|(name, bands)| EqPreset {
+            name: (*name).into(),
+            bands: *bands,
+        })
+        .collect()
 }
 
 pub fn config_dir() -> PathBuf {
@@ -144,10 +137,8 @@ pub fn all_presets() -> Vec<EqPreset> {
     presets
 }
 
-const BUILTIN_NAMES: &[&str] = &["Flat", "Bass Boost", "Treble Boost", "V-Shape", "Vocal"];
-
 pub fn is_builtin(name: &str) -> bool {
-    BUILTIN_NAMES.contains(&name)
+    BUILTIN_PRESETS.iter().any(|(n, _)| *n == name)
 }
 
 pub fn load_selected_profile() -> SelectedProfile {
