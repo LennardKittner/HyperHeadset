@@ -14,8 +14,8 @@ serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 dirs = { version = "6", optional = true }
 notify = { version = "7", optional = true }
-ratatui = { version = "0.29", optional = true }
-crossterm = { version = "0.28", optional = true }
+ratatui = { version = "0.30", optional = true }
+crossterm = { version = "0.29", optional = true }
 
 [features]
 default = []
