@@ -191,7 +191,7 @@ Usage: hyper_headset [OPTIONS]
 Options:
       --refresh-interval <refresh-interval>
           Set the refresh interval (in seconds) [default: 3]
-      --press_mute_key <press_mute_key>
+      --press-mute-key <press-mute-key>
           The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted. [default: true] [possible values: true, false]
   -h, --help
           Print help

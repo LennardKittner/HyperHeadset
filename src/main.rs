@@ -40,16 +40,18 @@ fn main() {
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("A tray application for monitoring HyperX headsets.")
         .arg(
-            Arg::new("refresh_interval")
-                .long("refresh_interval")
+            Arg::new("refresh-interval")
+                .long("refresh-interval")
+                .alias("refresh_interval")
                 .required(false)
                 .help("Set the refresh interval (in seconds)")
                 .default_value("3")
                 .value_parser(clap::value_parser!(u64)),
         )
         .arg(
-            Arg::new("press_mute_key")
-                .long("press_mute_key")
+            Arg::new("press-mute-key")
+                .long("press-mute-key")
+                .alias("press_mute_key")
                 .required(false)
                 .help("The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted.")
                 .default_value("true")
@@ -57,7 +59,7 @@ fn main() {
         )
         .get_matches();
 
-        let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
+        let press_mute_key = *matches.get_one::<bool>("press-mute-key").unwrap_or(&true);
         let mut enigo = if press_mute_key {
             match Enigo::new(&Settings::default()) {
                 Ok(enigo) => Some(enigo),
@@ -69,7 +71,7 @@ fn main() {
         } else {
             None
         };
-        let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
+        let refresh_interval = *matches.get_one::<u64>("refresh-interval").unwrap_or(&3);
         let refresh_interval = Duration::from_secs(refresh_interval);
 
         loop {
@@ -166,8 +168,9 @@ fn main() {
                 .value_parser(clap::value_parser!(u64)),
         )
         .arg(
-            Arg::new("press_mute_key")
-                .long("press_mute_key")
+            Arg::new("press-mute-key")
+                .long("press-mute-key")
+                .alias("press_mute_key")
                 .required(false)
                 .help("The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted.")
                 .default_value("true")
