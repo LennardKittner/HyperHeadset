@@ -6,6 +6,8 @@ use std::time::Duration;
 use clap::{Arg, ArgAction, Command};
 use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
 
+const SHOW_ALL_OPTIONS: bool = false;
+
 // Frequency-to-index mapping for CLI band references.
 // Must stay in sync with hyper_headset::eq::EQ_FREQUENCIES.
 const EQ_FREQUENCIES: [(u32, u8); 10] = [
@@ -128,6 +130,22 @@ fn parse_eq_pair(s: &str) -> Result<(u8, f32), String> {
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    {
+        use hyper_headset::act_as_askpass_handler;
+        use hyper_headset::prompt_user_for_udev_rule;
+
+        if let Ok(name) = std::env::current_exe() {
+            if let Some(name) = name.to_str() {
+                if let Ok(askpass) = std::env::var("SUDO_ASKPASS") {
+                    if name == askpass {
+                        act_as_askpass_handler();
+                    }
+                }
+            }
+        }
+        prompt_user_for_udev_rule();
+    }
     let mut device = match connect_compatible_device() {
         Ok(device) => device,
         Err(error) => {
@@ -161,7 +179,7 @@ fn main() {
                 .help(
                     "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
                 )
-                    .hide(!device.can_set_automatic_shutdown())
+                    .hide(!SHOW_ALL_OPTIONS && !device.can_set_automatic_shutdown())
                 .value_parser(clap::value_parser!(u8)),
         )
         .arg(
@@ -169,7 +187,7 @@ fn main() {
                 .long("mute")
                 .required(false)
                 .help("Mute or unmute the headset.")
-                .hide(!device.can_set_mute())
+                .hide(!SHOW_ALL_OPTIONS && !device.can_set_mute())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -178,7 +196,7 @@ fn main() {
                 .alias("enable_side_tone")
                 .required(false)
                 .help("Enable or disable side tone.")
-                .hide(!device.can_set_side_tone())
+                .hide(!SHOW_ALL_OPTIONS && !device.can_set_side_tone())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -187,7 +205,7 @@ fn main() {
                 .alias("side_tone_volume")
                 .required(false)
                 .help("Set the side tone volume.")
-                .hide(!device.can_set_side_tone_volume())
+                .hide(!SHOW_ALL_OPTIONS && !device.can_set_side_tone_volume())
                 .value_parser(clap::value_parser!(u8)),
         )
         .arg(
@@ -196,7 +214,7 @@ fn main() {
                 .alias("enable_voice_prompt")
                 .required(false)
                 .help("Enable voice prompt. This may not be supported on your device.")
-                .hide(!device.can_set_voice_prompt())
+                .hide(!SHOW_ALL_OPTIONS && !device.can_set_voice_prompt())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -205,7 +223,7 @@ fn main() {
                 .alias("surround_sound")
                 .required(false)
                 .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
-                .hide(!device.can_set_surround_sound())
+                .hide(!SHOW_ALL_OPTIONS && !device.can_set_surround_sound())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -214,7 +232,7 @@ fn main() {
                 .alias("mute_playback")
                 .required(false)
                 .help("Mute or unmute playback. This may not be supported on your device.")
-                .hide(!device.can_set_silent_mode())
+                .hide(!SHOW_ALL_OPTIONS && !device.can_set_silent_mode())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -223,7 +241,7 @@ fn main() {
                 .alias("activate_noise_gate")
                 .required(false)
                 .help("Activates noise gate.")
-                .hide(!device.can_set_noise_gate())
+                .hide(!SHOW_ALL_OPTIONS && !device.can_set_noise_gate())
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -238,7 +256,7 @@ fn main() {
                      DB: -12.0 to 12.0.\n\
                      Example: --eq-profile 5=-12.0,1khz=3.0,16khz=4.0",
                 )
-                .hide(!can_set_eq),
+                .hide(!SHOW_ALL_OPTIONS && !can_set_eq),
         )
         .arg(
             Arg::new("eq-band")
@@ -252,7 +270,7 @@ fn main() {
                      See --eq-profile for band/dB reference.\n\
                      Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0",
                 )
-                .hide(!can_set_eq),
+                .hide(!SHOW_ALL_OPTIONS && !can_set_eq),
         );
 
     // Feature-gated TUI editor arg
@@ -263,7 +281,7 @@ fn main() {
                 .long("eq")
                 .action(ArgAction::SetTrue)
                 .help("Open interactive EQ editor (TUI).\nThis may not be supported on your device.")
-                .hide(!can_set_eq),
+                .hide(!SHOW_ALL_OPTIONS && !can_set_eq),
         );
     }
 
