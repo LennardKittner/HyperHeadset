@@ -329,7 +329,7 @@ fn main() {
                     println!("EQ preset '{}' saved.", name);
                     std::process::exit(0);
                 }
-                Ok(EditorResult::Cancelled { name, bands: _ }) => {
+                Ok(EditorResult::Cancelled { name }) => {
                     // Restore previous profile with its original synced state
                     let profile = presets::SelectedProfile {
                         active_preset: Some(name),

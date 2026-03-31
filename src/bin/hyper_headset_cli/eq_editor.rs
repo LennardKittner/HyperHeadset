@@ -48,7 +48,7 @@ pub enum EditorResult {
     /// User saved: (preset_name, bands). Save preset file + set selected profile.
     Saved { name: String, bands: [f32; NUM_BANDS] },
     /// User cancelled/undid: (preset_name, bands). Restore selected profile + headset state.
-    Cancelled { name: String, bands: [f32; NUM_BANDS] },
+    Cancelled { name: String },
 }
 
 pub struct EqEditor {
@@ -622,7 +622,6 @@ impl EqEditor {
                 } else {
                     return Some(EditorResult::Cancelled {
                         name: self.original_preset.clone(),
-                        bands: self.original_bands,
                     });
                 }
             }
@@ -792,7 +791,6 @@ impl EqEditor {
                     self.restore_original(device);
                     return Some(EditorResult::Cancelled {
                         name: self.original_preset.clone(),
-                        bands: self.original_bands,
                     });
                 }
             },
