@@ -8,6 +8,8 @@ mod status_tray_not_linux;
 
 mod tray_battery_icon_state;
 
+use cfg_if::cfg_if;
+
 #[cfg(all(target_os = "linux", feature = "eq-support"))]
 use hyper_headset::eq::presets;
 
@@ -208,32 +210,34 @@ fn main() {
             std::thread::sleep(Duration::from_secs(1));
         };
 
-        #[cfg(feature = "eq-support")]
-        let (_watcher, watcher_rx) = if device.get_device_state().device_properties.can_set_equalizer {
-            // Seed EQ state from disk so tray shows correct preset immediately
-            let profile = presets::load_selected_profile();
-            let all = presets::all_presets();
-            let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
-            let props = &mut device.get_device_state_mut().device_properties;
-            props.active_eq_preset = profile.active_preset;
-            props.eq_synced = Some(profile.synced);
-            props.eq_preset_options = preset_names;
+        cfg_if! {
+            if #[cfg(feature = "eq-support")] {
+                let (_watcher, watcher_rx) = if device.get_device_state().device_properties.can_set_equalizer {
+                    // Seed EQ state from disk so tray shows correct preset immediately
+                    let profile = presets::load_selected_profile();
+                    let all = presets::all_presets();
+                    let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
+                    let props = &mut device.get_device_state_mut().device_properties;
+                    props.active_eq_preset = profile.active_preset;
+                    props.eq_synced = Some(profile.synced);
+                    props.eq_preset_options = preset_names;
 
-            // Start file watcher for preset/settings changes
-            match presets::watch_config_dir() {
-                Ok(pair) => (Some(pair.0), Some(pair.1)),
-                Err(e) => {
-                    eprintln!("Warning: failed to watch config directory: {e}");
+                    match presets::watch_config_dir() {
+                        Ok(pair) => (Some(pair.0), Some(pair.1)),
+                        Err(e) => {
+                            eprintln!("Warning: failed to watch config directory: {e}");
+                            (None, None)
+                        }
+                    }
+                } else {
                     (None, None)
+                };
+            } else {
+                if device.get_device_state().device_properties.can_set_equalizer {
+                    static EQ_WARNING: std::sync::Once = std::sync::Once::new();
+                    EQ_WARNING.call_once(|| eprintln!("This headset supports EQ presets. Rebuild with --features eq-support to enable."));
                 }
             }
-        } else {
-            (None, None)
-        };
-
-        #[cfg(not(feature = "eq-support"))]
-        if device.get_device_state().device_properties.can_set_equalizer {
-            eprintln!("This headset supports EQ presets. Rebuild with --features eq-support to enable.");
         }
 
         // Run loop
@@ -284,8 +288,6 @@ fn main() {
                 }
             }
 
-            tray_handler.update(device.get_device_state());
-
             // Sync unsynced profile when headset transitions to connected
             #[cfg(feature = "eq-support")]
             {
@@ -301,6 +303,8 @@ fn main() {
                 }
                 was_connected = is_connected;
             }
+
+            tray_handler.update(device.get_device_state());
 
             run_counter += 1;
         }

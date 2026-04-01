@@ -1670,6 +1670,7 @@ dependencies = [
 name = "hyper_headset"
 version = "1.7.0"
 dependencies = [
+ "cfg-if 1.0.4",
  "clap 4.6.0",
  "crossterm",
  "dialog",
