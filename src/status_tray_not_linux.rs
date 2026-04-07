@@ -473,9 +473,11 @@ impl TrayApp {
                     );
                     let _ = menu.append(&menu_item);
                 }
-                hyper_headset::devices::PropertyDescriptorWrapper::Select {
+                hyper_headset::devices::PropertyDescriptorWrapper::SelectEQ {
                     descriptor,
                     options,
+                    active_preset,
+                    synced,
                 } => {
                     let Some(ref current_value) = descriptor.data else {
                         continue;
@@ -499,14 +501,24 @@ impl TrayApp {
                         true,
                     );
 
+                    let applying_name = if !synced {
+                        active_preset.as_deref()
+                    } else {
+                        None
+                    };
+
                     for option_name in &options {
-                        let is_active = descriptor
-                            .data
+                        let is_active = active_preset
                             .as_ref()
-                            .map(|d| d.starts_with(option_name.as_str()))
+                            .map(|a| a == option_name)
                             .unwrap_or(false);
+                        let label = if applying_name == Some(option_name.as_str()) {
+                            format!("{} (applying...)", option_name)
+                        } else {
+                            option_name.clone()
+                        };
                         let entry = CheckMenuItem::new(
-                            option_name,
+                            &label,
                             true,
                             is_active,
                             None,

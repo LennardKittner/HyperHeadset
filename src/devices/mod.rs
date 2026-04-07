@@ -377,9 +377,11 @@ pub enum PropertyDescriptorWrapper {
     Int(PropertyDescriptor<u8>, &'static [u8]),
     Bool(PropertyDescriptor<bool>),
     String(PropertyDescriptor<String>),
-    Select {
+    SelectEQ {
         descriptor: PropertyDescriptor<String>,
         options: Vec<String>,
+        active_preset: Option<String>,
+        synced: bool,
     },
 }
 
@@ -587,7 +589,7 @@ impl DeviceProperties {
                 property_type: PropertyType::AlwaysReadOnly,
                 create_event: &|_| None,
             }),
-            PropertyDescriptorWrapper::Select {
+            PropertyDescriptorWrapper::SelectEQ {
                 descriptor: PropertyDescriptor {
                     prefix: "EQ:",
                     data: self.active_eq_preset.as_ref().map(|name| {
@@ -606,6 +608,8 @@ impl DeviceProperties {
                     create_event: &|name| Some(DeviceEvent::EqualizerPreset(name)),
                 },
                 options: self.eq_preset_options.clone(),
+                active_preset: self.active_eq_preset.clone(),
+                synced: self.eq_synced.unwrap_or(false),
             },
         ]
     }
@@ -630,7 +634,7 @@ impl DeviceProperties {
                         property_descriptor.data.clone(),
                         property_descriptor.suffix,
                     ),
-                    PropertyDescriptorWrapper::Select { descriptor, .. } => (
+                    PropertyDescriptorWrapper::SelectEQ { descriptor, .. } => (
                         descriptor.prefix,
                         descriptor.data.clone(),
                         descriptor.suffix,
@@ -666,7 +670,7 @@ impl DeviceProperties {
                         property_descriptor.suffix,
                         property_descriptor.property_type,
                     ),
-                    PropertyDescriptorWrapper::Select { descriptor, .. } => (
+                    PropertyDescriptorWrapper::SelectEQ { descriptor, .. } => (
                         descriptor.prefix,
                         descriptor.data.clone(),
                         descriptor.suffix,
@@ -1111,10 +1115,12 @@ pub trait Device {
                     let props = &mut dev.get_device_state_mut().device_properties;
                     props.active_eq_preset = Some(name.clone());
                     props.eq_synced = Some(synced);
-                    let _ = presets::save_selected_profile(&presets::SelectedProfile {
+                    if let Err(e) = presets::save_selected_profile(&presets::SelectedProfile {
                         active_preset: Some(name.clone()),
                         synced,
-                    });
+                    }) {
+                        eprintln!("Failed to save EQ profile: {e}");
+                    }
                 };
 
                 let connected = self.get_device_state().device_properties.connected == Some(true);

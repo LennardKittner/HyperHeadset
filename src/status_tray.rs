@@ -253,9 +253,11 @@ impl Tray for StatusTray {
                         .into(),
                     );
                 }
-                hyper_headset::devices::PropertyDescriptorWrapper::Select {
+                hyper_headset::devices::PropertyDescriptorWrapper::SelectEQ {
                     descriptor,
                     options,
+                    active_preset,
+                    synced,
                 } => {
                     if options.is_empty() {
                         // No options available — show as read-only label if data exists
@@ -277,12 +279,11 @@ impl Tray for StatusTray {
 
                     menu_items.push(MenuItem::Separator);
 
-                    let active_name = device_properties.active_eq_preset.as_deref();
-                    let eq_synced = device_properties.eq_synced.unwrap_or(false);
+                    let active_name = active_preset.as_deref();
                     let active_index = active_name
                         .and_then(|name| options.iter().position(|n| n == name));
 
-                    let applying_name = if !eq_synced { active_name } else { None };
+                    let applying_name = if !synced { active_name } else { None };
                     let radio_options: Vec<RadioItem> = options
                         .iter()
                         .map(|name| {
