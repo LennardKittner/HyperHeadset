@@ -80,34 +80,34 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     debug_println!("Found device selecting handler");
 
     // On Linux and MacOS we can just take the first
-    #[cfg(not(target_os = "windows"))]
-    {
-        let state = states
-            .into_iter()
-            .next()
-            .ok_or(DeviceError::NoDeviceFound())?;
-        println!(
-            "Connecting to {}",
-            state
-                .device_properties
-                .device_name
-                .clone()
-                .unwrap_or("???".to_string())
-        );
-        let entry = DEVICE_REGISTER
-            .iter()
-            .find(|e| {
-                e.vendor_ids.contains(&state.device_properties.vendor_id)
-                    && e.product_ids.contains(&state.device_properties.product_id)
-            })
-            .ok_or(DeviceError::NoDeviceFound())?;
-
-        let mut device = (entry.factory)(state);
-        device.init_capabilities();
-        Ok(device)
-    }
+    // #[cfg(not(target_os = "windows"))]
+    // {
+    //     let state = states
+    //         .into_iter()
+    //         .next()
+    //         .ok_or(DeviceError::NoDeviceFound())?;
+    //     println!(
+    //         "Connecting to {}",
+    //         state
+    //             .device_properties
+    //             .device_name
+    //             .clone()
+    //             .unwrap_or("???".to_string())
+    //     );
+    //     let entry = DEVICE_REGISTER
+    //         .iter()
+    //         .find(|e| {
+    //             e.vendor_ids.contains(&state.device_properties.vendor_id)
+    //                 && e.product_ids.contains(&state.device_properties.product_id)
+    //         })
+    //         .ok_or(DeviceError::NoDeviceFound())?;
+    //
+    //     let mut device = (entry.factory)(state);
+    //     device.init_capabilities();
+    //     Ok(device)
+    // }
     // On Windows we have to check which interface can be used
-    #[cfg(target_os = "windows")]
+    // #[cfg(target_os = "windows")]
     {
         let mut device = None;
         for state in states {
@@ -133,7 +133,7 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
             let probe_packet = test_device
                 .get_query_packets()
                 .into_iter()
-                .next()
+                .nth(2)
                 .expect("Why is there a device without packets ???");
 
             test_device.prepare_write();
@@ -144,6 +144,16 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
                 debug_println!("Failed to open: {_e:?}");
                 continue;
             } else {
+                std::thread::sleep(RESPONSE_DELAY);
+
+                if let Some(events) = test_device.wait_for_updates(Duration::from_secs(1)) {
+                    for event in events {
+                        debug_println!("got response {event:?}");
+                    }
+                } else {
+                    continue;
+                }
+
                 device = Some(test_device);
                 break;
             }
