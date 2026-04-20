@@ -5,8 +5,9 @@ use crate::{
 use std::time::Duration;
 
 const HP: u16 = 0x03F0;
-pub const VENDOR_IDS: [u16; 1] = [HP];
-pub const PRODUCT_IDS: [u16; 1] = [0x0e90];
+const HYPERX: u16 = 0x0951;
+pub const VENDOR_IDS: [u16; 2] = [HP, HYPERX];
+pub const PRODUCT_IDS: [u16; 2] = [0x0e90, 0x1749];
 
 const BASE_PACKET: [u8; 64] = {
     let mut packet = [0; 64];
