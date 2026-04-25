@@ -1,3 +1,5 @@
+use hidapi::HidError;
+
 use crate::{
     debug_println,
     devices::{ChargingStatus, Color, Device, DeviceEvent, DeviceState},
@@ -135,6 +137,12 @@ impl CloudIIISWireless {
 }
 
 impl Device for CloudIIISWireless {
+    fn write_hid_report(&mut self, packet: &[u8]) -> Result<(), HidError> {
+        self.get_device_state_mut()
+            .hid_device
+            .send_feature_report(packet)
+    }
+
     fn get_charging_packet(&self) -> Option<Vec<u8>> {
         let mut packet = BASE_PACKET.to_vec();
         packet[5] = CHARGE_STATE_COMMAND_ID;
