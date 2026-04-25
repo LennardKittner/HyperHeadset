@@ -1,3 +1,5 @@
+use hidapi::HidError;
+
 use crate::{
     debug_println,
     devices::{ChargingStatus, Color, Device, DeviceEvent, DeviceState},
@@ -34,8 +36,8 @@ const EQ_CMD: [u8; 5] = [0x02, 0x03, 0x00, 0x00, 0x5f];
 const EQ_PACKET_SIZE: usize = 64;
 
 // Battery packet
-const BASE_PACKET: [u8; 62] = {
-    let mut packet = [0u8; 62];
+const BASE_PACKET: [u8; 64] = {
+    let mut packet = [0u8; 64];
     packet[0] = 0x0C;
     packet[1] = 0x02;
     packet[2] = 0x03;
@@ -147,6 +149,12 @@ impl CloudIIISWireless {
 }
 
 impl Device for CloudIIISWireless {
+    fn write_hid_report(&mut self, packet: &[u8]) -> Result<(), HidError> {
+        self.get_device_state_mut()
+            .hid_device
+            .send_feature_report(packet)
+    }
+
     fn get_charging_packet(&self) -> Option<Vec<u8>> {
         let mut packet = BASE_PACKET.to_vec();
         packet[5] = CHARGE_STATE_COMMAND_ID;
