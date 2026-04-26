@@ -78,8 +78,9 @@ pub fn load_preset(name: &str) -> Option<EqPreset> {
     let path = presets_dir().join(format!("{}.json", sanitize_name(name)));
     if path.exists() {
         if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(preset) = serde_json::from_str::<EqPreset>(&data) {
-                return Some(preset);
+            match serde_json::from_str::<EqPreset>(&data) {
+                Ok(preset) => return Some(preset),
+                Err(e) => eprintln!("Failed to parse preset at {}: {e}", path.display()),
             }
         }
     }
@@ -124,8 +125,11 @@ pub fn load_user_presets() -> Vec<EqPreset> {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "json") {
                 if let Ok(data) = std::fs::read_to_string(&path) {
-                    if let Ok(preset) = serde_json::from_str::<EqPreset>(&data) {
-                        presets.push(preset);
+                    match serde_json::from_str::<EqPreset>(&data) {
+                        Ok(preset) => presets.push(preset),
+                        Err(e) => {
+                            eprintln!("Failed to parse preset at {}: {e}", path.display())
+                        }
                     }
                 }
             }
@@ -158,7 +162,13 @@ pub fn load_selected_profile() -> SelectedProfile {
         return SelectedProfile::default();
     }
     match std::fs::read_to_string(&path) {
-        Ok(data) => serde_json::from_str(&data).unwrap_or_default(),
+        Ok(data) => match serde_json::from_str(&data) {
+            Ok(profile) => profile,
+            Err(e) => {
+                eprintln!("Failed to parse selected profile at {}: {e}", path.display());
+                SelectedProfile::default()
+            }
+        },
         Err(_) => SelectedProfile::default(),
     }
 }
@@ -174,29 +184,61 @@ pub fn save_selected_profile(profile: &SelectedProfile) -> std::io::Result<()> {
 
 // === Config-dir watcher ===
 
-/// Creates a file watcher on the config directory (recursive, includes eq_presets/).
-/// Returns the watcher (must be kept alive) and a receiver that fires on file changes.
-pub fn watch_config_dir() -> notify::Result<(notify::RecommendedWatcher, mpsc::Receiver<()>)> {
-    use notify::{Event, EventKind, RecursiveMode, Watcher};
+/// Watches the config directory for EQ-relevant changes (preset files under
+/// `eq_presets/` and the `selected_profile.json` file). Hides `notify`'s
+/// "must be kept alive" requirement inside the type — caller just keeps the
+/// `ConfigWatcher` alive and polls via `take_pending`.
+pub struct ConfigWatcher {
+    _watcher: notify::RecommendedWatcher,
+    rx: mpsc::Receiver<()>,
+}
 
-    let (tx, rx) = mpsc::channel();
-    let config = config_dir();
+impl ConfigWatcher {
+    /// Install a recursive watcher on the config dir. Events are filtered to
+    /// those touching `eq_presets/*` or `selected_profile.json`; everything
+    /// else is dropped before reaching the receiver.
+    pub fn new() -> notify::Result<Self> {
+        use notify::{Event, EventKind, RecursiveMode, Watcher};
 
-    // Ensure the directories exist so we can watch them
-    std::fs::create_dir_all(config.join("eq_presets")).ok();
+        let (tx, rx) = mpsc::channel();
+        let config = config_dir();
+        let presets = presets_dir();
+        let profile = selected_profile_path();
 
-    let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
-        if let Ok(event) = res {
-            match event.kind {
-                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
-                    let _ = tx.send(());
-                }
-                _ => {}
+        // Ensure the directories exist so we can watch them
+        std::fs::create_dir_all(&presets).ok();
+
+        let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
+            let Ok(event) = res else { return };
+            if !matches!(
+                event.kind,
+                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+            ) {
+                return;
             }
+            let relevant = event
+                .paths
+                .iter()
+                .any(|p| p.starts_with(&presets) || p == &profile);
+            if relevant {
+                let _ = tx.send(());
+            }
+        })?;
+
+        watcher.watch(&config, RecursiveMode::Recursive)?;
+
+        Ok(Self {
+            _watcher: watcher,
+            rx,
+        })
+    }
+
+    /// Drain pending change signals; return true if anything was queued.
+    pub fn take_pending(&self) -> bool {
+        let mut any = false;
+        while self.rx.try_recv().is_ok() {
+            any = true;
         }
-    })?;
-
-    watcher.watch(&config, RecursiveMode::Recursive)?;
-
-    Ok((watcher, rx))
+        any
+    }
 }

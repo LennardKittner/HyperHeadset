@@ -5,11 +5,10 @@
 
 use crate::devices::{Device, DeviceEvent};
 use crate::eq::presets;
-use std::sync::mpsc;
+use crate::eq::presets::ConfigWatcher;
 
 pub struct EqSession {
-    _watcher: notify::RecommendedWatcher,
-    rx: mpsc::Receiver<()>,
+    watcher: ConfigWatcher,
     was_connected: bool,
     active: bool,
 }
@@ -19,16 +18,15 @@ impl EqSession {
     /// watcher cannot be set up; device capability is checked later
     /// in `bind_device`.
     pub fn new() -> Option<Self> {
-        let (watcher, rx) = match presets::watch_config_dir() {
-            Ok(pair) => pair,
+        let watcher = match ConfigWatcher::new() {
+            Ok(w) => w,
             Err(e) => {
                 eprintln!("Warning: failed to watch EQ config directory: {e}");
                 return None;
             }
         };
         Some(Self {
-            _watcher: watcher,
-            rx,
+            watcher,
             was_connected: false,
             active: false,
         })
@@ -45,7 +43,7 @@ impl EqSession {
             return;
         }
         Self::load_props_from_disk(device);
-        while self.rx.try_recv().is_ok() {}
+        self.watcher.take_pending();
         self.was_connected = false;
     }
 
@@ -56,10 +54,9 @@ impl EqSession {
         if !self.active {
             return;
         }
-        if self.rx.try_recv().is_err() {
+        if !self.watcher.take_pending() {
             return;
         }
-        while self.rx.try_recv().is_ok() {}
         Self::load_props_from_disk(device);
     }
 
