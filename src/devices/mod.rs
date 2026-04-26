@@ -144,8 +144,8 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
                 std::thread::sleep(RESPONSE_DELAY);
 
                 if let Some(events) = test_device.wait_for_updates(Duration::from_secs(1)) {
-                    for event in events {
-                        debug_println!("got response {event:?}");
+                    for _event in events {
+                        debug_println!("got response {_event:?}");
                     }
                 } else {
                     continue;
