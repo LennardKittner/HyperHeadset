@@ -468,7 +468,11 @@ fn main() {
         std::process::exit(1);
     };
 
-    // Populate EQ state from disk so it appears in the output
+    // Populate EQ state from disk so it appears in the output.
+    // Note: the firmware does not respond to EQ-query reads, so disk is the only
+    // source of truth. This may be stale if EQ was changed by another tool
+    // (e.g. NGenuity on Windows) — re-applying via the tray or `--eq-profile`
+    // re-syncs it.
     #[cfg(feature = "eq-support")]
     if device.get_device_state().device_properties.can_set_equalizer {
         use hyper_headset::eq::presets;

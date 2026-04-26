@@ -10,8 +10,20 @@ mod tray_battery_icon_state;
 
 use cfg_if::cfg_if;
 
-#[cfg(all(target_os = "linux", feature = "eq-support"))]
-use hyper_headset::eq::presets;
+#[cfg(feature = "eq-support")]
+use hyper_headset::eq::runtime as eq_runtime;
+
+#[cfg(not(feature = "eq-support"))]
+fn warn_eq_unavailable_once(can_set_equalizer: bool) {
+    if can_set_equalizer {
+        static EQ_WARNING: std::sync::Once = std::sync::Once::new();
+        EQ_WARNING.call_once(|| {
+            eprintln!(
+                "This headset supports EQ presets. Rebuild with --features eq-support to enable."
+            )
+        });
+    }
+}
 
 #[cfg(not(target_os = "linux"))]
 fn main() {
@@ -88,8 +100,24 @@ fn main() {
                 std::thread::sleep(Duration::from_secs(1));
             };
 
+            cfg_if! {
+                if #[cfg(feature = "eq-support")] {
+                    let (_watcher, watcher_rx) = match eq_runtime::init_device_eq_state(&mut *device) {
+                        Some((w, rx)) => (Some(w), Some(rx)),
+                        None => (None, None),
+                    };
+                } else {
+                    warn_eq_unavailable_once(
+                        device.get_device_state().device_properties.can_set_equalizer,
+                    );
+                }
+            }
+
             // Run loop
             let mut run_counter = 0;
+            #[cfg(feature = "eq-support")]
+            let mut was_connected =
+                device.get_device_state().device_properties.connected == Some(true);
             loop {
                 let mute_state = device.get_device_state().device_properties.muted;
                 match if run_counter % 30 == 0 {
@@ -122,6 +150,22 @@ fn main() {
                     let _ = device.try_apply(command);
                     std::thread::sleep(hyper_headset::devices::RESPONSE_DELAY);
                     let _ = device.active_refresh_state();
+                }
+
+                #[cfg(feature = "eq-support")]
+                if let Some(ref wrx) = watcher_rx {
+                    if eq_runtime::drain_watcher(wrx) {
+                        eq_runtime::refresh_preset_options(&mut *device);
+                        let _ = proxy.send_event(Some(
+                            device.get_device_state().device_properties.clone(),
+                        ));
+                    }
+                }
+
+                #[cfg(feature = "eq-support")]
+                {
+                    was_connected =
+                        eq_runtime::maybe_sync_on_reconnect(&mut *device, was_connected);
                 }
 
                 let _ = proxy.send_event(Some(device.get_device_state().device_properties.clone()));
@@ -212,31 +256,14 @@ fn main() {
 
         cfg_if! {
             if #[cfg(feature = "eq-support")] {
-                let (_watcher, watcher_rx) = if device.get_device_state().device_properties.can_set_equalizer {
-                    // Seed EQ state from disk so tray shows correct preset immediately
-                    let profile = presets::load_selected_profile();
-                    let all = presets::all_presets();
-                    let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
-                    let props = &mut device.get_device_state_mut().device_properties;
-                    props.active_eq_preset = profile.active_preset;
-                    props.eq_synced = Some(profile.synced);
-                    props.eq_preset_options = preset_names;
-
-                    match presets::watch_config_dir() {
-                        Ok(pair) => (Some(pair.0), Some(pair.1)),
-                        Err(e) => {
-                            eprintln!("Warning: failed to watch config directory: {e}");
-                            (None, None)
-                        }
-                    }
-                } else {
-                    (None, None)
+                let (_watcher, watcher_rx) = match eq_runtime::init_device_eq_state(&mut *device) {
+                    Some((w, rx)) => (Some(w), Some(rx)),
+                    None => (None, None),
                 };
             } else {
-                if device.get_device_state().device_properties.can_set_equalizer {
-                    static EQ_WARNING: std::sync::Once = std::sync::Once::new();
-                    EQ_WARNING.call_once(|| eprintln!("This headset supports EQ presets. Rebuild with --features eq-support to enable."));
-                }
+                warn_eq_unavailable_once(
+                    device.get_device_state().device_properties.can_set_equalizer,
+                );
             }
         }
 
@@ -281,9 +308,7 @@ fn main() {
             // Check for preset file changes
             #[cfg(feature = "eq-support")]
             if let Some(ref wrx) = watcher_rx {
-                if wrx.try_recv().is_ok() {
-                    // Drain any additional events
-                    while wrx.try_recv().is_ok() {}
+                if eq_runtime::drain_watcher(wrx) {
                     tray_handler.reload_presets();
                 }
             }
@@ -291,17 +316,7 @@ fn main() {
             // Sync unsynced profile when headset transitions to connected
             #[cfg(feature = "eq-support")]
             {
-                let is_connected = device.get_device_state().device_properties.connected == Some(true);
-                if is_connected && !was_connected && device.get_device_state().device_properties.can_set_equalizer {
-                    let profile = presets::load_selected_profile();
-                    if !profile.synced {
-                        if let Some(ref name) = profile.active_preset {
-                            println!("Syncing EQ preset '{}' to headset...", name);
-                            let _ = device.try_apply(hyper_headset::devices::DeviceEvent::EqualizerPreset(name.clone()));
-                        }
-                    }
-                }
-                was_connected = is_connected;
+                was_connected = eq_runtime::maybe_sync_on_reconnect(&mut *device, was_connected);
             }
 
             tray_handler.update(device.get_device_state());
