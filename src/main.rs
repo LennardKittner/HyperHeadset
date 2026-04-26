@@ -102,7 +102,7 @@ fn main() {
 
             cfg_if! {
                 if #[cfg(feature = "eq-support")] {
-                    let (_watcher, watcher_rx) = match eq_runtime::init_device_eq_state(&mut *device) {
+                    let (_watcher, watcher_rx) = match eq_runtime::init_device_eq(&mut *device) {
                         Some((w, rx)) => (Some(w), Some(rx)),
                         None => (None, None),
                     };
@@ -155,7 +155,7 @@ fn main() {
                 #[cfg(feature = "eq-support")]
                 if let Some(ref wrx) = watcher_rx {
                     if eq_runtime::drain_watcher(wrx) {
-                        eq_runtime::refresh_eq_state_from_disk(&mut *device);
+                        eq_runtime::refresh_eq_props_from_disk(&mut *device);
                         // The unconditional proxy.send_event at the end of this
                         // iteration body picks up the refresh; no extra send needed.
                     }
@@ -255,7 +255,7 @@ fn main() {
 
         cfg_if! {
             if #[cfg(feature = "eq-support")] {
-                let (_watcher, watcher_rx) = match eq_runtime::init_device_eq_state(&mut *device) {
+                let (_watcher, watcher_rx) = match eq_runtime::init_device_eq(&mut *device) {
                     Some((w, rx)) => (Some(w), Some(rx)),
                     None => (None, None),
                 };
@@ -308,7 +308,7 @@ fn main() {
             #[cfg(feature = "eq-support")]
             if let Some(ref wrx) = watcher_rx {
                 if eq_runtime::drain_watcher(wrx) {
-                    eq_runtime::refresh_eq_state_from_disk(&mut *device);
+                    eq_runtime::refresh_eq_props_from_disk(&mut *device);
                 }
             }
 

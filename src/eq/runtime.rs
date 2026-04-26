@@ -11,7 +11,7 @@ pub type WatcherPair = (notify::RecommendedWatcher, mpsc::Receiver<()>);
 /// Seed device EQ properties from disk and start watching the config dir.
 /// Returns `None` when the device does not support EQ; otherwise returns the
 /// watcher pair, which the caller must keep alive for events to flow.
-pub fn init_device_eq_state(device: &mut dyn Device) -> Option<WatcherPair> {
+pub fn init_device_eq(device: &mut dyn Device) -> Option<WatcherPair> {
     if !device.get_device_state().device_properties.can_set_equalizer {
         return None;
     }
@@ -27,14 +27,8 @@ pub fn init_device_eq_state(device: &mut dyn Device) -> Option<WatcherPair> {
 }
 
 /// Re-read the on-disk EQ state (preset list, active preset, sync flag) into
-/// the device's properties. Call when the config-dir watcher fires so the tray
-/// reflects external edits to `selected_profile.json` or the `eq_presets/`
-/// directory. Note: per-band edits to the *content* of an existing preset do
-/// fire watcher events, but only the preset name list and the contents of
-/// `selected_profile.json` produce visible UI changes — band values are not
-/// stored in `DeviceProperties`, so a content edit only takes effect when the
-/// preset is next applied.
-pub fn refresh_eq_state_from_disk(device: &mut dyn Device) {
+/// the device's properties. Call when the config-dir watcher fires.
+pub fn refresh_eq_props_from_disk(device: &mut dyn Device) {
     seed_eq_props_from_disk(device);
 }
 
