@@ -11,7 +11,7 @@ mod tray_battery_icon_state;
 use cfg_if::cfg_if;
 
 #[cfg(feature = "eq-support")]
-use hyper_headset::eq::runtime as eq_runtime;
+use hyper_headset::eq::session::EqSession;
 
 #[cfg(not(feature = "eq-support"))]
 fn warn_eq_unavailable_once(can_set_equalizer: bool) {
@@ -102,10 +102,7 @@ fn main() {
 
             cfg_if! {
                 if #[cfg(feature = "eq-support")] {
-                    let (_watcher, watcher_rx) = match eq_runtime::init_device_eq(&mut *device) {
-                        Some((w, rx)) => (Some(w), Some(rx)),
-                        None => (None, None),
-                    };
+                    let mut eq = EqSession::new(&mut *device);
                 } else {
                     warn_eq_unavailable_once(
                         device.get_device_state().device_properties.can_set_equalizer,
@@ -115,9 +112,6 @@ fn main() {
 
             // Run loop
             let mut run_counter = 0;
-            #[cfg(feature = "eq-support")]
-            let mut was_connected =
-                device.get_device_state().device_properties.connected == Some(true);
             loop {
                 let mute_state = device.get_device_state().device_properties.muted;
                 match if run_counter % 30 == 0 {
@@ -143,8 +137,9 @@ fn main() {
                     }
                 }
 
+                // Process tray device commands
                 // with the default refresh_interval the state is only actively queried every 3min
-                // querying the device to frequently can lead to instability
+                // querying the device too frequently can lead to instability
                 let first = rx.recv_timeout(refresh_interval);
                 for command in first.into_iter().chain(rx.try_iter()) {
                     let _ = device.try_apply(command);
@@ -152,19 +147,12 @@ fn main() {
                     let _ = device.active_refresh_state();
                 }
 
+                // Per-tick EQ session work: pick up watcher changes, sync
+                // active preset on reconnect.
                 #[cfg(feature = "eq-support")]
-                if let Some(ref wrx) = watcher_rx {
-                    if eq_runtime::drain_watcher(wrx) {
-                        eq_runtime::refresh_eq_props_from_disk(&mut *device);
-                        // The unconditional proxy.send_event at the end of this
-                        // iteration body picks up the refresh; no extra send needed.
-                    }
-                }
-
-                #[cfg(feature = "eq-support")]
-                {
-                    was_connected =
-                        eq_runtime::maybe_sync_on_reconnect(&mut *device, was_connected);
+                if let Some(ref mut eq) = eq {
+                    eq.load_if_config_changed(&mut *device);
+                    eq.sync_if_reconnected(&mut *device);
                 }
 
                 let _ = proxy.send_event(Some(device.get_device_state().device_properties.clone()));
@@ -255,10 +243,7 @@ fn main() {
 
         cfg_if! {
             if #[cfg(feature = "eq-support")] {
-                let (_watcher, watcher_rx) = match eq_runtime::init_device_eq(&mut *device) {
-                    Some((w, rx)) => (Some(w), Some(rx)),
-                    None => (None, None),
-                };
+                let mut eq = EqSession::new(&mut *device);
             } else {
                 warn_eq_unavailable_once(
                     device.get_device_state().device_properties.can_set_equalizer,
@@ -268,8 +253,6 @@ fn main() {
 
         // Run loop
         let mut run_counter = 0;
-        #[cfg(feature = "eq-support")]
-        let mut was_connected = device.get_device_state().device_properties.connected == Some(true);
         loop {
             let mute_state = device.get_device_state().device_properties.muted;
             match if run_counter % 30 == 0 {
@@ -304,18 +287,12 @@ fn main() {
                 let _ = device.active_refresh_state();
             }
 
-            // Check for preset file changes
+            // Per-iteration EQ session work: pick up watcher changes, sync
+            // active preset on reconnect.
             #[cfg(feature = "eq-support")]
-            if let Some(ref wrx) = watcher_rx {
-                if eq_runtime::drain_watcher(wrx) {
-                    eq_runtime::refresh_eq_props_from_disk(&mut *device);
-                }
-            }
-
-            // Sync unsynced profile when headset transitions to connected
-            #[cfg(feature = "eq-support")]
-            {
-                was_connected = eq_runtime::maybe_sync_on_reconnect(&mut *device, was_connected);
+            if let Some(ref mut eq) = eq {
+                eq.load_if_config_changed(&mut *device);
+                eq.sync_if_reconnected(&mut *device);
             }
 
             tray_handler.update(device.get_device_state());

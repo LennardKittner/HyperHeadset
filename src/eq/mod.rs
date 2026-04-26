@@ -1,5 +1,5 @@
 pub mod presets;
-pub mod runtime;
+pub mod session;
 
 /// EQ band frequencies with labels and descriptions.
 /// (frequency_hz, short_label, description)
