@@ -8,9 +8,6 @@ use ksni::{
 
 use crate::tray_battery_icon_state::TrayBatteryIconState;
 
-#[cfg(feature = "eq-support")]
-use hyper_headset::eq::presets;
-
 /// Escape underscores for ksni labels (single `_` is an accelerator prefix).
 fn escape_label(s: &str) -> String {
     s.replace('_', "__")
@@ -44,16 +41,6 @@ impl TrayHandler {
         })
     }
 
-    #[cfg(feature = "eq-support")]
-    pub fn reload_presets(&self) {
-        let all = presets::all_presets();
-        let preset_names: Vec<String> = all.iter().map(|p| p.name.clone()).collect();
-        self.handle.update(|tray| {
-            if let Some(ref mut props) = tray.device_properties {
-                props.eq_preset_options = preset_names;
-            }
-        })
-    }
 }
 
 pub struct StatusTray {

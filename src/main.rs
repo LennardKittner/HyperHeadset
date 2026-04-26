@@ -155,7 +155,7 @@ fn main() {
                 #[cfg(feature = "eq-support")]
                 if let Some(ref wrx) = watcher_rx {
                     if eq_runtime::drain_watcher(wrx) {
-                        eq_runtime::refresh_preset_options(&mut *device);
+                        eq_runtime::refresh_eq_state_from_disk(&mut *device);
                         let _ = proxy.send_event(Some(
                             device.get_device_state().device_properties.clone(),
                         ));
@@ -309,7 +309,7 @@ fn main() {
             #[cfg(feature = "eq-support")]
             if let Some(ref wrx) = watcher_rx {
                 if eq_runtime::drain_watcher(wrx) {
-                    tray_handler.reload_presets();
+                    eq_runtime::refresh_eq_state_from_disk(&mut *device);
                 }
             }
 

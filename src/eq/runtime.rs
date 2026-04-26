@@ -15,12 +15,7 @@ pub fn init_device_eq_state(device: &mut dyn Device) -> Option<WatcherPair> {
     if !device.get_device_state().device_properties.can_set_equalizer {
         return None;
     }
-    let profile = presets::load_selected_profile();
-    let preset_names: Vec<String> = presets::all_presets().into_iter().map(|p| p.name).collect();
-    let props = &mut device.get_device_state_mut().device_properties;
-    props.active_eq_preset = profile.active_preset;
-    props.eq_synced = Some(profile.synced);
-    props.eq_preset_options = preset_names;
+    seed_eq_props_from_disk(device);
 
     match presets::watch_config_dir() {
         Ok(pair) => Some(pair),
@@ -31,14 +26,23 @@ pub fn init_device_eq_state(device: &mut dyn Device) -> Option<WatcherPair> {
     }
 }
 
-/// Refresh the device's preset-options list from disk. Call when the
-/// config-dir watcher fires.
-pub fn refresh_preset_options(device: &mut dyn Device) {
+/// Re-read the on-disk EQ state (preset list, active preset, sync flag) into
+/// the device's properties. Call when the config-dir watcher fires so the tray
+/// reflects external edits to `selected_profile.json` or the `eq_presets/`
+/// directory. Note: per-band edits to the *content* of an existing preset are
+/// not detected — only changes to the set of preset names and the
+/// `selected_profile.json` contents propagate.
+pub fn refresh_eq_state_from_disk(device: &mut dyn Device) {
+    seed_eq_props_from_disk(device);
+}
+
+fn seed_eq_props_from_disk(device: &mut dyn Device) {
+    let profile = presets::load_selected_profile();
     let preset_names: Vec<String> = presets::all_presets().into_iter().map(|p| p.name).collect();
-    device
-        .get_device_state_mut()
-        .device_properties
-        .eq_preset_options = preset_names;
+    let props = &mut device.get_device_state_mut().device_properties;
+    props.active_eq_preset = profile.active_preset;
+    props.eq_synced = Some(profile.synced);
+    props.eq_preset_options = preset_names;
 }
 
 /// Drain any pending watcher events. Returns true when at least one event was
