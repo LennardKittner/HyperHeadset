@@ -1152,7 +1152,7 @@ pub trait Device {
                 if let Some(packets) = self.set_equalizer_bands_packets(&pairs) {
                     for packet in packets {
                         self.prepare_write();
-                        if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        if let Err(err) = self.write_hid_report(&packet) {
                             record_eq(self, false);
                             Err(format!("Failed to apply EQ preset '{}': {:?}", name, err))?;
                         }

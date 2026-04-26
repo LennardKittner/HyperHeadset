@@ -441,7 +441,7 @@ fn main() {
         if let Some(packets) = device.set_equalizer_bands_packets(pairs) {
             for packet in packets {
                 device.prepare_write();
-                if let Err(err) = device.get_device_state().hid_device.write(&packet) {
+                if let Err(err) = device.write_hid_report(&packet) {
                     eprintln!("Failed to set equalizer with error: {:?}", err);
                     std::process::exit(1);
                 }
