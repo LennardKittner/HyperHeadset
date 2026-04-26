@@ -4,6 +4,8 @@ use std::sync::mpsc;
 
 use super::NUM_BANDS;
 
+// === Types ===
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EqPreset {
     pub name: String,
@@ -18,6 +20,34 @@ pub struct SelectedProfile {
     #[serde(default)]
     pub synced: bool,
 }
+
+// === Path helpers ===
+
+pub fn config_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("hyper_headset")
+}
+
+fn presets_dir() -> PathBuf {
+    config_dir().join("eq_presets")
+}
+
+fn selected_profile_path() -> PathBuf {
+    config_dir().join("selected_profile.json")
+}
+
+/// Sanitize a preset name for use as a filename.
+/// Strips path separators and other dangerous characters.
+fn sanitize_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !matches!(c, '/' | '\\' | '\0' | ':'))
+        .collect::<String>()
+        .trim_start_matches('.')
+        .to_string()
+}
+
+// === Built-in presets ===
 
 const BUILTIN_PRESETS: &[(&str, [f32; NUM_BANDS])] = &[
     ("Flat", [0.0; 10]),
@@ -37,33 +67,14 @@ pub fn builtin_presets() -> Vec<EqPreset> {
         .collect()
 }
 
-pub fn config_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("hyper_headset")
+pub fn is_builtin(name: &str) -> bool {
+    BUILTIN_PRESETS.iter().any(|(n, _)| *n == name)
 }
 
-fn presets_dir() -> PathBuf {
-    config_dir().join("eq_presets")
-}
-
-/// Sanitize a preset name for use as a filename.
-/// Strips path separators and other dangerous characters.
-fn sanitize_name(name: &str) -> String {
-    name.chars()
-        .filter(|c| !matches!(c, '/' | '\\' | '\0' | ':'))
-        .collect::<String>()
-        .trim_start_matches('.')
-        .to_string()
-}
-
-fn selected_profile_path() -> PathBuf {
-    config_dir().join("selected_profile.json")
-}
+// === Preset I/O ===
 
 /// Load a single preset by name. Checks user presets dir first, then builtins.
 pub fn load_preset(name: &str) -> Option<EqPreset> {
-    // Check user preset file first
     let path = presets_dir().join(format!("{}.json", sanitize_name(name)));
     if path.exists() {
         if let Ok(data) = std::fs::read_to_string(&path) {
@@ -72,7 +83,6 @@ pub fn load_preset(name: &str) -> Option<EqPreset> {
             }
         }
     }
-    // Fall back to builtin
     builtin_presets().into_iter().find(|p| p.name == name)
 }
 
@@ -80,7 +90,10 @@ pub fn load_preset(name: &str) -> Option<EqPreset> {
 pub fn save_preset(preset: &EqPreset) -> std::io::Result<()> {
     let safe_name = sanitize_name(&preset.name);
     if safe_name.is_empty() {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid preset name"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Invalid preset name",
+        ));
     }
     let dir = presets_dir();
     std::fs::create_dir_all(&dir)?;
@@ -137,9 +150,7 @@ pub fn all_presets() -> Vec<EqPreset> {
     presets
 }
 
-pub fn is_builtin(name: &str) -> bool {
-    BUILTIN_PRESETS.iter().any(|(n, _)| *n == name)
-}
+// === Selected-profile I/O ===
 
 pub fn load_selected_profile() -> SelectedProfile {
     let path = selected_profile_path();
@@ -160,6 +171,8 @@ pub fn save_selected_profile(profile: &SelectedProfile) -> std::io::Result<()> {
     let data = serde_json::to_string_pretty(profile)?;
     std::fs::write(&path, data)
 }
+
+// === Config-dir watcher ===
 
 /// Creates a file watcher on the config directory (recursive, includes eq_presets/).
 /// Returns the watcher (must be kept alive) and a receiver that fires on file changes.
