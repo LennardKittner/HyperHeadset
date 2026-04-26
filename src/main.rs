@@ -88,7 +88,11 @@ fn main() {
         let refresh_interval = *matches.get_one::<u64>("refresh-interval").unwrap_or(&3);
         let refresh_interval = Duration::from_secs(refresh_interval);
 
+        #[cfg(feature = "eq-support")]
+        let mut eq = EqSession::new();
+
         loop {
+            // (Re-)connect to device
             let mut device = loop {
                 match connect_compatible_device() {
                     Ok(d) => break d,
@@ -102,7 +106,9 @@ fn main() {
 
             cfg_if! {
                 if #[cfg(feature = "eq-support")] {
-                    let mut eq = EqSession::new(&mut *device);
+                    if let Some(ref mut eq) = eq {
+                        eq.bind_device(&mut *device);
+                    }
                 } else {
                     warn_eq_unavailable_once(
                         device.get_device_state().device_properties.can_set_equalizer,
@@ -110,7 +116,7 @@ fn main() {
                 }
             }
 
-            // Run loop
+            // Run tick loop while connected
             let mut run_counter = 0;
             loop {
                 let mute_state = device.get_device_state().device_properties.muted;
@@ -124,7 +130,7 @@ fn main() {
                         eprintln!("{error}");
                         let _ = proxy
                             .send_event(Some(device.get_device_state().device_properties.clone()));
-                        break; // try to reconnect
+                        break; // exit tick loop to retry connection in the outer loop
                     }
                 };
                 if mute_state.is_some()
@@ -229,7 +235,11 @@ fn main() {
     let (tx, rx) = mpsc::channel();
     let tray_handler = TrayHandler::new(StatusTray::new(tx));
 
+    #[cfg(feature = "eq-support")]
+    let mut eq = EqSession::new();
+
     loop {
+        // (Re-)connect to device
         let mut device = loop {
             match connect_compatible_device() {
                 Ok(d) => break d,
@@ -243,7 +253,9 @@ fn main() {
 
         cfg_if! {
             if #[cfg(feature = "eq-support")] {
-                let mut eq = EqSession::new(&mut *device);
+                if let Some(ref mut eq) = eq {
+                    eq.bind_device(&mut *device);
+                }
             } else {
                 warn_eq_unavailable_once(
                     device.get_device_state().device_properties.can_set_equalizer,
@@ -251,7 +263,7 @@ fn main() {
             }
         }
 
-        // Run loop
+        // Run tick loop while connected
         let mut run_counter = 0;
         loop {
             let mute_state = device.get_device_state().device_properties.muted;
@@ -264,7 +276,7 @@ fn main() {
                 Err(error) => {
                     eprintln!("{error}");
                     tray_handler.update(device.get_device_state());
-                    break; // try to reconnect
+                    break; // exit tick loop to retry connection in the outer loop
                 }
             };
             if mute_state.is_some()
@@ -287,7 +299,7 @@ fn main() {
                 let _ = device.active_refresh_state();
             }
 
-            // Per-iteration EQ session work: pick up watcher changes, sync
+            // Per-tick EQ session work: pick up watcher changes, sync
             // active preset on reconnect.
             #[cfg(feature = "eq-support")]
             if let Some(ref mut eq) = eq {
