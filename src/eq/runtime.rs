@@ -29,9 +29,11 @@ pub fn init_device_eq_state(device: &mut dyn Device) -> Option<WatcherPair> {
 /// Re-read the on-disk EQ state (preset list, active preset, sync flag) into
 /// the device's properties. Call when the config-dir watcher fires so the tray
 /// reflects external edits to `selected_profile.json` or the `eq_presets/`
-/// directory. Note: per-band edits to the *content* of an existing preset are
-/// not detected — only changes to the set of preset names and the
-/// `selected_profile.json` contents propagate.
+/// directory. Note: per-band edits to the *content* of an existing preset do
+/// fire watcher events, but only the preset name list and the contents of
+/// `selected_profile.json` produce visible UI changes — band values are not
+/// stored in `DeviceProperties`, so a content edit only takes effect when the
+/// preset is next applied.
 pub fn refresh_eq_state_from_disk(device: &mut dyn Device) {
     seed_eq_props_from_disk(device);
 }
@@ -56,21 +58,32 @@ pub fn drain_watcher(rx: &mpsc::Receiver<()>) -> bool {
 }
 
 /// If the headset just transitioned to connected and the on-disk profile is
-/// unsynced, push it to the device. Returns the new connected state so the
-/// caller can update its tracking variable.
+/// unsynced, push it to the device. Returns the value the caller should store
+/// as its new `was_connected`: `true` when the headset is connected AND
+/// either no sync was needed or the sync succeeded; `false` when disconnected
+/// or when the sync attempt failed (so the next iteration retries instead of
+/// silently leaving the headset out of sync).
 pub fn maybe_sync_on_reconnect(device: &mut dyn Device, was_connected: bool) -> bool {
     let is_connected = device.get_device_state().device_properties.connected == Some(true);
-    if is_connected
-        && !was_connected
-        && device.get_device_state().device_properties.can_set_equalizer
-    {
-        let profile = presets::load_selected_profile();
-        if !profile.synced {
-            if let Some(ref name) = profile.active_preset {
-                println!("Syncing EQ preset '{}' to headset...", name);
-                let _ = device.try_apply(DeviceEvent::EqualizerPreset(name.clone()));
-            }
+    if !is_connected {
+        return false;
+    }
+    if was_connected || !device.get_device_state().device_properties.can_set_equalizer {
+        return true;
+    }
+    let profile = presets::load_selected_profile();
+    let Some(ref name) = profile.active_preset else {
+        return true;
+    };
+    if profile.synced {
+        return true;
+    }
+    println!("Syncing EQ preset '{}' to headset...", name);
+    match device.try_apply(DeviceEvent::EqualizerPreset(name.clone())) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("Failed to sync EQ preset '{name}' on reconnect: {e}");
+            false
         }
     }
-    is_connected
 }

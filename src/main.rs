@@ -156,9 +156,8 @@ fn main() {
                 if let Some(ref wrx) = watcher_rx {
                     if eq_runtime::drain_watcher(wrx) {
                         eq_runtime::refresh_eq_state_from_disk(&mut *device);
-                        let _ = proxy.send_event(Some(
-                            device.get_device_state().device_properties.clone(),
-                        ));
+                        // The unconditional proxy.send_event at the end of this
+                        // iteration body picks up the refresh; no extra send needed.
                     }
                 }
 
