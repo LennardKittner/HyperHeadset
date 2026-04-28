@@ -27,6 +27,7 @@ Both the CLI and tray applications are compatible with Linux, MacOS, and Windows
 - HyperX Cloud Stinger 2 Wireless
 - HyperX Cloud Flight S
 - HyperX Cloud Alpha Wireless
+- HyperX Cloud MIX 2
 
 If your headset is not supported, feel free to open an issue; be sure to include the name, product ID, and vendor ID.
 
@@ -101,6 +102,7 @@ SUBSYSTEMS=="usb", ATTRS{idProduct}=="1765", ATTRS{idVendor}=="03f0", MODE="0666
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="1743", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="069f", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="0995", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="0fae", ATTRS{idVendor}=="03f0", MODE="0666"
 
 KERNEL=="hidraw*", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666"
@@ -116,12 +118,14 @@ KERNEL=="hidraw*", ATTRS{idProduct}=="1765", ATTRS{idVendor}=="03f0", MODE="0666
 KERNEL=="hidraw*", ATTRS{idProduct}=="1743", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="069f", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="0995", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="0fae", ATTRS{idVendor}=="03f0", MODE="0666"
 ```
 
 Once created, replug the wireless dongle.
 
 ## Usage
 
+<!-- TODO: update -->
 ```
 hyper_headset_cli --help
 A CLI application for monitoring and managing HyperX headsets.

@@ -4,6 +4,7 @@ pub mod cloud_ii_wireless;
 pub mod cloud_ii_wireless_dts;
 pub mod cloud_iii_s_wireless;
 pub mod cloud_iii_wireless;
+pub mod cloud_mix_2;
 
 use crate::{
     debug_println,
@@ -11,6 +12,7 @@ use crate::{
         cloud_alpha_wireless::CloudAlphaWireless, cloud_ii_core_wireless::CloudIICoreWireless,
         cloud_ii_wireless::CloudIIWireless, cloud_ii_wireless_dts::CloudIIWirelessDTS,
         cloud_iii_s_wireless::CloudIIISWireless, cloud_iii_wireless::CloudIIIWireless,
+        cloud_mix_2::CloudMix2,
     },
 };
 use hidapi::{HidApi, HidDevice, HidError};
@@ -61,6 +63,11 @@ const DEVICE_REGISTER: &[DeviceEntry] = &[
         vendor_ids: &cloud_ii_core_wireless::VENDOR_IDS,
         product_ids: &cloud_ii_core_wireless::PRODUCT_IDS,
         factory: |s| Box::new(CloudIICoreWireless::new_from_state(s)),
+    },
+    DeviceEntry {
+        vendor_ids: &cloud_mix_2::VENDOR_IDS,
+        product_ids: &cloud_mix_2::PRODUCT_IDS,
+        factory: |s| Box::new(CloudMix2::new_from_state(s)),
     },
 ];
 
@@ -177,6 +184,8 @@ pub struct DeviceProperties {
     pub connected: Option<bool>,
     pub silent: Option<bool>,
     pub noise_gate_active: Option<bool>,
+    pub anc_state: Option<ANCState>,
+    pub anc_level: Option<u8>,
     // Capability flags - set once during device initialization
     pub can_set_mute: bool,
     pub can_set_surround_sound: bool,
@@ -187,6 +196,8 @@ pub struct DeviceProperties {
     pub can_set_silent_mode: bool,
     pub can_set_equalizer: bool,
     pub can_set_noise_gate: bool,
+    pub can_set_anc_state: bool,
+    pub can_set_anc_level: bool,
 }
 
 impl Display for DeviceProperties {
@@ -353,6 +364,8 @@ impl DeviceState {
             DeviceEvent::NoiseGateActive(on) => {
                 self.device_properties.noise_gate_active = Some(*on)
             }
+            DeviceEvent::ANCState(state) => self.device_properties.anc_state = Some(*state),
+            DeviceEvent::ANCLevel(level) => self.device_properties.anc_level = Some(*level),
         };
     }
 }
@@ -369,6 +382,7 @@ pub enum PropertyDescriptorWrapper {
     Int(PropertyDescriptor<u8>, &'static [u8]),
     Bool(PropertyDescriptor<bool>),
     String(PropertyDescriptor<String>),
+    ANC(PropertyDescriptor<ANCState>),
 }
 
 pub struct PropertyDescriptor<T: 'static> {
@@ -410,6 +424,8 @@ impl DeviceProperties {
             connected: None,
             silent: None,
             noise_gate_active: None,
+            anc_state: None,
+            anc_level: None,
             can_set_mute: false,
             can_set_surround_sound: false,
             can_set_side_tone: false,
@@ -419,6 +435,8 @@ impl DeviceProperties {
             can_set_silent_mode: false,
             can_set_equalizer: false,
             can_set_noise_gate: false,
+            can_set_anc_state: false,
+            can_set_anc_level: false,
         }
     }
 
@@ -565,6 +583,32 @@ impl DeviceProperties {
                 },
                 create_event: &move |enable| Some(DeviceEvent::NoiseGateActive(enable)),
             }),
+            PropertyDescriptorWrapper::ANC(PropertyDescriptor {
+                prefix: "ANC state:",
+                data: self.anc_state,
+                suffix: "",
+                property_type: if self.can_set_anc_state {
+                    PropertyType::ReadWrite
+                } else {
+                    PropertyType::ReadOnly
+                },
+                create_event: &move |state| Some(DeviceEvent::ANCState(state)),
+            }),
+            PropertyDescriptorWrapper::Int(
+                PropertyDescriptor {
+                    prefix: "ANC level:",
+                    data: self.anc_level,
+                    suffix: "",
+                    property_type: if self.can_set_anc_level {
+                        PropertyType::ReadWrite
+                    } else {
+                        PropertyType::ReadOnly
+                    },
+                    create_event: &|l| Some(DeviceEvent::ANCLevel(l)),
+                },
+                //TODO: what levels are available?
+                &[],
+            ),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 prefix: "Connected:",
                 data: self.connected,
@@ -673,6 +717,15 @@ pub enum DeviceEvent {
     Silent(bool),
     RequireSIRKReset(bool),
     NoiseGateActive(bool),
+    ANCState(ANCState),
+    ANCLevel(u8),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ANCState {
+    On,
+    Off,
+    Transparent,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -780,9 +833,25 @@ pub trait Device {
     fn set_noise_gate_packet(&self, _enable: bool) -> Option<Vec<u8>> {
         None
     }
+    fn get_anc_state_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn set_anc_state_packet(&self, _state: ANCState) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_anc_level_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn set_anc_level_packet(&self, _level: u8) -> Option<Vec<u8>> {
+        None
+    }
+    /// parse a device response
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
+    /// get the device state
     fn get_device_state(&self) -> &DeviceState;
+    /// get the device state
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
+    /// executed before writing to the device
     fn prepare_write(&mut self) {}
     /// whether the app should periodically listen for packets from the headsets
     fn allow_passive_refresh(&mut self) -> bool;
@@ -791,30 +860,46 @@ pub trait Device {
     fn can_set_mute(&self) -> bool {
         self.set_mute_packet(false).is_some()
     }
+    // Helper methods to check if features are writable
     fn can_set_surround_sound(&self) -> bool {
         self.set_surround_sound_packet(false).is_some()
     }
+    // Helper methods to check if features are writable
     fn can_set_side_tone(&self) -> bool {
         self.set_side_tone_packet(false).is_some()
     }
+    // Helper methods to check if features are writable
     fn can_set_automatic_shutdown(&self) -> bool {
         self.set_automatic_shut_down_packet(Duration::from_secs(0))
             .is_some()
     }
+    // Helper methods to check if features are writable
     fn can_set_side_tone_volume(&self) -> bool {
         self.set_side_tone_volume_packet(0).is_some()
     }
+    // Helper methods to check if features are writable
     fn can_set_voice_prompt(&self) -> bool {
         self.set_voice_prompt_packet(false).is_some()
     }
+    // Helper methods to check if features are writable
     fn can_set_silent_mode(&self) -> bool {
         self.set_silent_mode_packet(false).is_some()
     }
+    // Helper methods to check if features are writable
     fn can_set_equalizer(&self) -> bool {
         self.set_equalizer_band_packet(0, 0.0).is_some()
     }
+    // Helper methods to check if features are writable
     fn can_set_noise_gate(&self) -> bool {
         self.set_noise_gate_packet(true).is_some()
+    }
+    // Helper methods to check if features are writable
+    fn can_set_anc_state(&self) -> bool {
+        self.set_anc_state_packet(ANCState::On).is_some()
+    }
+    // Helper methods to check if features are writable
+    fn can_set_anc_level(&self) -> bool {
+        self.set_anc_level_packet(0).is_some()
     }
 
     // Initialize capability flags in device state
@@ -829,6 +914,8 @@ pub trait Device {
         let can_set_silent_mode = self.can_set_silent_mode();
         let can_set_equalizer = self.can_set_equalizer();
         let can_set_noise_gate = self.can_set_noise_gate();
+        let can_set_anc_state = self.can_set_anc_state();
+        let can_set_anc_level = self.can_set_anc_level();
 
         // Now set them in device state
         let state = self.get_device_state_mut();
@@ -841,12 +928,17 @@ pub trait Device {
         state.device_properties.can_set_silent_mode = can_set_silent_mode;
         state.device_properties.can_set_equalizer = can_set_equalizer;
         state.device_properties.can_set_noise_gate = can_set_noise_gate;
+        state.device_properties.can_set_anc_state = can_set_anc_state;
+        state.device_properties.can_set_anc_level = can_set_anc_level;
     }
 
+    /// some headset specific functionality
+    /// Executed once before an active refresh
     fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
         Ok(())
     }
 
+    /// wait for a response from the headset and parse events
     fn wait_for_updates(&mut self, duration: Duration) -> Option<Vec<DeviceEvent>> {
         let mut buf = self.get_response_buffer();
         let res = self
@@ -862,6 +954,7 @@ pub trait Device {
         self.get_event_from_device_response(&buf)
     }
 
+    /// get all packets to query information
     fn get_query_packets(&self) -> Vec<Vec<u8>> {
         vec![
             self.get_wireless_connected_status_packet(),
@@ -879,6 +972,8 @@ pub trait Device {
             self.get_sirk_packet(),
             self.get_silent_mode_packet(),
             self.get_noise_gate_packet(),
+            self.get_anc_state_packet(),
+            self.get_anc_level_packet(),
         ]
         .into_iter()
         .flatten()
@@ -955,6 +1050,8 @@ pub trait Device {
         Ok(())
     }
 
+    /// try to apply the command
+    /// This may fail if e.g. the device does not support the command
     fn try_apply(&mut self, command: DeviceEvent) -> Result<(), String> {
         match command {
             DeviceEvent::AutomaticShutdownAfter(delay) => {
@@ -1055,11 +1152,32 @@ pub trait Device {
                     Err("ERROR: Activating noise gate is not supported on this device")?;
                 }
             }
+            DeviceEvent::ANCState(state) => {
+                if let Some(packet) = self.set_anc_state_packet(state) {
+                    self.prepare_write();
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        Err(format!("Failed to set ANC state: {:?}", err))?;
+                    }
+                } else {
+                    Err("ERROR: Setting ANC state is not supported on this device")?;
+                }
+            }
+            DeviceEvent::ANCLevel(level) => {
+                if let Some(packet) = self.set_anc_level_packet(level) {
+                    self.prepare_write();
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        Err(format!("Failed to set ANC level: {:?}", err))?;
+                    }
+                } else {
+                    Err("ERROR: Setting ANC level is not supported on this device")?;
+                }
+            }
             _ => (),
         }
         Ok(())
     }
 
+    /// reset device information
     fn clear_state(&mut self) {
         let product_id = self.get_device_state().device_properties.product_id;
         let vendor_id = self.get_device_state().device_properties.vendor_id;
