@@ -4,6 +4,13 @@ use crate::{
 };
 use std::time::Duration;
 
+#[cfg(target_os = "linux")]
+use crate::devices::{
+    DeviceError, DeviceProperties, HidTransport, LibusbTransport,
+};
+#[cfg(target_os = "linux")]
+use rusb::UsbContext;
+
 const HP: u16 = 0x03F0;
 pub const VENDOR_IDS: [u16; 1] = [HP];
 pub const PRODUCT_IDS: [u16; 1] = [0x06BE];
@@ -58,9 +65,17 @@ const GET_VOICE_PROMPT_COMMAND_ID: u8 = 0x14;
 // Button report header (incoming from headset)
 const CONSUMER_CONTROL_HEADER: u8 = 0x0f;
 // Consumer control button values
-const _VOL_UP: u8 = 0x01;
-const _VOL_DOWN: u8 = 0x02;
-const _PLAY_PAUSE: u8 = 0x08;
+const VOL_UP: u8 = 0x01;
+const VOL_DOWN: u8 = 0x02;
+const PLAY_PAUSE: u8 = 0x08;
+
+// HID interface exposed by the dongle. The dongle has only one HID interface
+// (`bInterfaceNumber = 3`) with a single INTERRUPT IN endpoint at `0x84`; all
+// writes are SET_REPORT class control transfers.
+#[cfg(target_os = "linux")]
+const HID_INTERFACE: u8 = 3;
+#[cfg(target_os = "linux")]
+const HID_EP_IN: u8 = 0x84;
 
 fn make_mic_packet(mute: bool) -> Vec<u8> {
     let mut packet = vec![0u8; PACKET_SIZE];
@@ -308,4 +323,109 @@ impl Device for CloudIIISWireless {
     fn get_device_state_mut(&mut self) -> &mut DeviceState {
         &mut self.state
     }
+}
+
+/// Open the dongle via libusb instead of hidapi/hidraw.
+///
+/// On Linux, once the kernel hidraw driver has touched this dongle's HID
+/// interface, RF-forwarded query responses (battery, charge, side tone, etc.)
+/// silently stop reaching user space. Going via libusb — detach the kernel
+/// driver, claim the interface exclusively, drive raw SET_REPORT control
+/// transfers + INT IN reads ourselves — sidesteps the issue and gives reliable
+/// bidirectional traffic.
+///
+/// Linux-only: the firmware quirk has only been observed on Linux's hidraw
+/// stack, and the kernel-driver-detach pattern is meaningful only there.
+#[cfg(target_os = "linux")]
+pub fn open_via_libusb() -> Result<Option<DeviceState>, DeviceError> {
+    let ctx = match rusb::Context::new() {
+        Ok(c) => c,
+        Err(_e) => {
+            debug_println!("libusb Context::new failed: {_e}");
+            return Ok(None);
+        }
+    };
+    let devices = match ctx.devices() {
+        Ok(d) => d,
+        Err(_e) => {
+            debug_println!("libusb devices() failed: {_e}");
+            return Ok(None);
+        }
+    };
+    let want_vid = VENDOR_IDS[0];
+    let want_pid = PRODUCT_IDS[0];
+    let dev = devices.iter().find(|d| {
+        d.device_descriptor()
+            .map(|desc| desc.vendor_id() == want_vid && desc.product_id() == want_pid)
+            .unwrap_or(false)
+    });
+    let Some(dev) = dev else {
+        return Ok(None);
+    };
+    let handle = match dev.open() {
+        Ok(h) => h,
+        Err(_e) => {
+            debug_println!("libusb open failed: {_e}");
+            return Ok(None);
+        }
+    };
+
+    if handle
+        .kernel_driver_active(HID_INTERFACE)
+        .unwrap_or(false)
+    {
+        if let Err(_e) = handle.detach_kernel_driver(HID_INTERFACE) {
+            debug_println!("detach_kernel_driver: {_e}");
+        }
+    }
+    if let Err(_e) = handle.claim_interface(HID_INTERFACE) {
+        debug_println!("claim_interface: {_e}");
+        let _ = handle.attach_kernel_driver(HID_INTERFACE);
+        return Ok(None);
+    }
+
+    let product_string = handle
+        .read_product_string_ascii(
+            &dev.device_descriptor()
+                .map_err(|_| DeviceError::NoDeviceFound())?,
+        )
+        .ok();
+
+    // Forward Consumer Control reports (vol-up / vol-down / play-pause) back
+    // to the OS via synthesized media key presses. With the kernel HID driver
+    // detached, the input subsystem no longer sees these events on its own.
+    //
+    // Caveat: on Wayland this depends on the compositor accepting input
+    // emulation through libei (`xdg-desktop-portal-*`). On compositors that
+    // don't, the synthetic events are silently dropped and the headset's
+    // volume / play-pause buttons stay inert while this program runs. Works
+    // out of the box on X11.
+    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+    let mut enigo = match Enigo::new(&Settings::default()) {
+        Ok(e) => Some(e),
+        Err(e) => {
+            eprintln!("Cloud III S: input forwarding disabled (enigo init: {e})");
+            None
+        }
+    };
+    let packet_hook = Box::new(move |buf: &[u8]| {
+        if buf.len() >= 2 && buf[0] == CONSUMER_CONTROL_HEADER {
+            let key = match buf[1] {
+                VOL_UP => Some(Key::VolumeUp),
+                VOL_DOWN => Some(Key::VolumeDown),
+                PLAY_PAUSE => Some(Key::MediaPlayPause),
+                _ => None,
+            };
+            if let (Some(k), Some(e)) = (key, enigo.as_mut()) {
+                let _ = e.key(k, Direction::Click);
+            }
+        }
+    });
+
+    let transport =
+        LibusbTransport::open(handle, HID_INTERFACE, HID_EP_IN, product_string.clone(), packet_hook);
+    Ok(Some(DeviceState {
+        transport: HidTransport::Libusb(transport),
+        device_properties: DeviceProperties::new(want_pid, want_vid, product_string),
+    }))
 }

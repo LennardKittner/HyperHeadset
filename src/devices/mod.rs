@@ -14,7 +14,6 @@ use crate::{
     },
 };
 use hidapi::{HidApi, HidDevice, HidError};
-use rusb::UsbContext;
 use std::{
     collections::HashSet,
     fmt::{Debug, Display},
@@ -24,186 +23,72 @@ use thistermination::TerminationFull;
 
 const PASSIVE_REFRESH_TIME_OUT: Duration = Duration::from_secs(2);
 
-/// HID interface exposed by the Cloud III S Wireless dongle. The dongle has
-/// only one HID interface (`bInterfaceNumber = 3`) with a single INTERRUPT IN
-/// endpoint at `0x84`; all writes are SET_REPORT class control transfers.
-const CLOUD_III_S_HID_INTERFACE: u8 = 3;
-const CLOUD_III_S_HID_EP_IN: u8 = 0x84;
-
-fn open_cloud_iii_s_via_libusb() -> Result<Option<DeviceState>, DeviceError> {
-    let ctx = match rusb::Context::new() {
-        Ok(c) => c,
-        Err(_e) => {
-            debug_println!("libusb Context::new failed: {_e}");
-            return Ok(None);
-        }
-    };
-    let devices = match ctx.devices() {
-        Ok(d) => d,
-        Err(_e) => {
-            debug_println!("libusb devices() failed: {_e}");
-            return Ok(None);
-        }
-    };
-    let want_vid = cloud_iii_s_wireless::VENDOR_IDS[0];
-    let want_pid = cloud_iii_s_wireless::PRODUCT_IDS[0];
-    let dev = devices.iter().find(|d| {
-        d.device_descriptor()
-            .map(|desc| desc.vendor_id() == want_vid && desc.product_id() == want_pid)
-            .unwrap_or(false)
-    });
-    let Some(dev) = dev else {
-        return Ok(None);
-    };
-    let handle = match dev.open() {
-        Ok(h) => h,
-        Err(_e) => {
-            debug_println!("Cloud III S: libusb open failed: {_e}");
-            return Ok(None);
-        }
-    };
-
-    // Best-effort detach the kernel HID driver so we can claim the interface
-    // exclusively. On non-Linux this is a no-op.
-    if handle
-        .kernel_driver_active(CLOUD_III_S_HID_INTERFACE)
-        .unwrap_or(false)
-    {
-        if let Err(_e) = handle.detach_kernel_driver(CLOUD_III_S_HID_INTERFACE) {
-            debug_println!("Cloud III S: detach_kernel_driver: {_e}");
-        }
-    }
-    if let Err(_e) = handle.claim_interface(CLOUD_III_S_HID_INTERFACE) {
-        debug_println!("Cloud III S: claim_interface: {_e}");
-        let _ = handle.attach_kernel_driver(CLOUD_III_S_HID_INTERFACE);
-        return Ok(None);
-    }
-
-    let product_string = handle
-        .read_product_string_ascii(&dev.device_descriptor().map_err(|_| DeviceError::NoDeviceFound())?)
-        .ok();
-
-    let handle = std::sync::Arc::new(handle);
-    let rx = std::sync::Arc::new((
-        std::sync::Mutex::new(std::collections::VecDeque::new()),
-        std::sync::Condvar::new(),
-    ));
-    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-    // Background reader: continuously poll EP IN with a short timeout. Push every
-    // received packet into the shared queue so callers see responses even when the
-    // surrounding flow does a `write → sleep → read` (active_refresh_state).
-    let reader = {
-        let handle = std::sync::Arc::clone(&handle);
-        let rx = std::sync::Arc::clone(&rx);
-        let stop = std::sync::Arc::clone(&stop);
-        std::thread::spawn(move || {
-            // Forwarding Consumer Control events (Report ID 0x0f, vol-up / vol-down /
-            // play-pause buttons on the headset) back to the OS. With the kernel HID
-            // driver detached, the input subsystem no longer sees them, so we
-            // synthesize the corresponding media key presses with `enigo`.
-            //
-            // Caveat: on Linux/Wayland this depends on the compositor accepting input
-            // emulation through libei (`xdg-desktop-portal-*`). On compositors that
-            // don't, the synthetic events are silently dropped and the headset's
-            // volume / play-pause buttons stay inert while this program runs. Works
-            // out of the box on X11.
-            use enigo::{Direction, Enigo, Key, Keyboard, Settings};
-            let mut enigo = match Enigo::new(&Settings::default()) {
-                Ok(e) => Some(e),
-                Err(e) => {
-                    eprintln!("Cloud III S: input forwarding disabled (enigo init: {e})");
-                    None
-                }
-            };
-            let mut buf = [0u8; 64];
-            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
-                match handle.read_interrupt(
-                    CLOUD_III_S_HID_EP_IN,
-                    &mut buf,
-                    Duration::from_millis(100),
-                ) {
-                    Ok(n) if n > 0 => {
-                        if n >= 2 && buf[0] == 0x0f {
-                            let key = match buf[1] {
-                                0x01 => Some(Key::VolumeUp),
-                                0x02 => Some(Key::VolumeDown),
-                                0x08 => Some(Key::MediaPlayPause),
-                                _ => None,
-                            };
-                            if let (Some(k), Some(e)) = (key, enigo.as_mut()) {
-                                let _ = e.key(k, Direction::Click);
-                            }
-                        }
-                        let (lock, cvar) = &*rx;
-                        let mut q = lock.lock().unwrap();
-                        q.push_back(buf[..n].to_vec());
-                        cvar.notify_one();
-                    }
-                    Ok(_) => {}
-                    Err(rusb::Error::Timeout) => {}
-                    Err(rusb::Error::NoDevice) | Err(rusb::Error::Pipe) => break,
-                    Err(_) => {}
-                }
-            }
-        })
-    };
-
-    let transport = LibusbTransport {
-        handle,
-        interface: CLOUD_III_S_HID_INTERFACE,
-        ep_in: CLOUD_III_S_HID_EP_IN,
-        product_string: product_string.clone(),
-        rx,
-        stop,
-        reader: Some(reader),
-    };
-    Ok(Some(DeviceState {
-        transport: HidTransport::Libusb(transport),
-        device_properties: DeviceProperties::new(want_pid, want_vid, product_string),
-    }))
-}
-
 type DeviceFactory = fn(DeviceState) -> Box<dyn Device>;
+
+/// Custom opener for devices that bypass the standard hidapi/hidraw enumeration.
+/// Returns `Ok(Some(state))` if the device was opened, `Ok(None)` if the device
+/// is not present (or the opener gave up gracefully). When set, the registry
+/// loop calls this in priority and `DeviceState::new` skips matching VID/PID
+/// pairs in the hidapi enumeration to avoid a race on the same interface.
+type CustomOpener = fn() -> Result<Option<DeviceState>, DeviceError>;
 
 struct DeviceEntry {
     vendor_ids: &'static [u16],
     product_ids: &'static [u16],
     factory: DeviceFactory,
+    custom_open: Option<CustomOpener>,
 }
+
+#[cfg(target_os = "linux")]
+const CLOUD_III_S_CUSTOM_OPEN: Option<CustomOpener> = Some(cloud_iii_s_wireless::open_via_libusb);
+#[cfg(not(target_os = "linux"))]
+const CLOUD_III_S_CUSTOM_OPEN: Option<CustomOpener> = None;
 
 const DEVICE_REGISTER: &[DeviceEntry] = &[
     DeviceEntry {
         vendor_ids: &cloud_ii_wireless::VENDOR_IDS,
         product_ids: &cloud_ii_wireless::PRODUCT_IDS,
         factory: |s| Box::new(CloudIIWireless::new_from_state(s)),
+        custom_open: None,
     },
     DeviceEntry {
         vendor_ids: &cloud_ii_wireless_dts::VENDOR_IDS,
         product_ids: &cloud_ii_wireless_dts::PRODUCT_IDS,
         factory: |s| Box::new(CloudIIWirelessDTS::new_from_state(s)),
+        custom_open: None,
     },
     DeviceEntry {
         vendor_ids: &cloud_iii_s_wireless::VENDOR_IDS,
         product_ids: &cloud_iii_s_wireless::PRODUCT_IDS,
         factory: |s| Box::new(CloudIIISWireless::new_from_state(s)),
+        custom_open: CLOUD_III_S_CUSTOM_OPEN,
     },
     DeviceEntry {
         vendor_ids: &cloud_iii_wireless::VENDOR_IDS,
         product_ids: &cloud_iii_wireless::PRODUCT_IDS,
         factory: |s| Box::new(CloudIIIWireless::new_from_state(s)),
+        custom_open: None,
     },
     DeviceEntry {
         vendor_ids: &cloud_alpha_wireless::VENDOR_IDS,
         product_ids: &cloud_alpha_wireless::PRODUCT_IDS,
         factory: |s| Box::new(CloudAlphaWireless::new_from_state(s)),
+        custom_open: None,
     },
     DeviceEntry {
         vendor_ids: &cloud_ii_core_wireless::VENDOR_IDS,
         product_ids: &cloud_ii_core_wireless::PRODUCT_IDS,
         factory: |s| Box::new(CloudIICoreWireless::new_from_state(s)),
+        custom_open: None,
     },
 ];
+
+fn is_owned_by_custom_opener(vendor_id: u16, product_id: u16) -> bool {
+    DEVICE_REGISTER
+        .iter()
+        .filter(|e| e.custom_open.is_some())
+        .any(|e| e.vendor_ids.contains(&vendor_id) && e.product_ids.contains(&product_id))
+}
 
 const RESPONSE_BUFFER_SIZE: usize = 256;
 pub const RESPONSE_DELAY: Duration = Duration::from_millis(50);
@@ -395,6 +280,65 @@ fn rusb_to_hid(err: rusb::Error) -> HidError {
 }
 
 impl LibusbTransport {
+    /// Build a `LibusbTransport` from a rusb handle whose target interface has
+    /// already been claimed (and the kernel driver detached if applicable).
+    /// Spawns a background thread that continuously polls `ep_in`, calls
+    /// `packet_hook` for every packet, then queues the packet for callers of
+    /// `read_timeout` / `read_interrupt`.
+    ///
+    /// `packet_hook` lets the caller react to unsolicited reports (e.g. button
+    /// events) that the kernel HID driver no longer surfaces because we
+    /// detached it — that logic is device-specific and lives in the device
+    /// module rather than in this transport.
+    pub fn open(
+        handle: rusb::DeviceHandle<rusb::Context>,
+        interface: u8,
+        ep_in: u8,
+        product_string: Option<String>,
+        mut packet_hook: Box<dyn FnMut(&[u8]) + Send + 'static>,
+    ) -> Self {
+        let handle = std::sync::Arc::new(handle);
+        let rx = std::sync::Arc::new((
+            std::sync::Mutex::new(std::collections::VecDeque::new()),
+            std::sync::Condvar::new(),
+        ));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let reader = {
+            let handle = std::sync::Arc::clone(&handle);
+            let rx = std::sync::Arc::clone(&rx);
+            let stop = std::sync::Arc::clone(&stop);
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 64];
+                while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                    match handle.read_interrupt(ep_in, &mut buf, Duration::from_millis(100)) {
+                        Ok(n) if n > 0 => {
+                            packet_hook(&buf[..n]);
+                            let (lock, cvar) = &*rx;
+                            let mut q = lock.lock().unwrap();
+                            q.push_back(buf[..n].to_vec());
+                            cvar.notify_one();
+                        }
+                        Ok(_) => {}
+                        Err(rusb::Error::Timeout) => {}
+                        Err(rusb::Error::NoDevice) | Err(rusb::Error::Pipe) => break,
+                        Err(_) => {}
+                    }
+                }
+            })
+        };
+
+        LibusbTransport {
+            handle,
+            interface,
+            ep_in,
+            product_string,
+            rx,
+            stop,
+            reader: Some(reader),
+        }
+    }
+
     fn set_report(&self, report_type: u16, data: &[u8]) -> Result<usize, HidError> {
         if data.is_empty() {
             return Err(HidError::InvalidZeroSizeData);
@@ -518,18 +462,25 @@ impl Display for DeviceProperties {
 
 impl DeviceState {
     pub fn new(product_ids: &[u16], vendor_ids: &[u16]) -> Result<Vec<Self>, DeviceError> {
-        // Cloud III S Wireless: open via libusb FIRST, before any hidapi/hidraw
-        // enumeration. The kernel hidraw driver, once it has touched the dongle's
-        // HID interface, leaves the INT IN URB queue in a state where responses
-        // never reach a subsequent libusb claim. Doing libusb first (and keeping
-        // it claimed) sidesteps the race.
-        let cloud_iii_s_state = if vendor_ids.contains(&cloud_iii_s_wireless::VENDOR_IDS[0])
-            && product_ids.contains(&cloud_iii_s_wireless::PRODUCT_IDS[0])
-        {
-            open_cloud_iii_s_via_libusb()?
-        } else {
-            None
-        };
+        // Devices with a custom opener (e.g. libusb-based) are opened FIRST,
+        // before any hidapi/hidraw enumeration. Reason: on Linux, once hidraw
+        // has touched some HID interfaces, a subsequent libusb claim races with
+        // the kernel driver and responses can be lost. Custom openers stake
+        // their claim early; the hidapi pass below skips the same VID/PID pairs.
+        let mut custom_states: Vec<DeviceState> = Vec::new();
+        for entry in DEVICE_REGISTER.iter().filter(|e| e.custom_open.is_some()) {
+            let owns_target = entry
+                .vendor_ids
+                .iter()
+                .any(|v| vendor_ids.contains(v))
+                && entry.product_ids.iter().any(|p| product_ids.contains(p));
+            if !owns_target {
+                continue;
+            }
+            if let Some(state) = (entry.custom_open.unwrap())()? {
+                custom_states.push(state);
+            }
+        }
 
         let hid_api = HidApi::new()?;
         let mut potential_devices = HashSet::new();
@@ -545,12 +496,9 @@ impl DeviceState {
         let device_candidates: Vec<(HidDevice, u16, u16)> = hid_api
             .device_list()
             .filter_map(|info| {
-                // Skip Cloud III S: opened via libusb separately below. Letting
-                // hidapi-hidraw open `/dev/hidraw*` here would race with our
-                // detach_kernel_driver/claim_interface call.
-                if info.vendor_id() == cloud_iii_s_wireless::VENDOR_IDS[0]
-                    && info.product_id() == cloud_iii_s_wireless::PRODUCT_IDS[0]
-                {
+                // Skip devices owned by a custom opener; letting hidapi open
+                // `/dev/hidraw*` here would race with the custom claim.
+                if is_owned_by_custom_opener(info.vendor_id(), info.product_id()) {
                     return None;
                 }
                 if product_ids.contains(&info.product_id())
@@ -591,7 +539,7 @@ impl DeviceState {
             })
             .collect();
 
-        if device_candidates.is_empty() && cloud_iii_s_state.is_none() {
+        if device_candidates.is_empty() && custom_states.is_empty() {
             if !potential_devices.is_empty() {
                 let names = potential_devices
                     .iter()
@@ -625,7 +573,9 @@ impl DeviceState {
                 }
             })
             .collect();
-        if let Some(state) = cloud_iii_s_state {
+        // Custom-opened devices come first so the connection probe tries them
+        // before falling back to any hidapi candidate.
+        for state in custom_states.into_iter().rev() {
             states.insert(0, state);
         }
         Ok(states)
