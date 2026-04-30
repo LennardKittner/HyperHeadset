@@ -1,24 +1,26 @@
-use hidapi::HidError;
-
 use crate::{
     debug_println,
     devices::{ChargingStatus, Color, Device, DeviceEvent, DeviceState},
 };
 use std::time::Duration;
 
+#[cfg(target_os = "linux")]
+use crate::devices::{
+    DeviceError, DeviceProperties, HidTransport, LibusbTransport,
+};
+#[cfg(target_os = "linux")]
+use rusb::UsbContext;
+
 const HP: u16 = 0x03F0;
 pub const VENDOR_IDS: [u16; 1] = [HP];
 pub const PRODUCT_IDS: [u16; 1] = [0x06BE];
 
-// Cloud III S uses a different protocol than Cloud III
-// Header 0x05 for mic control, 20-byte packets
-const PACKET_SIZE: usize = 20;
+// Mic state reports: the headset sometimes sends spontaneous reports on
+// Report ID 0x05 (e.g. on boom-mic flip). We don't write to this report ID
+// — mute is set via the 0x0c-protocol cmd 0x01 (see `set_mute_packet`) —
+// but we still parse incoming reports so the menu reflects hardware-driven
+// state changes. Pattern: `(byte[1] & 0x02) != 0` means muted.
 const MIC_HEADER: u8 = 0x05;
-
-// Mic control commands (byte 1 after header)
-// Pattern: (cmd & 0x02) == 0 means ON
-const MIC_ON_CMD: u8 = 0x00;
-const MIC_OFF_CMD: u8 = 0x02;
 
 // Auto-shutdown control (via SET_REPORT, report ID 0x0c)
 // Packet structure: 0c 02 03 00 00 4a XX 00... (64 bytes total)
@@ -53,6 +55,7 @@ const DONGLE_CONNECTED_COMMAND_ID: u8 = 0x02;
 const COLOR_COMMAND_ID: u8 = 0x4D;
 const CHARGE_STATE_COMMAND_ID: u8 = 0x48;
 const GET_MIC_MUTE_COMMAND_ID: u8 = 0x04;
+const SET_MIC_MUTE_COMMAND_ID: u8 = 0x01;
 const GET_SIDE_TONE_COMMAND_ID: u8 = 0x16;
 const GET_AUTO_POWER_OFF_COMMAND_ID: u8 = 0x4B;
 const GET_VOICE_PROMPT_COMMAND_ID: u8 = 0x14;
@@ -60,16 +63,17 @@ const GET_VOICE_PROMPT_COMMAND_ID: u8 = 0x14;
 // Button report header (incoming from headset)
 const CONSUMER_CONTROL_HEADER: u8 = 0x0f;
 // Consumer control button values
-const _VOL_UP: u8 = 0x01;
-const _VOL_DOWN: u8 = 0x02;
-const _PLAY_PAUSE: u8 = 0x08;
+const VOL_UP: u8 = 0x01;
+const VOL_DOWN: u8 = 0x02;
+const PLAY_PAUSE: u8 = 0x08;
 
-fn make_mic_packet(mute: bool) -> Vec<u8> {
-    let mut packet = vec![0u8; PACKET_SIZE];
-    packet[0] = MIC_HEADER;
-    packet[1] = if mute { MIC_OFF_CMD } else { MIC_ON_CMD };
-    packet
-}
+// HID interface exposed by the dongle. The dongle has only one HID interface
+// (`bInterfaceNumber = 3`) with a single INTERRUPT IN endpoint at `0x84`; all
+// writes are SET_REPORT class control transfers.
+#[cfg(target_os = "linux")]
+const HID_INTERFACE: u8 = 3;
+#[cfg(target_os = "linux")]
+const HID_EP_IN: u8 = 0x84;
 
 fn make_auto_shutdown_packet(minutes: u64) -> Vec<u8> {
     let mut packet = vec![0u8; AUTO_SHUTDOWN_PACKET_SIZE];
@@ -149,11 +153,13 @@ impl CloudIIISWireless {
 }
 
 impl Device for CloudIIISWireless {
-    fn write_hid_report(&mut self, packet: &[u8]) -> Result<(), HidError> {
-        self.get_device_state_mut()
-            .hid_device
-            .send_feature_report(packet)
-    }
+    // Use the default `write_hid_report` from the `Device` trait, which calls
+    // `hid_device.write()`. The Cloud III S HID interface has no OUT endpoint, so writes
+    // become `SET_REPORT` control transfers with report type **Output**, which is what the
+    // Ngenuity application uses (and what the device firmware listens for on Report ID 0x0c).
+    // The previous override forced `send_feature_report` (type **Feature**), which the device
+    // silently ignores — the symptom was that battery / connection / side tone queries never
+    // produced a response.
 
     fn get_charging_packet(&self) -> Option<Vec<u8>> {
         let mut packet = BASE_PACKET.to_vec();
@@ -185,9 +191,16 @@ impl Device for CloudIIISWireless {
         Some(packet)
     }
 
-    // Cloud III S: Mic control - CONFIRMED WORKING
+    // Mic mute via the 0x0c-report protocol (cmd 0x01). Confirmed by NGenuity
+    // capture : `0c 02 03 00 00 01 <0|1>`,
+    // value 1 = muted, 0 = unmuted. Acknowledged by the device with notification
+    // ID 3 (`0d 02 03 00 03 <val>`) which `parse_notification` already handles.
     fn set_mute_packet(&self, mute: bool) -> Option<Vec<u8>> {
-        Some(make_mic_packet(mute))
+        let mut packet = BASE_PACKET.to_vec();
+        packet[3] = 0x00;
+        packet[5] = SET_MIC_MUTE_COMMAND_ID;
+        packet[6] = mute as u8;
+        Some(packet)
     }
 
     fn get_surround_sound_packet(&self) -> Option<Vec<u8>> {
@@ -308,4 +321,109 @@ impl Device for CloudIIISWireless {
     fn get_device_state_mut(&mut self) -> &mut DeviceState {
         &mut self.state
     }
+}
+
+/// Open the dongle via libusb instead of hidapi/hidraw.
+///
+/// On Linux, once the kernel hidraw driver has touched this dongle's HID
+/// interface, RF-forwarded query responses (battery, charge, side tone, etc.)
+/// silently stop reaching user space. Going via libusb — detach the kernel
+/// driver, claim the interface exclusively, drive raw SET_REPORT control
+/// transfers + INT IN reads ourselves — sidesteps the issue and gives reliable
+/// bidirectional traffic.
+///
+/// Linux-only: the firmware quirk has only been observed on Linux's hidraw
+/// stack, and the kernel-driver-detach pattern is meaningful only there.
+#[cfg(target_os = "linux")]
+pub fn open_via_libusb() -> Result<Option<DeviceState>, DeviceError> {
+    let ctx = match rusb::Context::new() {
+        Ok(c) => c,
+        Err(_e) => {
+            debug_println!("libusb Context::new failed: {_e}");
+            return Ok(None);
+        }
+    };
+    let devices = match ctx.devices() {
+        Ok(d) => d,
+        Err(_e) => {
+            debug_println!("libusb devices() failed: {_e}");
+            return Ok(None);
+        }
+    };
+    let want_vid = VENDOR_IDS[0];
+    let want_pid = PRODUCT_IDS[0];
+    let dev = devices.iter().find(|d| {
+        d.device_descriptor()
+            .map(|desc| desc.vendor_id() == want_vid && desc.product_id() == want_pid)
+            .unwrap_or(false)
+    });
+    let Some(dev) = dev else {
+        return Ok(None);
+    };
+    let handle = match dev.open() {
+        Ok(h) => h,
+        Err(_e) => {
+            debug_println!("libusb open failed: {_e}");
+            return Ok(None);
+        }
+    };
+
+    if handle
+        .kernel_driver_active(HID_INTERFACE)
+        .unwrap_or(false)
+    {
+        if let Err(_e) = handle.detach_kernel_driver(HID_INTERFACE) {
+            debug_println!("detach_kernel_driver: {_e}");
+        }
+    }
+    if let Err(_e) = handle.claim_interface(HID_INTERFACE) {
+        debug_println!("claim_interface: {_e}");
+        let _ = handle.attach_kernel_driver(HID_INTERFACE);
+        return Ok(None);
+    }
+
+    let product_string = handle
+        .read_product_string_ascii(
+            &dev.device_descriptor()
+                .map_err(|_| DeviceError::NoDeviceFound())?,
+        )
+        .ok();
+
+    // Forward Consumer Control reports (vol-up / vol-down / play-pause) back
+    // to the OS via synthesized media key presses. With the kernel HID driver
+    // detached, the input subsystem no longer sees these events on its own.
+    //
+    // Caveat: on Wayland this depends on the compositor accepting input
+    // emulation through libei (`xdg-desktop-portal-*`). On compositors that
+    // don't, the synthetic events are silently dropped and the headset's
+    // volume / play-pause buttons stay inert while this program runs. Works
+    // out of the box on X11.
+    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+    let mut enigo = match Enigo::new(&Settings::default()) {
+        Ok(e) => Some(e),
+        Err(e) => {
+            eprintln!("Cloud III S: input forwarding disabled (enigo init: {e})");
+            None
+        }
+    };
+    let packet_hook = Box::new(move |buf: &[u8]| {
+        if buf.len() >= 2 && buf[0] == CONSUMER_CONTROL_HEADER {
+            let key = match buf[1] {
+                VOL_UP => Some(Key::VolumeUp),
+                VOL_DOWN => Some(Key::VolumeDown),
+                PLAY_PAUSE => Some(Key::MediaPlayPause),
+                _ => None,
+            };
+            if let (Some(k), Some(e)) = (key, enigo.as_mut()) {
+                let _ = e.key(k, Direction::Click);
+            }
+        }
+    });
+
+    let transport =
+        LibusbTransport::open(handle, HID_INTERFACE, HID_EP_IN, product_string.clone(), packet_hook);
+    Ok(Some(DeviceState {
+        transport: HidTransport::Libusb(transport),
+        device_properties: DeviceProperties::new(want_pid, want_vid, product_string),
+    }))
 }

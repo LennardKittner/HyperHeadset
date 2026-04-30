@@ -9,6 +9,7 @@ description = "A CLI and tray application for monitoring and managing HyperX hea
 clap = { version = "4.5.32", features = ["derive"] }
 enigo = "0.6.1"
 hidapi = { path = "vendor/hidapi" }
+rusb = "0.9"
 thistermination = "1.0.0"
 [target.'cfg(target_os = "linux")'.dependencies]
 dialog = "0.3.0"
