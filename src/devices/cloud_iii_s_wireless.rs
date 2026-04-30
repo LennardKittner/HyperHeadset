@@ -15,15 +15,12 @@ const HP: u16 = 0x03F0;
 pub const VENDOR_IDS: [u16; 1] = [HP];
 pub const PRODUCT_IDS: [u16; 1] = [0x06BE];
 
-// Cloud III S uses a different protocol than Cloud III
-// Header 0x05 for mic control, 20-byte packets
-const PACKET_SIZE: usize = 20;
+// Mic state reports: the headset sometimes sends spontaneous reports on
+// Report ID 0x05 (e.g. on boom-mic flip). We don't write to this report ID
+// — mute is set via the 0x0c-protocol cmd 0x01 (see `set_mute_packet`) —
+// but we still parse incoming reports so the menu reflects hardware-driven
+// state changes. Pattern: `(byte[1] & 0x02) != 0` means muted.
 const MIC_HEADER: u8 = 0x05;
-
-// Mic control commands (byte 1 after header)
-// Pattern: (cmd & 0x02) == 0 means ON
-const MIC_ON_CMD: u8 = 0x00;
-const MIC_OFF_CMD: u8 = 0x02;
 
 // Auto-shutdown control (via SET_REPORT, report ID 0x0c)
 // Packet structure: 0c 02 03 00 00 4a XX 00... (64 bytes total)
@@ -58,6 +55,7 @@ const DONGLE_CONNECTED_COMMAND_ID: u8 = 0x02;
 const COLOR_COMMAND_ID: u8 = 0x4D;
 const CHARGE_STATE_COMMAND_ID: u8 = 0x48;
 const GET_MIC_MUTE_COMMAND_ID: u8 = 0x04;
+const SET_MIC_MUTE_COMMAND_ID: u8 = 0x01;
 const GET_SIDE_TONE_COMMAND_ID: u8 = 0x16;
 const GET_AUTO_POWER_OFF_COMMAND_ID: u8 = 0x4B;
 const GET_VOICE_PROMPT_COMMAND_ID: u8 = 0x14;
@@ -76,13 +74,6 @@ const PLAY_PAUSE: u8 = 0x08;
 const HID_INTERFACE: u8 = 3;
 #[cfg(target_os = "linux")]
 const HID_EP_IN: u8 = 0x84;
-
-fn make_mic_packet(mute: bool) -> Vec<u8> {
-    let mut packet = vec![0u8; PACKET_SIZE];
-    packet[0] = MIC_HEADER;
-    packet[1] = if mute { MIC_OFF_CMD } else { MIC_ON_CMD };
-    packet
-}
 
 fn make_auto_shutdown_packet(minutes: u64) -> Vec<u8> {
     let mut packet = vec![0u8; AUTO_SHUTDOWN_PACKET_SIZE];
@@ -200,9 +191,16 @@ impl Device for CloudIIISWireless {
         Some(packet)
     }
 
-    // Cloud III S: Mic control - CONFIRMED WORKING
+    // Mic mute via the 0x0c-report protocol (cmd 0x01). Confirmed by NGenuity
+    // capture : `0c 02 03 00 00 01 <0|1>`,
+    // value 1 = muted, 0 = unmuted. Acknowledged by the device with notification
+    // ID 3 (`0d 02 03 00 03 <val>`) which `parse_notification` already handles.
     fn set_mute_packet(&self, mute: bool) -> Option<Vec<u8>> {
-        Some(make_mic_packet(mute))
+        let mut packet = BASE_PACKET.to_vec();
+        packet[3] = 0x00;
+        packet[5] = SET_MIC_MUTE_COMMAND_ID;
+        packet[6] = mute as u8;
+        Some(packet)
     }
 
     fn get_surround_sound_packet(&self) -> Option<Vec<u8>> {
