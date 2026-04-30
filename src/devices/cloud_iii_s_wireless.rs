@@ -1,5 +1,3 @@
-use hidapi::HidError;
-
 use crate::{
     debug_println,
     devices::{ChargingStatus, Color, Device, DeviceEvent, DeviceState},
@@ -149,11 +147,13 @@ impl CloudIIISWireless {
 }
 
 impl Device for CloudIIISWireless {
-    fn write_hid_report(&mut self, packet: &[u8]) -> Result<(), HidError> {
-        self.get_device_state_mut()
-            .hid_device
-            .send_feature_report(packet)
-    }
+    // Use the default `write_hid_report` from the `Device` trait, which calls
+    // `hid_device.write()`. The Cloud III S HID interface has no OUT endpoint, so writes
+    // become `SET_REPORT` control transfers with report type **Output**, which is what the
+    // Ngenuity application uses (and what the device firmware listens for on Report ID 0x0c).
+    // The previous override forced `send_feature_report` (type **Feature**), which the device
+    // silently ignores — the symptom was that battery / connection / side tone queries never
+    // produced a response.
 
     fn get_charging_packet(&self) -> Option<Vec<u8>> {
         let mut packet = BASE_PACKET.to_vec();

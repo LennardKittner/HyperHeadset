@@ -14,6 +14,7 @@ use crate::{
     },
 };
 use hidapi::{HidApi, HidDevice, HidError};
+use rusb::UsbContext;
 use std::{
     collections::HashSet,
     fmt::{Debug, Display},
@@ -22,6 +23,146 @@ use std::{
 use thistermination::TerminationFull;
 
 const PASSIVE_REFRESH_TIME_OUT: Duration = Duration::from_secs(2);
+
+/// HID interface exposed by the Cloud III S Wireless dongle. The dongle has
+/// only one HID interface (`bInterfaceNumber = 3`) with a single INTERRUPT IN
+/// endpoint at `0x84`; all writes are SET_REPORT class control transfers.
+const CLOUD_III_S_HID_INTERFACE: u8 = 3;
+const CLOUD_III_S_HID_EP_IN: u8 = 0x84;
+
+fn open_cloud_iii_s_via_libusb() -> Result<Option<DeviceState>, DeviceError> {
+    let ctx = match rusb::Context::new() {
+        Ok(c) => c,
+        Err(_e) => {
+            debug_println!("libusb Context::new failed: {_e}");
+            return Ok(None);
+        }
+    };
+    let devices = match ctx.devices() {
+        Ok(d) => d,
+        Err(_e) => {
+            debug_println!("libusb devices() failed: {_e}");
+            return Ok(None);
+        }
+    };
+    let want_vid = cloud_iii_s_wireless::VENDOR_IDS[0];
+    let want_pid = cloud_iii_s_wireless::PRODUCT_IDS[0];
+    let dev = devices.iter().find(|d| {
+        d.device_descriptor()
+            .map(|desc| desc.vendor_id() == want_vid && desc.product_id() == want_pid)
+            .unwrap_or(false)
+    });
+    let Some(dev) = dev else {
+        return Ok(None);
+    };
+    let handle = match dev.open() {
+        Ok(h) => h,
+        Err(_e) => {
+            debug_println!("Cloud III S: libusb open failed: {_e}");
+            return Ok(None);
+        }
+    };
+
+    // Best-effort detach the kernel HID driver so we can claim the interface
+    // exclusively. On non-Linux this is a no-op.
+    if handle
+        .kernel_driver_active(CLOUD_III_S_HID_INTERFACE)
+        .unwrap_or(false)
+    {
+        if let Err(_e) = handle.detach_kernel_driver(CLOUD_III_S_HID_INTERFACE) {
+            debug_println!("Cloud III S: detach_kernel_driver: {_e}");
+        }
+    }
+    if let Err(_e) = handle.claim_interface(CLOUD_III_S_HID_INTERFACE) {
+        debug_println!("Cloud III S: claim_interface: {_e}");
+        let _ = handle.attach_kernel_driver(CLOUD_III_S_HID_INTERFACE);
+        return Ok(None);
+    }
+
+    let product_string = handle
+        .read_product_string_ascii(&dev.device_descriptor().map_err(|_| DeviceError::NoDeviceFound())?)
+        .ok();
+
+    let handle = std::sync::Arc::new(handle);
+    let rx = std::sync::Arc::new((
+        std::sync::Mutex::new(std::collections::VecDeque::new()),
+        std::sync::Condvar::new(),
+    ));
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    // Background reader: continuously poll EP IN with a short timeout. Push every
+    // received packet into the shared queue so callers see responses even when the
+    // surrounding flow does a `write → sleep → read` (active_refresh_state).
+    let reader = {
+        let handle = std::sync::Arc::clone(&handle);
+        let rx = std::sync::Arc::clone(&rx);
+        let stop = std::sync::Arc::clone(&stop);
+        std::thread::spawn(move || {
+            // Forwarding Consumer Control events (Report ID 0x0f, vol-up / vol-down /
+            // play-pause buttons on the headset) back to the OS. With the kernel HID
+            // driver detached, the input subsystem no longer sees them, so we
+            // synthesize the corresponding media key presses with `enigo`.
+            //
+            // Caveat: on Linux/Wayland this depends on the compositor accepting input
+            // emulation through libei (`xdg-desktop-portal-*`). On compositors that
+            // don't, the synthetic events are silently dropped and the headset's
+            // volume / play-pause buttons stay inert while this program runs. Works
+            // out of the box on X11.
+            use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+            let mut enigo = match Enigo::new(&Settings::default()) {
+                Ok(e) => Some(e),
+                Err(e) => {
+                    eprintln!("Cloud III S: input forwarding disabled (enigo init: {e})");
+                    None
+                }
+            };
+            let mut buf = [0u8; 64];
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                match handle.read_interrupt(
+                    CLOUD_III_S_HID_EP_IN,
+                    &mut buf,
+                    Duration::from_millis(100),
+                ) {
+                    Ok(n) if n > 0 => {
+                        if n >= 2 && buf[0] == 0x0f {
+                            let key = match buf[1] {
+                                0x01 => Some(Key::VolumeUp),
+                                0x02 => Some(Key::VolumeDown),
+                                0x08 => Some(Key::MediaPlayPause),
+                                _ => None,
+                            };
+                            if let (Some(k), Some(e)) = (key, enigo.as_mut()) {
+                                let _ = e.key(k, Direction::Click);
+                            }
+                        }
+                        let (lock, cvar) = &*rx;
+                        let mut q = lock.lock().unwrap();
+                        q.push_back(buf[..n].to_vec());
+                        cvar.notify_one();
+                    }
+                    Ok(_) => {}
+                    Err(rusb::Error::Timeout) => {}
+                    Err(rusb::Error::NoDevice) | Err(rusb::Error::Pipe) => break,
+                    Err(_) => {}
+                }
+            }
+        })
+    };
+
+    let transport = LibusbTransport {
+        handle,
+        interface: CLOUD_III_S_HID_INTERFACE,
+        ep_in: CLOUD_III_S_HID_EP_IN,
+        product_string: product_string.clone(),
+        rx,
+        stop,
+        reader: Some(reader),
+    };
+    Ok(Some(DeviceState {
+        transport: HidTransport::Libusb(transport),
+        device_properties: DeviceProperties::new(want_pid, want_vid, product_string),
+    }))
+}
 
 type DeviceFactory = fn(DeviceState) -> Box<dyn Device>;
 
@@ -130,10 +271,15 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
             let mut test_device = (entry.factory)(state);
             test_device.init_capabilities();
 
+            // Use the wireless-connected query as the probe: it is the cheapest one
+            // and the one most consistently answered by the dongle from its local cache
+            // (no RF round-trip to the headset required). Some devices (e.g. Cloud III S
+            // Wireless) won't answer the battery query when the headset isn't actively
+            // using the audio link, so probing on battery would falsely fail.
             let probe_packet = test_device
                 .get_query_packets()
                 .into_iter()
-                .nth(2)
+                .next()
                 .expect("Why is there a device without packets ???");
 
             test_device.prepare_write();
@@ -144,8 +290,8 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
                 std::thread::sleep(RESPONSE_DELAY);
 
                 if let Some(events) = test_device.wait_for_updates(Duration::from_secs(1)) {
-                    for event in events {
-                        debug_println!("got response {event:?}");
+                    for _event in events {
+                        debug_println!("got response {_event:?}");
                     }
                 } else {
                     continue;
@@ -161,8 +307,177 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
 
 #[derive(Debug)]
 pub struct DeviceState {
-    pub hid_device: HidDevice,
+    pub transport: HidTransport,
     pub device_properties: DeviceProperties,
+}
+
+/// HID transport abstraction. Most devices use `Hidapi` (the `hidapi-rs` library
+/// which talks to `/dev/hidrawN` on Linux). The `Libusb` variant is for devices
+/// that need direct USB access — specifically the Cloud III S Wireless on
+/// firmware ≥ 0x4118, where the kernel hidraw stack causes RF-forwarded query
+/// responses to be lost. With `Libusb` we detach the kernel driver, claim the
+/// HID interface exclusively, and issue raw SET_REPORT class control transfers
+/// + INT IN reads ourselves.
+pub enum HidTransport {
+    Hidapi(HidDevice),
+    Libusb(LibusbTransport),
+}
+
+pub struct LibusbTransport {
+    handle: std::sync::Arc<rusb::DeviceHandle<rusb::Context>>,
+    interface: u8,
+    ep_in: u8,
+    product_string: Option<String>,
+    rx: std::sync::Arc<(std::sync::Mutex<std::collections::VecDeque<Vec<u8>>>, std::sync::Condvar)>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    reader: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Debug for HidTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HidTransport::Hidapi(_) => f.write_str("HidTransport::Hidapi(..)"),
+            HidTransport::Libusb(t) => f
+                .debug_struct("HidTransport::Libusb")
+                .field("interface", &t.interface)
+                .field("ep_in", &format_args!("0x{:02x}", t.ep_in))
+                .finish(),
+        }
+    }
+}
+
+const HID_REQ_GET_REPORT: u8 = 0x01;
+const HID_REQ_SET_REPORT: u8 = 0x09;
+const HID_REPORT_TYPE_INPUT: u16 = 0x01;
+const HID_REPORT_TYPE_OUTPUT: u16 = 0x02;
+const HID_REPORT_TYPE_FEATURE: u16 = 0x03;
+
+impl HidTransport {
+    pub fn write(&self, data: &[u8]) -> Result<usize, HidError> {
+        match self {
+            HidTransport::Hidapi(d) => d.write(data),
+            HidTransport::Libusb(t) => t.set_report(HID_REPORT_TYPE_OUTPUT, data),
+        }
+    }
+
+    pub fn read_timeout(&self, buf: &mut [u8], timeout_ms: i32) -> Result<usize, HidError> {
+        match self {
+            HidTransport::Hidapi(d) => d.read_timeout(buf, timeout_ms),
+            HidTransport::Libusb(t) => t.read_interrupt(buf, timeout_ms),
+        }
+    }
+
+    pub fn send_feature_report(&self, data: &[u8]) -> Result<(), HidError> {
+        match self {
+            HidTransport::Hidapi(d) => d.send_feature_report(data),
+            HidTransport::Libusb(t) => t.set_report(HID_REPORT_TYPE_FEATURE, data).map(|_| ()),
+        }
+    }
+
+    pub fn get_input_report(&self, buf: &mut [u8]) -> Result<usize, HidError> {
+        match self {
+            HidTransport::Hidapi(d) => d.get_input_report(buf),
+            HidTransport::Libusb(t) => t.get_report(HID_REPORT_TYPE_INPUT, buf),
+        }
+    }
+
+    pub fn product_string(&self) -> Option<String> {
+        match self {
+            HidTransport::Hidapi(d) => d.get_product_string().ok().flatten(),
+            HidTransport::Libusb(t) => t.product_string.clone(),
+        }
+    }
+}
+
+fn rusb_to_hid(err: rusb::Error) -> HidError {
+    HidError::HidApiError {
+        message: format!("libusb: {err}"),
+    }
+}
+
+impl LibusbTransport {
+    fn set_report(&self, report_type: u16, data: &[u8]) -> Result<usize, HidError> {
+        if data.is_empty() {
+            return Err(HidError::InvalidZeroSizeData);
+        }
+        let report_id = data[0];
+        let request_type = rusb::request_type(
+            rusb::Direction::Out,
+            rusb::RequestType::Class,
+            rusb::Recipient::Interface,
+        );
+        let wvalue = (report_type << 8) | (report_id as u16);
+        self.handle
+            .write_control(
+                request_type,
+                HID_REQ_SET_REPORT,
+                wvalue,
+                self.interface as u16,
+                data,
+                Duration::from_millis(500),
+            )
+            .map_err(rusb_to_hid)
+    }
+
+    fn get_report(&self, report_type: u16, buf: &mut [u8]) -> Result<usize, HidError> {
+        if buf.is_empty() {
+            return Err(HidError::InvalidZeroSizeData);
+        }
+        let report_id = buf[0];
+        let request_type = rusb::request_type(
+            rusb::Direction::In,
+            rusb::RequestType::Class,
+            rusb::Recipient::Interface,
+        );
+        let wvalue = (report_type << 8) | (report_id as u16);
+        self.handle
+            .read_control(
+                request_type,
+                HID_REQ_GET_REPORT,
+                wvalue,
+                self.interface as u16,
+                buf,
+                Duration::from_millis(500),
+            )
+            .map_err(rusb_to_hid)
+    }
+
+    fn read_interrupt(&self, buf: &mut [u8], timeout_ms: i32) -> Result<usize, HidError> {
+        // Pop from the background-reader queue. This decouples USB polling from
+        // user calls so a `write` followed by a `sleep` followed by a `read` still
+        // captures any response that arrived during the sleep.
+        let timeout = if timeout_ms < 0 {
+            Duration::from_secs(60 * 60)
+        } else {
+            Duration::from_millis(timeout_ms as u64)
+        };
+        let (lock, cvar) = &*self.rx;
+        let deadline = std::time::Instant::now() + timeout;
+        let mut q = lock.lock().unwrap();
+        while q.is_empty() {
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return Ok(0);
+            }
+            let (g, _) = cvar.wait_timeout(q, deadline - now).unwrap();
+            q = g;
+        }
+        let pkt = q.pop_front().unwrap();
+        let n = pkt.len().min(buf.len());
+        buf[..n].copy_from_slice(&pkt[..n]);
+        Ok(n)
+    }
+}
+
+impl Drop for LibusbTransport {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(t) = self.reader.take() {
+            let _ = t.join();
+        }
+        let _ = self.handle.release_interface(self.interface);
+        let _ = self.handle.attach_kernel_driver(self.interface);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,6 +519,19 @@ impl Display for DeviceProperties {
 
 impl DeviceState {
     pub fn new(product_ids: &[u16], vendor_ids: &[u16]) -> Result<Vec<Self>, DeviceError> {
+        // Cloud III S Wireless: open via libusb FIRST, before any hidapi/hidraw
+        // enumeration. The kernel hidraw driver, once it has touched the dongle's
+        // HID interface, leaves the INT IN URB queue in a state where responses
+        // never reach a subsequent libusb claim. Doing libusb first (and keeping
+        // it claimed) sidesteps the race.
+        let cloud_iii_s_state = if vendor_ids.contains(&cloud_iii_s_wireless::VENDOR_IDS[0])
+            && product_ids.contains(&cloud_iii_s_wireless::PRODUCT_IDS[0])
+        {
+            open_cloud_iii_s_via_libusb()?
+        } else {
+            None
+        };
+
         let hid_api = HidApi::new()?;
         let mut potential_devices = HashSet::new();
         let mut error = Ok(());
@@ -218,6 +546,14 @@ impl DeviceState {
         let device_candidates: Vec<(HidDevice, u16, u16)> = hid_api
             .device_list()
             .filter_map(|info| {
+                // Skip Cloud III S: opened via libusb separately below. Letting
+                // hidapi-hidraw open `/dev/hidraw*` here would race with our
+                // detach_kernel_driver/claim_interface call.
+                if info.vendor_id() == cloud_iii_s_wireless::VENDOR_IDS[0]
+                    && info.product_id() == cloud_iii_s_wireless::PRODUCT_IDS[0]
+                {
+                    return None;
+                }
                 if product_ids.contains(&info.product_id())
                     && vendor_ids.contains(&info.vendor_id())
                 {
@@ -256,7 +592,7 @@ impl DeviceState {
             })
             .collect();
 
-        if device_candidates.is_empty() {
+        if device_candidates.is_empty() && cloud_iii_s_state.is_none() {
             if !potential_devices.is_empty() {
                 let names = potential_devices
                     .iter()
@@ -280,16 +616,20 @@ impl DeviceState {
             return Err(DeviceError::NoDeviceFound());
         }
 
-        Ok(device_candidates
+        let mut states: Vec<DeviceState> = device_candidates
             .into_iter()
             .map(|(hid_device, product_id, vendor_id)| {
                 let device_name = hid_device.get_product_string().ok().flatten();
                 DeviceState {
-                    hid_device,
+                    transport: HidTransport::Hidapi(hid_device),
                     device_properties: DeviceProperties::new(product_id, vendor_id, device_name),
                 }
             })
-            .collect())
+            .collect();
+        if let Some(state) = cloud_iii_s_state {
+            states.insert(0, state);
+        }
+        Ok(states)
     }
 
     fn update_self_with_event(&mut self, event: &DeviceEvent) {
@@ -726,7 +1066,7 @@ pub trait Device {
     /// Adapted from PR #20 by @navrozashvili
     /// Source: https://github.com/LennardKittner/HyperHeadset/pull/20
     fn write_hid_report(&mut self, packet: &[u8]) -> Result<(), HidError> {
-        match self.get_device_state_mut().hid_device.write(packet) {
+        match self.get_device_state_mut().transport.write(packet) {
             Ok(_) => Ok(()),
             Err(write_err) => {
                 #[cfg(target_os = "windows")]
@@ -741,7 +1081,7 @@ pub trait Device {
                             // write() error since that's what callers attempted.
                             if let Err(_feature_err) = self
                                 .get_device_state_mut()
-                                .hid_device
+                                .transport
                                 .send_feature_report(packet)
                             {
                                 return Err(write_err);
@@ -862,7 +1202,7 @@ pub trait Device {
         let mut buf = self.get_response_buffer();
         let res = self
             .get_device_state()
-            .hid_device
+            .transport
             .read_timeout(&mut buf[..], duration.as_millis() as i32)
             .ok()?;
 
