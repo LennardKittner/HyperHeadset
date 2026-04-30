@@ -313,11 +313,10 @@ pub struct DeviceState {
 
 /// HID transport abstraction. Most devices use `Hidapi` (the `hidapi-rs` library
 /// which talks to `/dev/hidrawN` on Linux). The `Libusb` variant is for devices
-/// that need direct USB access — specifically the Cloud III S Wireless on
-/// firmware ≥ 0x4118, where the kernel hidraw stack causes RF-forwarded query
-/// responses to be lost. With `Libusb` we detach the kernel driver, claim the
-/// HID interface exclusively, and issue raw SET_REPORT class control transfers
-/// + INT IN reads ourselves.
+/// that need direct USB access - specifically the Cloud III S Wireless where the 
+/// kernel hidraw stack causes RF-forwarded query responses to be lost. 
+/// With `Libusb` we detach the kernel driver, claim the HID interface exclusively, 
+/// and issue raw SET_REPORT class control transfers + INT IN reads ourselves.
 pub enum HidTransport {
     Hidapi(HidDevice),
     Libusb(LibusbTransport),
