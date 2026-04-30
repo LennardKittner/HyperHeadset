@@ -15,6 +15,14 @@ pub struct TrayHandler {
 const NO_COMPATIBLE_DEVICE: &str = "No compatible device found.\nIs the dongle plugged in?\nIf you are using Linux did you\nadd the Udev rules?";
 const HEADSET_NOT_CONNECTED: &str = "Headset is not connected";
 
+fn format_int_value(value: u8, suffix: &str) -> String {
+    if value == 0 && suffix == "min" {
+        "Disabled".to_string()
+    } else {
+        format!("{}{}", value, suffix)
+    }
+}
+
 impl TrayHandler {
     pub fn new(tray: StatusTray) -> Self {
         let tray_service = TrayService::new(tray);
@@ -97,7 +105,7 @@ impl Tray for StatusTray {
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let make_exit = || StandardItem {
             label: "Quit".into(),
-            icon_name: "application-exit".into(),
+            icon_name: "application-exit-symbolic".into(),
             activate: Box::new(|_| std::process::exit(0)),
             ..Default::default()
         };
@@ -162,7 +170,7 @@ impl Tray for StatusTray {
                         .map(|val| {
                             let update_sender = self.update_sender.clone();
                             StandardItem {
-                                label: format!("{}{}", val, property.suffix),
+                                label: format_int_value(*val, property.suffix),
                                 enabled: property.property_type == PropertyType::ReadWrite
                                     && property.data.is_some(),
                                 activate: Box::new(move |_| {
@@ -178,8 +186,9 @@ impl Tray for StatusTray {
                     menu_items.push(
                         SubMenu {
                             label: format!(
-                                "{} {}{}",
-                                property.prefix, current_value, property.suffix
+                                "{} {}",
+                                property.prefix,
+                                format_int_value(current_value, property.suffix)
                             ),
                             enabled: property.property_type == PropertyType::ReadWrite
                                 && property.data.is_some(),
