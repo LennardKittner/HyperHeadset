@@ -213,8 +213,6 @@ impl Device for CloudIIISWireless {
     }
 
     fn set_side_tone_packet(&self, side_tone_on: bool) -> Option<Vec<u8>> {
-        // Confirmed via NGenuity USB capture: `0c 02 03 00 00 0d <0|1>`.
-        // byte[3] = 0x00 marks a SET (vs 0x01 for GET).
         let mut packet = BASE_PACKET.to_vec();
         packet[3] = 0x00;
         packet[5] = SET_SIDE_TONE_COMMAND_ID;
@@ -237,7 +235,6 @@ impl Device for CloudIIISWireless {
     }
 
     fn set_voice_prompt_packet(&self, enable: bool) -> Option<Vec<u8>> {
-        // Confirmed via NGenuity USB capture: `0c 02 03 00 00 0b <0|1>`.
         let mut packet = BASE_PACKET.to_vec();
         packet[3] = 0x00;
         packet[5] = SET_VOICE_PROMPT_COMMAND_ID;
