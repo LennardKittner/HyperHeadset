@@ -156,15 +156,10 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
             let mut test_device = (entry.factory)(state);
             test_device.init_capabilities();
 
-            // Use the wireless-connected query as the probe: it is the cheapest one
-            // and the one most consistently answered by the dongle from its local cache
-            // (no RF round-trip to the headset required). Some devices (e.g. Cloud III S
-            // Wireless) won't answer the battery query when the headset isn't actively
-            // using the audio link, so probing on battery would falsely fail.
             let probe_packet = test_device
                 .get_query_packets()
                 .into_iter()
-                .next()
+                .nth(2)
                 .expect("Why is there a device without packets ???");
 
             test_device.prepare_write();
