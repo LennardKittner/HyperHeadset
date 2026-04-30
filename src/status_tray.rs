@@ -66,7 +66,7 @@ impl Tray for StatusTray {
             return ToolTip {
                 title: "Unknown".to_string(),
                 description: NO_COMPATIBLE_DEVICE.to_string(),
-                icon_name: "audio-headset".into(),
+                icon_name: "audio-headset-symbolic".into(),
                 icon_pixmap: Vec::new(),
             };
         };
