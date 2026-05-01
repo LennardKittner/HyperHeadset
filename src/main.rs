@@ -8,6 +8,23 @@ mod status_tray_not_linux;
 
 mod tray_battery_icon_state;
 
+use cfg_if::cfg_if;
+
+#[cfg(feature = "eq-support")]
+use hyper_headset::eq::session::EqSession;
+
+#[cfg(not(feature = "eq-support"))]
+fn warn_eq_unavailable_once(can_set_equalizer: bool) {
+    if can_set_equalizer {
+        static EQ_WARNING: std::sync::Once = std::sync::Once::new();
+        EQ_WARNING.call_once(|| {
+            eprintln!(
+                "This headset supports EQ presets. Rebuild with --features eq-support to enable."
+            )
+        });
+    }
+}
+
 #[cfg(not(target_os = "linux"))]
 fn main() {
     use std::sync::mpsc;
@@ -37,16 +54,18 @@ fn main() {
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("A tray application for monitoring HyperX headsets.")
         .arg(
-            Arg::new("refresh_interval")
-                .long("refresh_interval")
+            Arg::new("refresh-interval")
+                .long("refresh-interval")
+                .alias("refresh_interval")
                 .required(false)
                 .help("Set the refresh interval (in seconds)")
                 .default_value("3")
                 .value_parser(clap::value_parser!(u64)),
         )
         .arg(
-            Arg::new("press_mute_key")
-                .long("press_mute_key")
+            Arg::new("press-mute-key")
+                .long("press-mute-key")
+                .alias("press_mute_key")
                 .required(false)
                 .help("The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted.")
                 .default_value("true")
@@ -54,7 +73,7 @@ fn main() {
         )
         .get_matches();
 
-        let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
+        let press_mute_key = *matches.get_one::<bool>("press-mute-key").unwrap_or(&true);
         let mut enigo = if press_mute_key {
             match Enigo::new(&Settings::default()) {
                 Ok(enigo) => Some(enigo),
@@ -66,10 +85,14 @@ fn main() {
         } else {
             None
         };
-        let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
+        let refresh_interval = *matches.get_one::<u64>("refresh-interval").unwrap_or(&3);
         let refresh_interval = Duration::from_secs(refresh_interval);
 
+        #[cfg(feature = "eq-support")]
+        let mut eq = EqSession::new();
+
         loop {
+            // (Re-)connect to device
             let mut device = loop {
                 match connect_compatible_device() {
                     Ok(d) => break d,
@@ -81,7 +104,19 @@ fn main() {
                 std::thread::sleep(Duration::from_secs(1));
             };
 
-            // Run loop
+            cfg_if! {
+                if #[cfg(feature = "eq-support")] {
+                    if let Some(ref mut eq) = eq {
+                        eq.bind_device(&mut *device);
+                    }
+                } else {
+                    warn_eq_unavailable_once(
+                        device.get_device_state().device_properties.can_set_equalizer,
+                    );
+                }
+            }
+
+            // Run tick loop while connected
             let mut run_counter = 0;
             loop {
                 let mute_state = device.get_device_state().device_properties.muted;
@@ -95,7 +130,7 @@ fn main() {
                         eprintln!("{error}");
                         let _ = proxy
                             .send_event(Some(device.get_device_state().device_properties.clone()));
-                        break; // try to reconnect
+                        break; // exit tick loop to retry connection in the outer loop
                     }
                 };
                 if mute_state.is_some()
@@ -108,13 +143,22 @@ fn main() {
                     }
                 }
 
+                // Process tray device commands
                 // with the default refresh_interval the state is only actively queried every 3min
-                // querying the device to frequently can lead to instability
+                // querying the device too frequently can lead to instability
                 let first = rx.recv_timeout(refresh_interval);
                 for command in first.into_iter().chain(rx.try_iter()) {
                     let _ = device.try_apply(command);
                     std::thread::sleep(hyper_headset::devices::RESPONSE_DELAY);
                     let _ = device.active_refresh_state();
+                }
+
+                // Per-tick EQ session work: pick up watcher changes, sync
+                // active preset on reconnect.
+                #[cfg(feature = "eq-support")]
+                if let Some(ref mut eq) = eq {
+                    eq.load_if_config_changed(&mut *device);
+                    eq.sync_if_reconnected(&mut *device);
                 }
 
                 let _ = proxy.send_event(Some(device.get_device_state().device_properties.clone()));
@@ -154,16 +198,18 @@ fn main() {
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("A tray application for monitoring HyperX headsets.")
         .arg(
-            Arg::new("refresh_interval")
-                .long("refresh_interval")
+            Arg::new("refresh-interval")
+                .long("refresh-interval")
+                .alias("refresh_interval")
                 .required(false)
                 .help("Set the refresh interval (in seconds)")
                 .default_value("3")
                 .value_parser(clap::value_parser!(u64)),
         )
         .arg(
-            Arg::new("press_mute_key")
-                .long("press_mute_key")
+            Arg::new("press-mute-key")
+                .long("press-mute-key")
+                .alias("press_mute_key")
                 .required(false)
                 .help("The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted.")
                 .default_value("true")
@@ -171,7 +217,7 @@ fn main() {
         )
         .get_matches();
 
-    let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
+    let press_mute_key = *matches.get_one::<bool>("press-mute-key").unwrap_or(&true);
     let mut enigo = if press_mute_key {
         match Enigo::new(&Settings::default()) {
             Ok(enigo) => Some(enigo),
@@ -183,11 +229,17 @@ fn main() {
     } else {
         None
     };
-    let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
+    let refresh_interval = *matches.get_one::<u64>("refresh-interval").unwrap_or(&3);
     let refresh_interval = Duration::from_secs(refresh_interval);
+
     let (tx, rx) = mpsc::channel();
     let tray_handler = TrayHandler::new(StatusTray::new(tx));
+
+    #[cfg(feature = "eq-support")]
+    let mut eq = EqSession::new();
+
     loop {
+        // (Re-)connect to device
         let mut device = loop {
             match connect_compatible_device() {
                 Ok(d) => break d,
@@ -199,7 +251,19 @@ fn main() {
             std::thread::sleep(Duration::from_secs(1));
         };
 
-        // Run loop
+        cfg_if! {
+            if #[cfg(feature = "eq-support")] {
+                if let Some(ref mut eq) = eq {
+                    eq.bind_device(&mut *device);
+                }
+            } else {
+                warn_eq_unavailable_once(
+                    device.get_device_state().device_properties.can_set_equalizer,
+                );
+            }
+        }
+
+        // Run tick loop while connected
         let mut run_counter = 0;
         loop {
             let mute_state = device.get_device_state().device_properties.muted;
@@ -212,7 +276,7 @@ fn main() {
                 Err(error) => {
                     eprintln!("{error}");
                     tray_handler.update(device.get_device_state());
-                    break; // try to reconnect
+                    break; // exit tick loop to retry connection in the outer loop
                 }
             };
             if mute_state.is_some()
@@ -225,8 +289,9 @@ fn main() {
                 }
             }
 
+            // Process tray device commands
             // with the default refresh_interval the state is only actively queried every 3min
-            // querying the device to frequently can lead to instability
+            // querying the device too frequently can lead to instability
             let first = rx.recv_timeout(refresh_interval);
             for command in first.into_iter().chain(rx.try_iter()) {
                 let _ = device.try_apply(command);
@@ -234,7 +299,16 @@ fn main() {
                 let _ = device.active_refresh_state();
             }
 
+            // Per-tick EQ session work: pick up watcher changes, sync
+            // active preset on reconnect.
+            #[cfg(feature = "eq-support")]
+            if let Some(ref mut eq) = eq {
+                eq.load_if_config_changed(&mut *device);
+                eq.sync_if_reconnected(&mut *device);
+            }
+
             tray_handler.update(device.get_device_state());
+
             run_counter += 1;
         }
     }

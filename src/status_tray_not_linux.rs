@@ -473,6 +473,73 @@ impl TrayApp {
                     );
                     let _ = menu.append(&menu_item);
                 }
+                hyper_headset::devices::PropertyDescriptorWrapper::SelectEQ {
+                    descriptor,
+                    options,
+                    active_preset,
+                    synced,
+                } => {
+                    let Some(ref current_value) = descriptor.data else {
+                        continue;
+                    };
+
+                    if options.is_empty() {
+                        let menu_item = MenuItem::new(
+                            format!(
+                                "{} {}{}",
+                                descriptor.prefix, current_value, descriptor.suffix
+                            ),
+                            false,
+                            None,
+                        );
+                        let _ = menu.append(&menu_item);
+                        continue;
+                    }
+
+                    let submenu = Submenu::new(
+                        format!("{} {}", descriptor.prefix, current_value),
+                        true,
+                    );
+
+                    let applying_name = if !synced {
+                        active_preset.as_deref()
+                    } else {
+                        None
+                    };
+
+                    for option_name in &options {
+                        let is_active = active_preset
+                            .as_ref()
+                            .map(|a| a == option_name)
+                            .unwrap_or(false);
+                        let label = if applying_name == Some(option_name.as_str()) {
+                            format!("{} (applying...)", option_name)
+                        } else {
+                            option_name.clone()
+                        };
+                        let entry = CheckMenuItem::new(
+                            &label,
+                            true,
+                            is_active,
+                            None,
+                        );
+                        let tx = self.sender.clone();
+                        let create_event = descriptor.create_event;
+                        let name = option_name.clone();
+                        let entry_id = entry.id().clone();
+                        new_callbacks.insert(
+                            entry_id,
+                            Box::new(move || {
+                                if let Some(event) = (create_event)(name.clone()) {
+                                    let _ = tx.send(event);
+                                }
+                            }),
+                        );
+                        let _ = submenu.append(&entry);
+                    }
+
+                    let _ = menu.append(&submenu);
+                }
             }
         }
 

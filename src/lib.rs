@@ -6,6 +6,8 @@ use dialog::{Choice, DialogBox};
 
 // #![warn(missing_docs)]
 pub mod devices;
+#[cfg(feature = "eq-support")]
+pub mod eq;
 
 #[macro_export]
 macro_rules! debug_println {

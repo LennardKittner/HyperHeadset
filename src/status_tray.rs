@@ -2,11 +2,16 @@ use std::sync::mpsc::Sender;
 
 use hyper_headset::devices::{DeviceEvent, DeviceProperties, DeviceState, PropertyType};
 use ksni::{
-    menu::{StandardItem, SubMenu},
+    menu::{RadioGroup, RadioItem, StandardItem, SubMenu},
     Handle, MenuItem, ToolTip, Tray, TrayService,
 };
 
 use crate::tray_battery_icon_state::TrayBatteryIconState;
+
+/// Escape underscores for ksni labels (single `_` is an accelerator prefix).
+fn escape_label(s: &str) -> String {
+    s.replace('_', "__")
+}
 
 pub struct TrayHandler {
     handle: Handle<StatusTray>,
@@ -24,8 +29,9 @@ impl TrayHandler {
     }
 
     pub fn update(&self, device_state: &DeviceState) {
+        let device_properties = device_state.device_properties.clone();
         self.handle.update(|tray| {
-            tray.device_properties = Some(device_state.device_properties.clone());
+            tray.device_properties = Some(device_properties);
         })
     }
 
@@ -34,6 +40,7 @@ impl TrayHandler {
             tray.device_properties = None;
         })
     }
+
 }
 
 pub struct StatusTray {
@@ -228,6 +235,86 @@ impl Tray for StatusTray {
                             activate: Box::new(move |_| {
                                 let _ = (create_event)(String::new());
                             }),
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
+                hyper_headset::devices::PropertyDescriptorWrapper::SelectEQ {
+                    descriptor,
+                    options,
+                    active_preset,
+                    synced,
+                } => {
+                    if options.is_empty() {
+                        // No options available — show as read-only label if data exists
+                        if let Some(ref current_value) = descriptor.data {
+                            menu_items.push(
+                                StandardItem {
+                                    label: format!(
+                                        "{} {}{}",
+                                        descriptor.prefix, current_value, descriptor.suffix
+                                    ),
+                                    enabled: false,
+                                    ..Default::default()
+                                }
+                                .into(),
+                            );
+                        }
+                        continue;
+                    }
+
+                    menu_items.push(MenuItem::Separator);
+
+                    let active_name = active_preset.as_deref();
+                    let active_index = active_name
+                        .and_then(|name| options.iter().position(|n| n == name));
+
+                    let applying_name = if !synced { active_name } else { None };
+                    let radio_options: Vec<RadioItem> = options
+                        .iter()
+                        .map(|name| {
+                            let label = if applying_name == Some(name.as_str()) {
+                                escape_label(&format!("{} (applying...)", name))
+                            } else {
+                                escape_label(name)
+                            };
+                            RadioItem {
+                                label,
+                                enabled: true,
+                                ..Default::default()
+                            }
+                        })
+                        .collect();
+
+                    let options_clone = options.clone();
+                    let mut submenu_items: Vec<MenuItem<Self>> = vec![
+                        RadioGroup {
+                            selected: active_index.unwrap_or(usize::MAX),
+                            select: Box::new(move |this: &mut Self, index| {
+                                if let Some(name) = options_clone.get(index).cloned() {
+                                    let _ = this.update_sender.send(DeviceEvent::EqualizerPreset(name));
+                                }
+                            }),
+                            options: radio_options,
+                        }
+                        .into(),
+                    ];
+
+                    submenu_items.push(MenuItem::Separator);
+                    submenu_items.push(
+                        StandardItem {
+                            label: "Edit with: hyper__headset__cli --eq".into(),
+                            enabled: false,
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+
+                    menu_items.push(
+                        SubMenu {
+                            label: format!("{} {}", descriptor.prefix, descriptor.data.as_deref().unwrap_or("None")),
+                            submenu: submenu_items,
                             ..Default::default()
                         }
                         .into(),
