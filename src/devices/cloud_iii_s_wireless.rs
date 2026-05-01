@@ -52,8 +52,10 @@ const COLOR_COMMAND_ID: u8 = 0x4D;
 const CHARGE_STATE_COMMAND_ID: u8 = 0x48;
 const GET_MIC_MUTE_COMMAND_ID: u8 = 0x04;
 const GET_SIDE_TONE_COMMAND_ID: u8 = 0x16;
+const SET_SIDE_TONE_COMMAND_ID: u8 = 0x0D;
 const GET_AUTO_POWER_OFF_COMMAND_ID: u8 = 0x4B;
 const GET_VOICE_PROMPT_COMMAND_ID: u8 = 0x14;
+const SET_VOICE_PROMPT_COMMAND_ID: u8 = 0x0B;
 
 // Button report header (incoming from headset)
 const CONSUMER_CONTROL_HEADER: u8 = 0x0f;
@@ -210,8 +212,12 @@ impl Device for CloudIIISWireless {
         Some(packet)
     }
 
-    fn set_side_tone_packet(&self, _side_tone_on: bool) -> Option<Vec<u8>> {
-        None
+    fn set_side_tone_packet(&self, side_tone_on: bool) -> Option<Vec<u8>> {
+        let mut packet = BASE_PACKET.to_vec();
+        packet[3] = 0x00;
+        packet[5] = SET_SIDE_TONE_COMMAND_ID;
+        packet[6] = side_tone_on as u8;
+        Some(packet)
     }
 
     fn get_side_tone_volume_packet(&self) -> Option<Vec<u8>> {
@@ -228,8 +234,12 @@ impl Device for CloudIIISWireless {
         Some(packet)
     }
 
-    fn set_voice_prompt_packet(&self, _enable: bool) -> Option<Vec<u8>> {
-        None
+    fn set_voice_prompt_packet(&self, enable: bool) -> Option<Vec<u8>> {
+        let mut packet = BASE_PACKET.to_vec();
+        packet[3] = 0x00;
+        packet[5] = SET_VOICE_PROMPT_COMMAND_ID;
+        packet[6] = enable as u8;
+        Some(packet)
     }
 
     fn get_wireless_connected_status_packet(&self) -> Option<Vec<u8>> {
