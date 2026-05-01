@@ -16,6 +16,8 @@ const BASE_PACKET: [u8; 64] = {
     packet
 };
 
+const RESPONSE_POWER: u8 = 0x64;
+const RESPONSE_MUTE: u8 = 0x65;
 const GET_BATTERY_CMD_ID: u8 = 5;
 
 pub struct CloudFlightWireless {
@@ -48,11 +50,13 @@ impl Device for CloudFlightWireless {
 
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
         debug_println!("Read packet: {:?}", response);
-        if response[0] != BASE_PACKET[0] || response[1] != BASE_PACKET[1] {
-            return None;
-        }
-        match response[2] {
-            GET_BATTERY_CMD_ID => {
+        const BASE_0: u8 = BASE_PACKET[0];
+        const BASE_1: u8 = BASE_PACKET[1];
+        match (response[0], response[1], response[2]) {
+            (RESPONSE_POWER, 1, _) => Some(vec![DeviceEvent::WirelessConnected(true)]),
+            (RESPONSE_POWER, 3, _) => Some(vec![DeviceEvent::WirelessConnected(true)]),
+            (RESPONSE_MUTE, mute, _) => Some(vec![DeviceEvent::Muted(mute == 4)]),
+            (BASE_0, BASE_1, GET_BATTERY_CMD_ID) => {
                 let upper = response[3];
                 let lower = response[4];
                 let mut events = Vec::new();
