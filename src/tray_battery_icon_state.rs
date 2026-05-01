@@ -50,7 +50,9 @@ impl TrayBatteryIconState {
     #[cfg(target_os = "linux")]
     pub fn linux_icon_name(self) -> &'static str {
         match self {
-            Self::NoDevice | Self::Disconnected | Self::ConnectedUnknown => "audio-headset",
+            Self::NoDevice | Self::Disconnected | Self::ConnectedUnknown => {
+                "audio-headset-symbolic"
+            }
             Self::Connected { percent, charging } => {
                 let level_name = if percent <= 10 {
                     "battery-caution"
@@ -65,14 +67,20 @@ impl TrayBatteryIconState {
                 };
                 if charging {
                     match level_name {
-                        "battery-caution" => "battery-caution-charging",
-                        "battery-low" => "battery-low-charging",
-                        "battery-medium" => "battery-medium-charging",
-                        "battery-good" => "battery-good-charging",
-                        _ => "battery-full-charging",
+                        "battery-caution" => "battery-caution-charging-symbolic",
+                        "battery-low" => "battery-low-charging-symbolic",
+                        "battery-medium" => "battery-medium-charging-symbolic",
+                        "battery-good" => "battery-good-charging-symbolic",
+                        _ => "battery-full-charging-symbolic",
                     }
                 } else {
-                    level_name
+                    match level_name {
+                        "battery-caution" => "battery-caution-symbolic",
+                        "battery-low" => "battery-low-symbolic",
+                        "battery-medium" => "battery-medium-symbolic",
+                        "battery-good" => "battery-good-symbolic",
+                        _ => "battery-full-symbolic",
+                    }
                 }
             }
         }
