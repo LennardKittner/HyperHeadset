@@ -3,9 +3,9 @@ use std::{
     sync::{mpsc::Sender, Arc, Mutex},
 };
 
+use hyper_headset::devices::{ANCState, DeviceEvent, DeviceProperties, PropertyType};
 #[cfg(target_os = "windows")]
 use image::{Rgba, RgbaImage};
-use hyper_headset::devices::{DeviceEvent, DeviceProperties, PropertyType};
 use tray_icon::{
     menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu},
     TrayIcon, TrayIconBuilder,
@@ -50,14 +50,7 @@ fn draw_rect(image: &mut RgbaImage, x: i32, y: i32, width: i32, height: i32, col
 }
 
 #[cfg(target_os = "windows")]
-fn draw_digit(
-    image: &mut RgbaImage,
-    digit: char,
-    x: i32,
-    y: i32,
-    scale: i32,
-    color: Rgba<u8>,
-) {
+fn draw_digit(image: &mut RgbaImage, digit: char, x: i32, y: i32, scale: i32, color: Rgba<u8>) {
     let rows = match digit {
         '0' => ["111", "101", "101", "101", "111"],
         // Narrow upright '1'.
@@ -170,7 +163,14 @@ fn render_windows_battery_icon_rgba(key: WindowsIconKey) -> Vec<u8> {
 
     let mut x = start_x;
     for (idx, digit) in text.chars().enumerate() {
-        draw_digit(&mut image, digit, x, start_y, scale, Rgba([10, 10, 10, 255]));
+        draw_digit(
+            &mut image,
+            digit,
+            x,
+            start_y,
+            scale,
+            Rgba([10, 10, 10, 255]),
+        );
         x += glyph_widths[idx] + spacing;
     }
 
@@ -472,6 +472,34 @@ impl TrayApp {
                         None,
                     );
                     let _ = menu.append(&menu_item);
+                }
+                hyper_headset::devices::PropertyDescriptorWrapper::ANC(property) => {
+                    let Some(current_value) = property.data else {
+                        continue;
+                    };
+                    let submenu = Submenu::new(
+                        format!("{} {}{}", property.prefix, current_value, property.suffix),
+                        property.property_type == PropertyType::ReadWrite,
+                    );
+
+                    for item_value in ANCState::get_variants() {
+                        let entry = MenuItem::new(item_value.to_string(), true, None);
+                        submenu.append(&entry).unwrap();
+
+                        let create_event = property.create_event;
+                        let tx = self.sender.clone();
+                        let entry_id = entry.id().clone();
+                        new_callbacks.insert(
+                            entry_id,
+                            Box::new(move || {
+                                if let Some(event) = (create_event)(*item_value) {
+                                    let _ = tx.send(event);
+                                }
+                            }),
+                        );
+                    }
+
+                    menu.append(&submenu).unwrap();
                 }
             }
         }
