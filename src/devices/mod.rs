@@ -15,6 +15,7 @@ use crate::{
         cloud_mix_2::CloudMix2,
     },
 };
+use clap::ValueEnum;
 use hidapi::{HidApi, HidDevice, HidError};
 use std::{
     collections::HashSet,
@@ -186,6 +187,7 @@ pub struct DeviceProperties {
     pub noise_gate_active: Option<bool>,
     pub anc_state: Option<ANCState>,
     pub anc_level: Option<u8>,
+    pub equalizer_index: Option<u8>,
     // Capability flags - set once during device initialization
     pub can_set_mute: bool,
     pub can_set_surround_sound: bool,
@@ -198,6 +200,7 @@ pub struct DeviceProperties {
     pub can_set_noise_gate: bool,
     pub can_set_anc_state: bool,
     pub can_set_anc_level: bool,
+    pub can_set_equalizer_index: bool,
 }
 
 impl Display for DeviceProperties {
@@ -366,6 +369,9 @@ impl DeviceState {
             }
             DeviceEvent::ANCState(state) => self.device_properties.anc_state = Some(*state),
             DeviceEvent::ANCLevel(level) => self.device_properties.anc_level = Some(*level),
+            DeviceEvent::EqualizerIndex(index) => {
+                self.device_properties.equalizer_index = Some(*index)
+            }
         };
     }
 }
@@ -426,6 +432,7 @@ impl DeviceProperties {
             noise_gate_active: None,
             anc_state: None,
             anc_level: None,
+            equalizer_index: None,
             can_set_mute: false,
             can_set_surround_sound: false,
             can_set_side_tone: false,
@@ -437,6 +444,7 @@ impl DeviceProperties {
             can_set_noise_gate: false,
             can_set_anc_state: false,
             can_set_anc_level: false,
+            can_set_equalizer_index: false,
         }
     }
 
@@ -606,8 +614,21 @@ impl DeviceProperties {
                     },
                     create_event: &|l| Some(DeviceEvent::ANCLevel(l)),
                 },
-                //TODO: what levels are available?
-                &[],
+                &[0, 1, 2],
+            ),
+            PropertyDescriptorWrapper::Int(
+                PropertyDescriptor {
+                    prefix: "EQ index:",
+                    data: self.equalizer_index,
+                    suffix: "",
+                    property_type: if self.can_set_equalizer_index {
+                        PropertyType::ReadWrite
+                    } else {
+                        PropertyType::ReadOnly
+                    },
+                    create_event: &|l| Some(DeviceEvent::EqualizerIndex(l)),
+                },
+                &[0, 1, 2, 3, 4],
             ),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 prefix: "Connected:",
@@ -639,6 +660,11 @@ impl DeviceProperties {
                         &property_descriptor.data,
                         property_descriptor.suffix,
                     ),
+                    PropertyDescriptorWrapper::ANC(property_descriptor) => (
+                        property_descriptor.prefix,
+                        &property_descriptor.data.map(|v| format!("{v:?}")),
+                        property_descriptor.suffix,
+                    ),
                 };
                 data.as_ref()
                     .map(|data| format!("{:<padding$} {}{}", prefix, data, suffix))
@@ -667,6 +693,12 @@ impl DeviceProperties {
                     PropertyDescriptorWrapper::String(property_descriptor) => (
                         property_descriptor.prefix,
                         &property_descriptor.data,
+                        property_descriptor.suffix,
+                        property_descriptor.property_type,
+                    ),
+                    PropertyDescriptorWrapper::ANC(property_descriptor) => (
+                        property_descriptor.prefix,
+                        &property_descriptor.data.map(|v| format!("{v:?}")),
                         property_descriptor.suffix,
                         property_descriptor.property_type,
                     ),
@@ -719,13 +751,30 @@ pub enum DeviceEvent {
     NoiseGateActive(bool),
     ANCState(ANCState),
     ANCLevel(u8),
+    EqualizerIndex(u8),
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum ANCState {
     On,
     Off,
     Transparent,
+}
+
+impl ANCState {
+    pub fn get_variants() -> &'static [ANCState] {
+        &[ANCState::On, ANCState::Off, ANCState::Transparent]
+    }
+}
+
+impl Display for ANCState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ANCState::On => write!(f, "On"),
+            ANCState::Off => write!(f, "Off"),
+            ANCState::Transparent => write!(f, "Transparent"),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -845,6 +894,13 @@ pub trait Device {
     fn set_anc_level_packet(&self, _level: u8) -> Option<Vec<u8>> {
         None
     }
+    fn get_equalizer_index_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn set_equalizer_index_packet(&self, _index: u8) -> Option<Vec<u8>> {
+        None
+    }
+
     /// parse a device response
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
     /// get the device state
@@ -901,6 +957,9 @@ pub trait Device {
     fn can_set_anc_level(&self) -> bool {
         self.set_anc_level_packet(0).is_some()
     }
+    fn can_set_equalizer_index(&self) -> bool {
+        self.set_equalizer_index_packet(0).is_some()
+    }
 
     // Initialize capability flags in device state
     fn init_capabilities(&mut self) {
@@ -916,6 +975,7 @@ pub trait Device {
         let can_set_noise_gate = self.can_set_noise_gate();
         let can_set_anc_state = self.can_set_anc_state();
         let can_set_anc_level = self.can_set_anc_level();
+        let can_set_equalizer_index = self.can_set_equalizer_index();
 
         // Now set them in device state
         let state = self.get_device_state_mut();
@@ -930,6 +990,7 @@ pub trait Device {
         state.device_properties.can_set_noise_gate = can_set_noise_gate;
         state.device_properties.can_set_anc_state = can_set_anc_state;
         state.device_properties.can_set_anc_level = can_set_anc_level;
+        state.device_properties.can_set_equalizer_index = can_set_equalizer_index;
     }
 
     /// some headset specific functionality
@@ -974,6 +1035,7 @@ pub trait Device {
             self.get_noise_gate_packet(),
             self.get_anc_state_packet(),
             self.get_anc_level_packet(),
+            self.get_equalizer_index_packet(),
         ]
         .into_iter()
         .flatten()
@@ -1170,6 +1232,16 @@ pub trait Device {
                     }
                 } else {
                     Err("ERROR: Setting ANC level is not supported on this device")?;
+                }
+            }
+            DeviceEvent::EqualizerIndex(index) => {
+                if let Some(packet) = self.set_equalizer_index_packet(index) {
+                    self.prepare_write();
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                        Err(format!("Failed to set equalizer index: {:?}", err))?;
+                    }
+                } else {
+                    Err("ERROR: Setting the equalizer index is not supported on this device")?;
                 }
             }
             _ => (),

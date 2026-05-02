@@ -33,6 +33,8 @@ const GET_SIDE_TONE_ON_CMD_ID: u8 = 22;
 const SET_SIDE_TONE_ON_CMD_ID: u8 = 13;
 const GET_WIRELESS_STATUS_CMD_ID: u8 = 2;
 const GET_WIRELESS_STATUS_RESPONSE_CODE: u8 = 4;
+const GET_EQUALIZER_INDEX_CMD_ID: u8 = 28;
+const SET_EQUALIZER_INDEX_CMD_ID: u8 = 15;
 
 pub struct CloudMix2 {
     state: DeviceState,
@@ -42,10 +44,6 @@ impl CloudMix2 {
     pub fn new_from_state(state: DeviceState) -> Self {
         CloudMix2 { state }
     }
-}
-
-fn valid_eq_index(index: u8) -> bool {
-    (0..4).contains(&index)
 }
 
 impl Device for CloudMix2 {
@@ -178,11 +176,27 @@ impl Device for CloudMix2 {
         tmp[5] = GET_ANC_LEVEL_CMD_ID;
         Some(tmp)
     }
+
     fn set_anc_level_packet(&self, level: u8) -> Option<Vec<u8>> {
         let mut tmp = BASE_PACKET.to_vec();
         tmp[3] = 0;
         tmp[5] = SET_ANC_LEVEL_CMD_ID;
         tmp[6] = level.clamp(0, 2);
+        Some(tmp)
+    }
+
+    fn get_equalizer_index_packet(&self) -> Option<Vec<u8>> {
+        let mut tmp = BASE_PACKET.to_vec();
+        tmp[5] = GET_EQUALIZER_INDEX_CMD_ID;
+        Some(tmp)
+    }
+
+    fn set_equalizer_index_packet(&self, index: u8) -> Option<Vec<u8>> {
+        let index = index.clamp(0, 4);
+        let mut tmp = BASE_PACKET.to_vec();
+        tmp[3] = 0;
+        tmp[5] = SET_EQUALIZER_INDEX_CMD_ID;
+        tmp[6] = index;
         Some(tmp)
     }
 
@@ -236,7 +250,7 @@ impl Device for CloudMix2 {
                         ANCState::Off
                     }
                 })]),
-                (28, value) => todo!(), //TODO: EQ
+                (28, value) => Some(vec![DeviceEvent::EqualizerIndex(value)]),
                 _ => {
                     debug_println!("Unknown device event: {:?}", response);
                     None

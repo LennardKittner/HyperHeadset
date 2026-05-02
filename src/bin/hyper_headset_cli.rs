@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use clap::{Arg, Command};
-use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
+use hyper_headset::devices::{connect_compatible_device, ANCState, DeviceEvent};
 
 const SHOW_ALL_OPTIONS: bool = false;
 
@@ -109,8 +109,34 @@ fn main() {
                     && !device.can_set_silent_mode())
                 .value_parser(clap::value_parser!(bool)),
         )
+        .arg(
+            Arg::new("equalizer_index")
+            .long("equalizer_index")
+            .required(false)
+            .help("Choose between a predefined list of equalizers.\n Cloud mix 2 [0..4]")
+            .hide(!SHOW_ALL_OPTIONS
+                && !device.can_set_equalizer_index())
+            .value_parser(clap::value_parser!(u8)),
+            )
+        .arg(
+            Arg::new("anc_mode")
+            .long("anc_state")
+            .required(false)
+            .help("Set the active noise cancellation mode")
+            .hide(!SHOW_ALL_OPTIONS
+                && !device.can_set_anc_state())
+            .value_parser(clap::builder::EnumValueParser::<ANCState>::new())
+        )
+        .arg(
+            Arg::new("anc_level")
+            .long("anc_level")
+            .required(false)
+            .help("Adjust the active nose cancellation level\n \n Cloud mix 2 [0..2]")
+            .hide(!SHOW_ALL_OPTIONS
+                && !device.can_set_anc_level())
+            .value_parser(clap::value_parser!(u8)),
+        )
         .get_matches();
-    //TODO: add ANC options
 
     let mut commands = Vec::new();
     if let Some(delay) = matches.get_one::<u8>("automatic_shutdown") {

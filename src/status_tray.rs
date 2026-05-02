@@ -1,6 +1,6 @@
 use std::sync::mpsc::Sender;
 
-use hyper_headset::devices::{DeviceEvent, DeviceProperties, DeviceState, PropertyType};
+use hyper_headset::devices::{ANCState, DeviceEvent, DeviceProperties, DeviceState, PropertyType};
 use ksni::{
     menu::{StandardItem, SubMenu},
     Handle, MenuItem, ToolTip, Tray, TrayService,
@@ -228,6 +228,43 @@ impl Tray for StatusTray {
                             activate: Box::new(move |_| {
                                 let _ = (create_event)(String::new());
                             }),
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
+                hyper_headset::devices::PropertyDescriptorWrapper::ANC(property) => {
+                    let Some(current_value) = property.data else {
+                        continue;
+                    };
+                    let create_event = property.create_event;
+                    let sub_menu = ANCState::get_variants()
+                        .iter()
+                        .map(|val| {
+                            let update_sender = self.update_sender.clone();
+                            StandardItem {
+                                label: val.to_string(),
+                                enabled: property.property_type == PropertyType::ReadWrite
+                                    && property.data.is_some(),
+                                activate: Box::new(move |_| {
+                                    if let Some(command) = (create_event)(*val) {
+                                        let _ = update_sender.send(command);
+                                    }
+                                }),
+                                ..Default::default()
+                            }
+                            .into()
+                        })
+                        .collect();
+                    menu_items.push(
+                        SubMenu {
+                            label: format!(
+                                "{} {}{}",
+                                property.prefix, current_value, property.suffix
+                            ),
+                            enabled: property.property_type == PropertyType::ReadWrite
+                                && property.data.is_some(),
+                            submenu: sub_menu,
                             ..Default::default()
                         }
                         .into(),
