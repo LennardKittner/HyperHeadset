@@ -125,7 +125,6 @@ Once created, replug the wireless dongle.
 
 ## Usage
 
-<!-- TODO: update -->
 ```
 hyper_headset_cli --help
 A CLI application for monitoring and managing HyperX headsets.
@@ -150,6 +149,14 @@ Options:
           Mute or unmute playback. [possible values: true, false]
       --activate_noise_gate <activate_noise_gate>
           Activates noise gate. [possible values: true, false]
+      --equalizer_index <equalizer_index>
+          Choose between a predefined list of equalizers.
+          Cloud mix 2 [0..4]
+      --anc_state <anc_mode>
+          Set the active noise cancellation mode [possible values: on, off, transparent]
+      --anc_level <anc_level>
+          Adjust the active noise cancellation level
+          Cloud mix 2 [0..2]
   -h, --help
           Print help
   -V, --version

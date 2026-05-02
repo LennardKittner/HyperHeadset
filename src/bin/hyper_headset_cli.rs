@@ -3,7 +3,7 @@ use std::time::Duration;
 use clap::{Arg, Command};
 use hyper_headset::devices::{connect_compatible_device, ANCState, DeviceEvent};
 
-const SHOW_ALL_OPTIONS: bool = false;
+const SHOW_ALL_OPTIONS: bool = true;
 
 fn main() {
     #[cfg(target_os = "linux")]
@@ -113,7 +113,7 @@ fn main() {
             Arg::new("equalizer_index")
             .long("equalizer_index")
             .required(false)
-            .help("Choose between a predefined list of equalizers.\n Cloud mix 2 [0..4]")
+            .help("Choose between a predefined list of equalizers.\nCloud mix 2 [0..4]")
             .hide(!SHOW_ALL_OPTIONS
                 && !device.can_set_equalizer_index())
             .value_parser(clap::value_parser!(u8)),
@@ -131,7 +131,7 @@ fn main() {
             Arg::new("anc_level")
             .long("anc_level")
             .required(false)
-            .help("Adjust the active nose cancellation level\n \n Cloud mix 2 [0..2]")
+            .help("Adjust the active noise cancellation level\nCloud mix 2 [0..2]")
             .hide(!SHOW_ALL_OPTIONS
                 && !device.can_set_anc_level())
             .value_parser(clap::value_parser!(u8)),
