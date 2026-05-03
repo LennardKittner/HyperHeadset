@@ -1,11 +1,51 @@
 use std::time::Duration;
 
-use clap::{Arg, Command};
-use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
+use clap::{Arg, ArgAction, Command};
+use hyper_headset::{
+    devices::{connect_compatible_device, Device, DeviceError, DeviceEvent},
+    VERBOSE,
+};
 
 const SHOW_ALL_OPTIONS: bool = false;
 
+/// helper function to enable help messages
+fn device_supports<F>(device: &Result<Box<dyn Device>, DeviceError>, f: F) -> bool
+where
+    F: FnOnce(&Box<dyn Device>) -> bool,
+{
+    device.as_ref().map(f).unwrap_or(false)
+}
+
 fn main() {
+    let pre = Command::new(env!("CARGO_PKG_NAME"))
+        .version(env!("CARGO_PKG_VERSION"))
+        .disable_version_flag(true) // we have to implement version manually
+        .disable_help_flag(true)
+        .arg(
+            Arg::new("verbose")
+                .long("verbose")
+                .short('v')
+                .action(ArgAction::SetTrue)
+                .required(false)
+                .help("Use verbose output "),
+        )
+        .arg(
+            Arg::new("version")
+                .long("version")
+                .short('V')
+                .action(ArgAction::SetTrue),
+        )
+        .allow_external_subcommands(true)
+        .try_get_matches();
+
+    if let Ok(pre) = pre {
+        VERBOSE.set(pre.get_flag("verbose")).unwrap();
+        if pre.get_flag("version") {
+            println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+            return;
+        }
+    }
+
     #[cfg(target_os = "linux")]
     {
         use hyper_headset::act_as_askpass_handler;
@@ -22,16 +62,12 @@ fn main() {
         }
         prompt_user_for_udev_rule();
     }
-    let mut device = match connect_compatible_device() {
-        Ok(device) => device,
-        Err(error) => {
-            eprintln!("{error}");
-            std::process::exit(1);
-        }
-    };
+
+    let device = connect_compatible_device();
 
     let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
+        .disable_version_flag(false)
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("A CLI application for monitoring and managing HyperX headsets.")
         .after_help("Help only lists commands supported by this headset.")
@@ -43,7 +79,7 @@ fn main() {
                     "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
                 )
                     .hide(!SHOW_ALL_OPTIONS
-                    && !device.can_set_automatic_shutdown())
+                        && !device_supports(&device, |d| d.can_set_automatic_shutdown()))
                 .value_parser(clap::value_parser!(u8)),
         )
         .arg(
@@ -52,7 +88,7 @@ fn main() {
                 .required(false)
                 .help("Mute or unmute the headset.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device.can_set_mute())
+                    && !device_supports(&device, |d| d.can_set_mute()))
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -61,7 +97,7 @@ fn main() {
                 .required(false)
                 .help("Enable or disable side tone.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device.can_set_side_tone())
+                    && !device_supports(&device, |d| d.can_set_side_tone()))
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -70,7 +106,7 @@ fn main() {
                 .required(false)
                 .help("Set the side tone volume.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device.can_set_side_tone_volume())
+                    && !device_supports(&device, |d| d.can_set_side_tone_volume()))
                 .value_parser(clap::value_parser!(u8)),
         )
         .arg(
@@ -79,7 +115,7 @@ fn main() {
                 .required(false)
                 .help("Enable voice prompt. This may not be supported on your device.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device.can_set_voice_prompt())
+                    && !device_supports(&device, |d| d.can_set_voice_prompt()))
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -88,7 +124,7 @@ fn main() {
                 .required(false)
                 .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device.can_set_surround_sound())
+                    && !device_supports(&device, |d| d.can_set_surround_sound()))
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -97,7 +133,7 @@ fn main() {
                 .required(false)
                 .help("Mute or unmute playback.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device.can_set_silent_mode())
+                    && !device_supports(&device, |d| d.can_set_silent_mode()))
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -106,10 +142,26 @@ fn main() {
                 .required(false)
                 .help("Activates noise gate.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device.can_set_silent_mode())
+                    && !device_supports(&device, |d| d.can_set_silent_mode()))
                 .value_parser(clap::value_parser!(bool)),
         )
+        .arg(
+            Arg::new("verbose")
+                .long("verbose")
+                .short('v')
+                .action(ArgAction::SetTrue)
+                .required(false)
+                .help("Use verbose output "),
+        )
         .get_matches();
+
+    let mut device = match device {
+        Ok(device) => device,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1)
+        }
+    };
 
     let mut commands = Vec::new();
     if let Some(delay) = matches.get_one::<u8>("automatic_shutdown") {

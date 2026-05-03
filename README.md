@@ -146,6 +146,8 @@ Options:
           Mute or unmute playback. [possible values: true, false]
       --activate_noise_gate <activate_noise_gate>
           Activates noise gate. [possible values: true, false]
+  -v, --verbose
+          Use verbose output
   -h, --help
           Print help
   -V, --version
@@ -166,6 +168,8 @@ Options:
           Set the refresh interval (in seconds) [default: 3]
       --press_mute_key <press_mute_key>
           The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted. [default: true] [possible values: true, false]
+  -v, --verbose
+          Use verbose output
   -h, --help
           Print help
   -V, --version

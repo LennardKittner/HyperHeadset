@@ -10,9 +10,11 @@ mod tray_battery_icon_state;
 
 #[cfg(not(target_os = "linux"))]
 fn main() {
+    use clap::ArgAction;
     use std::sync::mpsc;
 
     use hyper_headset::devices::{DeviceEvent, DeviceProperties};
+    use hyper_headset::VERBOSE;
     use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy};
 
     use crate::status_tray_not_linux::TrayApp;
@@ -34,6 +36,7 @@ fn main() {
 
         let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
+        .disable_version_flag(false)
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("A tray application for monitoring HyperX headsets.")
         .arg(
@@ -52,7 +55,16 @@ fn main() {
                 .default_value("true")
                 .value_parser(clap::value_parser!(bool)),
         )
+        .arg(Arg::new("verbose")
+            .long("verbose")
+            .short('v')
+            .action(ArgAction::SetTrue)
+            .required(false)
+            .help("Use verbose output ")
+        )
         .get_matches();
+
+        VERBOSE.set(matches.get_flag("verbose")).unwrap();
 
         let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
         let mut enigo = if press_mute_key {
@@ -128,6 +140,7 @@ fn main() {
 
 #[cfg(target_os = "linux")]
 fn main() {
+    use clap::ArgAction;
     use clap::{Arg, Command};
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     use std::sync::mpsc;
@@ -136,8 +149,8 @@ fn main() {
     use hyper_headset::devices::connect_compatible_device;
     use status_tray::{StatusTray, TrayHandler};
 
-    use hyper_headset::act_as_askpass_handler;
     use hyper_headset::prompt_user_for_udev_rule;
+    use hyper_headset::{act_as_askpass_handler, VERBOSE};
 
     if let Ok(name) = std::env::current_exe() {
         if let Some(name) = name.to_str() {
@@ -151,6 +164,7 @@ fn main() {
     prompt_user_for_udev_rule();
     let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
+        .disable_version_flag(false)
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("A tray application for monitoring HyperX headsets.")
         .arg(
@@ -169,6 +183,13 @@ fn main() {
                 .default_value("true")
                 .value_parser(clap::value_parser!(bool)),
         )
+        .arg(Arg::new("verbose")
+            .long("verbose")
+            .short('v')
+            .action(ArgAction::SetTrue)
+            .required(false)
+            .help("Use verbose output ")
+        )
         .get_matches();
 
     let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
@@ -183,6 +204,8 @@ fn main() {
     } else {
         None
     };
+    VERBOSE.set(matches.get_flag("verbose")).unwrap();
+
     let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
     let refresh_interval = Duration::from_secs(refresh_interval);
     let (tx, rx) = mpsc::channel();
