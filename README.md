@@ -80,6 +80,10 @@ MacOS:
 
 `brew install libusb`
 
+GNOME:
+
+You may have to install [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/) and [Status Icons ](https://extensions.gnome.org/extension/7332/status-icons/)
+
 ### Udev (Linux only)
 
 Normally the program installs the required udev rules automatically on first launch.
