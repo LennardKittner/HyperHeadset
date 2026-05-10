@@ -6,7 +6,7 @@ use std::time::Duration;
 
 const HP: u16 = 0x03F0;
 pub const VENDOR_IDS: [u16; 1] = [HP];
-pub const PRODUCT_IDS: [u16; 1] = [0x06BE];
+pub const PRODUCT_IDS: [u16; 2] = [0x06BE, 0x02CC];
 
 // Cloud III S uses a different protocol than Cloud III
 // Header 0x05 for mic control, 20-byte packets
