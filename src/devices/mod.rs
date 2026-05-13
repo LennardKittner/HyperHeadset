@@ -87,6 +87,7 @@ const DEVICE_REGISTER: &[DeviceEntry] = &[
         vendor_ids: &cloud_flight_wireless::VENDOR_IDS,
         product_ids: &cloud_flight_wireless::PRODUCT_IDS,
         factory: |s| Box::new(CloudFlightWireless::new_from_state(s)),
+        custom_open: None,
     },
 ];
 
