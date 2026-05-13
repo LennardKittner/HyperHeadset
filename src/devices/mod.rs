@@ -153,8 +153,21 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
                 })
                 .ok_or(DeviceError::NoDeviceFound())?;
 
+            // Libusb-opened devices: a successful claim already proves we have
+            // THE control interface (libusb claims by VID/PID, no enumeration
+            // ambiguity). Skip the probe-response gate — the Cloud III S
+            // firmware can sit in a state where writes work but query reads
+            // are silently dropped, and we still want the tray/CLI usable
+            // (EQ presets, mute, etc. all use writes).
+            let is_libusb = matches!(state.transport, HidTransport::Libusb(_));
+
             let mut test_device = (entry.factory)(state);
             test_device.init_capabilities();
+
+            if is_libusb {
+                device = Some(test_device);
+                break;
+            }
 
             let probe_packet = test_device
                 .get_query_packets()
@@ -210,6 +223,47 @@ pub struct LibusbTransport {
     rx: std::sync::Arc<(std::sync::Mutex<std::collections::VecDeque<Vec<u8>>>, std::sync::Condvar)>,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     reader: Option<std::thread::JoinHandle<()>>,
+}
+
+// Cleanup hook for the currently-active LibusbTransport. The ctrlc handler
+// calls this on SIGINT/SIGTERM/SIGHUP so the kernel HID driver gets re-attached
+// before the process exits — otherwise the device's own input events (e.g.
+// volume keys) stay broken until the dongle is replugged or manually rebound.
+type LibusbCleanup = Box<dyn Fn() + Send + 'static>;
+static LIBUSB_CLEANUP: std::sync::OnceLock<std::sync::Mutex<Option<LibusbCleanup>>> =
+    std::sync::OnceLock::new();
+static LIBUSB_SIGNAL_INSTALLED: std::sync::Once = std::sync::Once::new();
+
+fn libusb_cleanup_slot() -> &'static std::sync::Mutex<Option<LibusbCleanup>> {
+    LIBUSB_CLEANUP.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn install_libusb_signal_handler_once() {
+    LIBUSB_SIGNAL_INSTALLED.call_once(|| {
+        let _ = ctrlc::set_handler(|| {
+            if let Ok(mut g) = libusb_cleanup_slot().lock() {
+                if let Some(cleanup) = g.take() {
+                    cleanup();
+                }
+            }
+            std::process::exit(130);
+        });
+    });
+}
+
+fn register_libusb_cleanup(cleanup: LibusbCleanup) {
+    install_libusb_signal_handler_once();
+    if let Ok(mut g) = libusb_cleanup_slot().lock() {
+        *g = Some(cleanup);
+    }
+}
+
+fn clear_libusb_cleanup() {
+    if let Some(slot) = LIBUSB_CLEANUP.get() {
+        if let Ok(mut g) = slot.lock() {
+            *g = None;
+        }
+    }
 }
 
 impl Debug for HidTransport {
@@ -323,6 +377,20 @@ impl LibusbTransport {
             })
         };
 
+        // Register a SIGINT/SIGTERM/SIGHUP cleanup so a Ctrl+C exit re-attaches
+        // the kernel HID driver. Without this, Drop wouldn't run on signal-kill
+        // and the device's own input events (volume keys etc.) would stop
+        // working until the dongle is replugged.
+        {
+            let h = std::sync::Arc::clone(&handle);
+            let s = std::sync::Arc::clone(&stop);
+            register_libusb_cleanup(Box::new(move || {
+                s.store(true, std::sync::atomic::Ordering::SeqCst);
+                let _ = h.release_interface(interface);
+                let _ = h.attach_kernel_driver(interface);
+            }));
+        }
+
         LibusbTransport {
             handle,
             interface,
@@ -409,6 +477,7 @@ impl LibusbTransport {
 
 impl Drop for LibusbTransport {
     fn drop(&mut self) {
+        clear_libusb_cleanup();
         self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
         if let Some(t) = self.reader.take() {
             let _ = t.join();

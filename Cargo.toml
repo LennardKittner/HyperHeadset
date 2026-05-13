@@ -7,6 +7,7 @@ description = "A CLI and tray application for monitoring and managing HyperX hea
 
 [dependencies]
 clap = { version = "4.5.32", features = ["derive"] }
+ctrlc = { version = "3.5.2", features = ["termination"] }
 enigo = "0.6.1"
 hidapi = { path = "vendor/hidapi" }
 rusb = "0.9"
