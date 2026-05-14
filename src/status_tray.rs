@@ -17,7 +17,7 @@ const HEADSET_NOT_CONNECTED: &str = "Headset is not connected";
 
 fn format_int_value(value: u8, suffix: &str) -> String {
     if value == 0 && suffix == "min" {
-        "Disabled".to_string()
+        "never".to_string()
     } else {
         format!("{}{}", value, suffix)
     }
@@ -47,13 +47,31 @@ impl TrayHandler {
 pub struct StatusTray {
     device_properties: Option<DeviceProperties>,
     update_sender: Sender<DeviceEvent>,
+    monochrome_icons: bool,
 }
 
 impl StatusTray {
-    pub fn new(update_sender: Sender<DeviceEvent>) -> Self {
+    pub fn new(update_sender: Sender<DeviceEvent>, monochrome_icons: bool) -> Self {
         StatusTray {
             device_properties: None,
             update_sender,
+            monochrome_icons,
+        }
+    }
+
+    fn fallback_headset_icon(&self) -> &'static str {
+        if self.monochrome_icons {
+            "audio-headset-symbolic"
+        } else {
+            "audio-headset"
+        }
+    }
+
+    fn exit_icon(&self) -> &'static str {
+        if self.monochrome_icons {
+            "application-exit-symbolic"
+        } else {
+            "application-exit"
         }
     }
 }
@@ -65,7 +83,7 @@ impl Tray for StatusTray {
 
     fn icon_name(&self) -> String {
         TrayBatteryIconState::from_device_properties(self.device_properties.as_ref())
-            .linux_icon_name()
+            .linux_icon_name(self.monochrome_icons)
             .to_string()
     }
 
@@ -74,7 +92,7 @@ impl Tray for StatusTray {
             return ToolTip {
                 title: "Unknown".to_string(),
                 description: NO_COMPATIBLE_DEVICE.to_string(),
-                icon_name: "audio-headset-symbolic".into(),
+                icon_name: self.fallback_headset_icon().into(),
                 icon_pixmap: Vec::new(),
             };
         };
@@ -96,16 +114,17 @@ impl Tray for StatusTray {
                 .unwrap_or("Unknown".to_string()),
             description,
             icon_name: TrayBatteryIconState::from_device_properties(Some(device_properties))
-                .linux_icon_name()
+                .linux_icon_name(self.monochrome_icons)
                 .to_string(),
             icon_pixmap: Vec::new(),
         }
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
+        let exit_icon = self.exit_icon();
         let make_exit = || StandardItem {
             label: "Quit".into(),
-            icon_name: "application-exit-symbolic".into(),
+            icon_name: exit_icon.into(),
             activate: Box::new(|_| std::process::exit(0)),
             ..Default::default()
         };

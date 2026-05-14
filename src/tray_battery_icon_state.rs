@@ -48,10 +48,14 @@ impl TrayBatteryIconState {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn linux_icon_name(self) -> &'static str {
+    pub fn linux_icon_name(self, monochrome: bool) -> &'static str {
         match self {
             Self::NoDevice | Self::Disconnected | Self::ConnectedUnknown => {
-                "audio-headset-symbolic"
+                if monochrome {
+                    "audio-headset-symbolic"
+                } else {
+                    "audio-headset"
+                }
             }
             Self::Connected { percent, charging } => {
                 let level_name = if percent <= 10 {
@@ -66,20 +70,26 @@ impl TrayBatteryIconState {
                     "battery-full"
                 };
                 if charging {
-                    match level_name {
-                        "battery-caution" => "battery-caution-charging-symbolic",
-                        "battery-low" => "battery-low-charging-symbolic",
-                        "battery-medium" => "battery-medium-charging-symbolic",
-                        "battery-good" => "battery-good-charging-symbolic",
-                        _ => "battery-full-charging-symbolic",
+                    match (level_name, monochrome) {
+                        ("battery-caution", false) => "battery-caution-charging",
+                        ("battery-low", false) => "battery-low-charging",
+                        ("battery-medium", false) => "battery-medium-charging",
+                        ("battery-good", false) => "battery-good-charging",
+                        (_, false) => "battery-full-charging",
+                        ("battery-caution", true) => "battery-caution-charging-symbolic",
+                        ("battery-low", true) => "battery-low-charging-symbolic",
+                        ("battery-medium", true) => "battery-medium-charging-symbolic",
+                        ("battery-good", true) => "battery-good-charging-symbolic",
+                        (_, true) => "battery-full-charging-symbolic",
                     }
                 } else {
-                    match level_name {
-                        "battery-caution" => "battery-caution-symbolic",
-                        "battery-low" => "battery-low-symbolic",
-                        "battery-medium" => "battery-medium-symbolic",
-                        "battery-good" => "battery-good-symbolic",
-                        _ => "battery-full-symbolic",
+                    match (level_name, monochrome) {
+                        ("battery-caution", true) => "battery-caution-symbolic",
+                        ("battery-low", true) => "battery-low-symbolic",
+                        ("battery-medium", true) => "battery-medium-symbolic",
+                        ("battery-good", true) => "battery-good-symbolic",
+                        (name, false) => name,
+                        (_, true) => "battery-full-symbolic",
                     }
                 }
             }
