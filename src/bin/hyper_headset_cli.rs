@@ -153,6 +153,14 @@ fn main() {
                 .required(false)
                 .help("Use verbose output "),
         )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .default_value("false")
+                .action(ArgAction::SetTrue)
+                .required(false)
+                .help("Use JSON output. Time is in seconds."),
+        )
         .get_matches();
 
     let mut device = match device {
@@ -220,5 +228,51 @@ fn main() {
         eprintln!("{error}");
         std::process::exit(1);
     };
-    println!("{}", device.get_device_state().device_properties);
+
+    if let Some(output_json) = matches.get_one::<bool>("json") {
+        if *output_json {
+            let properties = &device.get_device_state().device_properties;
+            let mut headset_info_string = "{\n".to_string();
+
+            macro_rules! append_json_property {
+                ($val:expr, $name:ident) => {
+                    if let Some($name) = $val {
+                        headset_info_string +=
+                            &format!("    \"{}\": \"{}\",\n", stringify!($name), $name);
+                    }
+                };
+            }
+
+            append_json_property!(&properties.device_name, device_name);
+            append_json_property!(properties.battery_level, battery_level);
+            append_json_property!(properties.charging, charging);
+            append_json_property!(properties.muted, muted);
+            append_json_property!(properties.mic_connected, mic_connected);
+            append_json_property!(properties.pairing_info, pairing_info);
+            append_json_property!(properties.product_color, product_color);
+            append_json_property!(properties.side_tone_on, side_tone_on);
+            append_json_property!(properties.side_tone_volume, side_tone_volume);
+            append_json_property!(properties.surround_sound, surround_sound);
+            append_json_property!(properties.voice_prompt_on, voice_prompt_on);
+            append_json_property!(properties.connected, connected);
+            append_json_property!(properties.silent, silent);
+            append_json_property!(properties.noise_gate_active, noise_gate_active);
+
+            // This is the last property so it shouldn't have a comma at the end
+            // Durations also do not implement `Display` so this needs to be output manually
+            if let Some(automatic_shutdown_interval) = properties.automatic_shutdown_after {
+                headset_info_string += &format!(
+                    "    \"automatic_shutdown_interval\": \"{}\"\n",
+                    automatic_shutdown_interval.as_secs()
+                );
+            }
+
+            headset_info_string += "}";
+            println!("{}", headset_info_string);
+        } else {
+            println!("{}", device.get_device_state().device_properties);
+        }
+    } else {
+        println!("{}", device.get_device_state().device_properties);
+    }
 }

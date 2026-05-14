@@ -93,7 +93,7 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
             .into_iter()
             .next()
             .ok_or(DeviceError::NoDeviceFound())?;
-        println!(
+        eprintln!(
             "Connecting to {}",
             state
                 .device_properties
@@ -118,7 +118,7 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     {
         let mut device = None;
         for state in states {
-            println!(
+            eprintln!(
                 "Try to connecting to {}",
                 state
                     .device_properties
@@ -271,7 +271,7 @@ impl DeviceState {
                     .collect::<Vec<String>>()
                     .join(",\n");
                 //TODO: show as message in tray app
-                println!(
+                eprintln!(
                     "Found the following HyperX device{}: [\n{}\n]\nHowever, either {} not supported or the product ID is not yet known.",
                     if potential_devices.len() > 1 { "s" } else { "" }, names, if potential_devices.len() > 1 { "they are" } else { "it is" }
                 );
