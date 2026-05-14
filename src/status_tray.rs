@@ -1,6 +1,8 @@
 use std::sync::mpsc::Sender;
 
-use hyper_headset::devices::{DeviceEvent, DeviceProperties, DeviceState, PropertyType};
+use hyper_headset::devices::{
+    format_int_value, DeviceEvent, DeviceProperties, DeviceState, PropertyType,
+};
 use ksni::{
     menu::{StandardItem, SubMenu},
     Handle, MenuItem, ToolTip, Tray, TrayService,
@@ -14,14 +16,6 @@ pub struct TrayHandler {
 
 const NO_COMPATIBLE_DEVICE: &str = "No compatible device found.\nIs the dongle plugged in?\nIf you are using Linux did you\nadd the Udev rules?";
 const HEADSET_NOT_CONNECTED: &str = "Headset is not connected";
-
-fn format_int_value(value: u8, suffix: &str) -> String {
-    if value == 0 && suffix == "min" {
-        "never".to_string()
-    } else {
-        format!("{}{}", value, suffix)
-    }
-}
 
 impl TrayHandler {
     pub fn new(tray: StatusTray) -> Self {
