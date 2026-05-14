@@ -87,34 +87,34 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     debug_println!("Found device selecting handler");
 
     // On Linux and MacOS we can just take the first
-    // #[cfg(not(target_os = "windows"))]
-    // {
-    //     let state = states
-    //         .into_iter()
-    //         .next()
-    //         .ok_or(DeviceError::NoDeviceFound())?;
-    //     println!(
-    //         "Connecting to {}",
-    //         state
-    //             .device_properties
-    //             .device_name
-    //             .clone()
-    //             .unwrap_or("???".to_string())
-    //     );
-    //     let entry = DEVICE_REGISTER
-    //         .iter()
-    //         .find(|e| {
-    //             e.vendor_ids.contains(&state.device_properties.vendor_id)
-    //                 && e.product_ids.contains(&state.device_properties.product_id)
-    //         })
-    //         .ok_or(DeviceError::NoDeviceFound())?;
-    //
-    //     let mut device = (entry.factory)(state);
-    //     device.init_capabilities();
-    //     Ok(device)
-    // }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let state = states
+            .into_iter()
+            .next()
+            .ok_or(DeviceError::NoDeviceFound())?;
+        println!(
+            "Connecting to {}",
+            state
+                .device_properties
+                .device_name
+                .clone()
+                .unwrap_or("???".to_string())
+        );
+        let entry = DEVICE_REGISTER
+            .iter()
+            .find(|e| {
+                e.vendor_ids.contains(&state.device_properties.vendor_id)
+                    && e.product_ids.contains(&state.device_properties.product_id)
+            })
+            .ok_or(DeviceError::NoDeviceFound())?;
+
+        let mut device = (entry.factory)(state);
+        device.init_capabilities();
+        Ok(device)
+    }
     // On Windows we have to check which interface can be used
-    // #[cfg(target_os = "windows")]
+    #[cfg(target_os = "windows")]
     {
         let mut device = None;
         for state in states {
@@ -140,24 +140,17 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
             let probe_packet = test_device
                 .get_query_packets()
                 .into_iter()
-                .nth(2)
+                .next()
                 .expect("Why is there a device without packets ???");
 
             test_device.prepare_write();
-            if let Err(_e) = test_device.write_hid_report(&probe_packet) {
+            if let Err(_e) = test_device
+                .get_device_state()
+                .write_hid_report(&probe_packet)
+            {
                 debug_println!("Failed to open: {_e:?}");
                 continue;
             } else {
-                std::thread::sleep(RESPONSE_DELAY);
-
-                if let Some(events) = test_device.wait_for_updates(Duration::from_secs(1)) {
-                    for _event in events {
-                        debug_println!("got response {_event:?}");
-                    }
-                } else {
-                    continue;
-                }
-
                 device = Some(test_device);
                 break;
             }
@@ -297,6 +290,43 @@ impl DeviceState {
                 }
             })
             .collect())
+    }
+
+    /// Write a HID report to the device.
+    ///
+    /// On Windows, some HyperX dongles expose commands as **Feature reports** only.
+    /// In that case, `hidapi::HidDevice::write()` fails with:
+    /// `WriteFile: (0x00000001) Incorrect function.`
+    ///
+    /// Linux/macOS hidraw paths often accept the same bytes via output reports, so this can look
+    /// "Windows-exclusive". We transparently fall back to `send_feature_report` when we detect
+    /// this specific failure.
+    /// Adapted from PR #20 by @navrozashvili
+    /// Source: https://github.com/LennardKittner/HyperHeadset/pull/20
+    pub fn write_hid_report(&self, packet: &[u8]) -> Result<(), HidError> {
+        match self.hid_device.write(packet) {
+            Ok(_) => Ok(()),
+            Err(write_err) => {
+                #[cfg(target_os = "windows")]
+                {
+                    if let HidError::HidApiError { message } = &write_err {
+                        // Windows HID stack returns ERROR_INVALID_FUNCTION (0x1) when the device
+                        // doesn't support output reports / interrupt OUT.
+                        if message.contains("Incorrect function")
+                            || message.contains("(0x00000001)")
+                        {
+                            // If the feature report also fails, prefer returning the original
+                            // write() error since that's what callers attempted.
+                            if let Err(_feature_err) = self.hid_device.send_feature_report(packet) {
+                                return Err(write_err);
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
+                Err(write_err)
+            }
+        }
     }
 
     fn update_self_with_event(&mut self, event: &DeviceEvent) {
@@ -721,47 +751,6 @@ impl From<u8> for ChargingStatus {
 }
 
 pub trait Device {
-    /// Write a HID report to the device.
-    ///
-    /// On Windows, some HyperX dongles expose commands as **Feature reports** only.
-    /// In that case, `hidapi::HidDevice::write()` fails with:
-    /// `WriteFile: (0x00000001) Incorrect function.`
-    ///
-    /// Linux/macOS hidraw paths often accept the same bytes via output reports, so this can look
-    /// "Windows-exclusive". We transparently fall back to `send_feature_report` when we detect
-    /// this specific failure.
-    /// Adapted from PR #20 by @navrozashvili
-    /// Source: https://github.com/LennardKittner/HyperHeadset/pull/20
-    fn write_hid_report(&mut self, packet: &[u8]) -> Result<(), HidError> {
-        match self.get_device_state_mut().hid_device.write(packet) {
-            Ok(_) => Ok(()),
-            Err(write_err) => {
-                #[cfg(target_os = "windows")]
-                {
-                    if let HidError::HidApiError { message } = &write_err {
-                        // Windows HID stack returns ERROR_INVALID_FUNCTION (0x1) when the device
-                        // doesn't support output reports / interrupt OUT.
-                        if message.contains("Incorrect function")
-                            || message.contains("(0x00000001)")
-                        {
-                            // If the feature report also fails, prefer returning the original
-                            // write() error since that's what callers attempted.
-                            if let Err(_feature_err) = self
-                                .get_device_state_mut()
-                                .hid_device
-                                .send_feature_report(packet)
-                            {
-                                return Err(write_err);
-                            }
-                            return Ok(());
-                        }
-                    }
-                }
-                Err(write_err)
-            }
-        }
-    }
-
     fn get_response_buffer(&self) -> Vec<u8> {
         [0u8; RESPONSE_BUFFER_SIZE].to_vec()
     }
@@ -912,7 +901,7 @@ pub trait Device {
         for packet in packets.into_iter() {
             self.prepare_write();
             debug_println!("Write packet: {packet:?}");
-            self.write_hid_report(&packet)?;
+            self.get_device_state().write_hid_report(&packet)?;
             std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
@@ -953,7 +942,7 @@ pub trait Device {
         }
         if let Some(batter_packet) = self.get_battery_packet() {
             self.prepare_write();
-            self.write_hid_report(&batter_packet)?;
+            self.get_device_state().write_hid_report(&batter_packet)?;
             std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
@@ -978,7 +967,7 @@ pub trait Device {
             DeviceEvent::AutomaticShutdownAfter(delay) => {
                 if let Some(packet) = self.set_automatic_shut_down_packet(delay) {
                     self.prepare_write();
-                    if let Err(err) = self.write_hid_report(&packet) {
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
                         Err(format!(
                             "Failed to set automatic shutdown with error: {:?}",
                             err
@@ -991,7 +980,7 @@ pub trait Device {
             DeviceEvent::Muted(mute) => {
                 if let Some(packet) = self.set_mute_packet(mute) {
                     self.prepare_write();
-                    if let Err(err) = self.write_hid_report(&packet) {
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
                         Err(format!("Failed to mute with error: {:?}", err))?;
                     }
                 } else {
@@ -1001,7 +990,7 @@ pub trait Device {
             DeviceEvent::SideToneOn(enable) => {
                 if let Some(packet) = self.set_side_tone_packet(enable) {
                     self.prepare_write();
-                    if let Err(err) = self.write_hid_report(&packet) {
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
                         Err(format!("Failed to enable side tone with error: {:?}", err))?;
                     }
                 } else {
@@ -1011,7 +1000,7 @@ pub trait Device {
             DeviceEvent::SideToneVolume(volume) => {
                 if let Some(packet) = self.set_side_tone_volume_packet(volume) {
                     self.prepare_write();
-                    if let Err(err) = self.write_hid_report(&packet) {
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
                         Err(format!(
                             "Failed to set side tone volume with error: {:?}",
                             err
@@ -1027,7 +1016,7 @@ pub trait Device {
             DeviceEvent::VoicePrompt(enable) => {
                 if let Some(packet) = self.set_voice_prompt_packet(enable) {
                     self.prepare_write();
-                    if let Err(err) = self.write_hid_report(&packet) {
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
                         Err(format!(
                             "Failed to enable voice prompt with error: {:?}",
                             err
@@ -1040,7 +1029,7 @@ pub trait Device {
             DeviceEvent::SurroundSound(surround_sound) => {
                 if let Some(packet) = self.set_surround_sound_packet(surround_sound) {
                     self.prepare_write();
-                    if let Err(err) = self.write_hid_report(&packet) {
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
                         Err(format!(
                             "Failed to set surround sound with error: {:?}",
                             err
@@ -1053,7 +1042,7 @@ pub trait Device {
             DeviceEvent::Silent(mute_playback) => {
                 if let Some(packet) = self.set_silent_mode_packet(mute_playback) {
                     self.prepare_write();
-                    if let Err(err) = self.write_hid_report(&packet) {
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
                         Err(format!("Failed to mute playback with error: {:?}", err))?;
                     }
                 } else {
@@ -1063,7 +1052,7 @@ pub trait Device {
             DeviceEvent::NoiseGateActive(activate) => {
                 if let Some(packet) = self.set_noise_gate_packet(activate) {
                     self.prepare_write();
-                    if let Err(err) = self.write_hid_report(&packet) {
+                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
                         Err(format!(
                             "Failed to activate noise gate with error: {:?}",
                             err

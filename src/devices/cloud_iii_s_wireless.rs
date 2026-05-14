@@ -8,11 +8,6 @@ const HP: u16 = 0x03F0;
 pub const VENDOR_IDS: [u16; 1] = [HP];
 pub const PRODUCT_IDS: [u16; 2] = [0x06BE, 0x02CC];
 
-// Mic state reports: the headset sometimes sends spontaneous reports on
-// Report ID 0x05 (e.g. on boom-mic flip). We don't write to this report ID
-// — mute is set via the 0x0c-protocol cmd 0x01 (see `set_mute_packet`) —
-// but we still parse incoming reports so the menu reflects hardware-driven
-// state changes. Pattern: `(byte[1] & 0x02) != 0` means muted.
 const MIC_HEADER: u8 = 0x05;
 
 // Auto-shutdown control (via SET_REPORT, report ID 0x0c)
@@ -55,11 +50,9 @@ const GET_AUTO_POWER_OFF_COMMAND_ID: u8 = 0x4B;
 const GET_VOICE_PROMPT_COMMAND_ID: u8 = 0x14;
 const SET_VOICE_PROMPT_COMMAND_ID: u8 = 0x0B;
 
-// Button report header (incoming from headset on the Consumer Control top-level
-// collection — vol-up/vol-down/play-pause). The kernel's hid-generic driver
-// already forwards these as media key events to the OS input subsystem, so the
-// only thing we do with them is log and ignore.
+// Button report header (incoming from headset)
 const CONSUMER_CONTROL_HEADER: u8 = 0x0f;
+// Consumer control button values
 const _VOL_UP: u8 = 0x01;
 const _VOL_DOWN: u8 = 0x02;
 const _PLAY_PAUSE: u8 = 0x08;
@@ -142,14 +135,6 @@ impl CloudIIISWireless {
 }
 
 impl Device for CloudIIISWireless {
-    // Use the default `write_hid_report` from the `Device` trait, which calls
-    // `hid_device.write()`. The Cloud III S HID interface has no OUT endpoint, so writes
-    // become `SET_REPORT` control transfers with report type **Output**, which is what the
-    // Ngenuity application uses (and what the device firmware listens for on Report ID 0x0c).
-    // The previous override forced `send_feature_report` (type **Feature**), which the device
-    // silently ignores — the symptom was that battery / connection / side tone queries never
-    // produced a response.
-
     fn get_charging_packet(&self) -> Option<Vec<u8>> {
         let mut packet = BASE_PACKET.to_vec();
         packet[5] = CHARGE_STATE_COMMAND_ID;
@@ -180,10 +165,6 @@ impl Device for CloudIIISWireless {
         Some(packet)
     }
 
-    // Mic mute via the 0x0c-report protocol (cmd 0x01). Confirmed by NGenuity
-    // capture : `0c 02 03 00 00 01 <0|1>`,
-    // value 1 = muted, 0 = unmuted. Acknowledged by the device with notification
-    // ID 3 (`0d 02 03 00 03 <val>`) which `parse_notification` already handles.
     fn set_mute_packet(&self, mute: bool) -> Option<Vec<u8>> {
         let mut packet = BASE_PACKET.to_vec();
         packet[3] = 0x00;
