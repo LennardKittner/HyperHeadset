@@ -153,6 +153,14 @@ fn main() {
                 .required(false)
                 .help("Use verbose output "),
         )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .default_value("false")
+                .action(ArgAction::SetTrue)
+                .required(false)
+                .help("Use JSON output. Time is in seconds."),
+        )
         .get_matches();
 
     let mut device = match device {
@@ -220,5 +228,48 @@ fn main() {
         eprintln!("{error}");
         std::process::exit(1);
     };
-    println!("{}", device.get_device_state().device_properties);
+
+    if let Some(output_json) = matches.get_one::<bool>("json") {
+        if *output_json {
+            let properties = &device.get_device_state().device_properties;
+            let mut headset_info_json = "{\n  ".to_string();
+
+            let json_properties: Vec<String> = properties
+                .get_properties()
+                .iter()
+                .filter_map(|property| match property {
+                    hyper_headset::devices::PropertyDescriptorWrapper::Int(
+                        property_descriptor,
+                        _items,
+                    ) => match property_descriptor.data {
+                        Some(data) => Some(format!("\"{}\": {}", property_descriptor.name, data)),
+                        _ => None,
+                    },
+                    hyper_headset::devices::PropertyDescriptorWrapper::Bool(
+                        property_descriptor,
+                    ) => match property_descriptor.data {
+                        Some(data) => Some(format!("\"{}\": {}", property_descriptor.name, data)),
+                        _ => None,
+                    },
+                    hyper_headset::devices::PropertyDescriptorWrapper::String(
+                        property_descriptor,
+                    ) => match &property_descriptor.data {
+                        Some(data) => {
+                            Some(format!("\"{}\": \"{}\"", property_descriptor.name, data))
+                        }
+                        _ => None,
+                    },
+                })
+                .collect();
+
+            headset_info_json += &json_properties.join(",\n  ");
+
+            headset_info_json += "\n}";
+            println!("{}", headset_info_json);
+        } else {
+            println!("{}", device.get_device_state().device_properties);
+        }
+    } else {
+        println!("{}", device.get_device_state().device_properties);
+    }
 }

@@ -93,7 +93,7 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
             .into_iter()
             .next()
             .ok_or(DeviceError::NoDeviceFound())?;
-        println!(
+        eprintln!(
             "Connecting to {}",
             state
                 .device_properties
@@ -118,7 +118,7 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
     {
         let mut device = None;
         for state in states {
-            println!(
+            eprintln!(
                 "Try to connecting to {}",
                 state
                     .device_properties
@@ -271,7 +271,7 @@ impl DeviceState {
                     .collect::<Vec<String>>()
                     .join(",\n");
                 //TODO: show as message in tray app
-                println!(
+                eprintln!(
                     "Found the following HyperX device{}: [\n{}\n]\nHowever, either {} not supported or the product ID is not yet known.",
                     if potential_devices.len() > 1 { "s" } else { "" }, names, if potential_devices.len() > 1 { "they are" } else { "it is" }
                 );
@@ -379,7 +379,8 @@ pub enum PropertyDescriptorWrapper {
 }
 
 pub struct PropertyDescriptor<T: 'static> {
-    pub prefix: &'static str,
+    pub name: &'static str,
+    pub pretty_name: &'static str,
     pub data: Option<T>,
     pub suffix: &'static str,
     pub property_type: PropertyType,
@@ -389,7 +390,7 @@ pub struct PropertyDescriptor<T: 'static> {
 impl<T: Debug> Debug for PropertyDescriptor<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PropertyDescriptor")
-            .field("prefix", &self.prefix)
+            .field("pretty_name", &self.pretty_name)
             .field("data", &self.data)
             .field("suffix", &self.suffix)
             .field("property_type", &self.property_type)
@@ -432,7 +433,8 @@ impl DeviceProperties {
     pub fn get_properties(&self) -> Vec<PropertyDescriptorWrapper> {
         vec![
             PropertyDescriptorWrapper::String(PropertyDescriptor {
-                prefix: "Charging status:",
+                name: "charging_status",
+                pretty_name: "Charging status",
                 data: self.charging.map(|c| c.to_string()),
                 suffix: "",
                 property_type: PropertyType::AlwaysReadOnly,
@@ -440,7 +442,8 @@ impl DeviceProperties {
             }),
             PropertyDescriptorWrapper::Int(
                 PropertyDescriptor {
-                    prefix: "Battery level:",
+                    name: "battery_level",
+                    pretty_name: "Battery level",
                     data: self.battery_level,
                     suffix: "%",
                     property_type: PropertyType::AlwaysReadOnly,
@@ -449,7 +452,8 @@ impl DeviceProperties {
                 &[],
             ),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
-                prefix: "Muted:",
+                name: "mic_muted",
+                pretty_name: "Muted",
                 data: self.muted,
                 suffix: "",
                 property_type: if self.can_set_mute {
@@ -460,7 +464,8 @@ impl DeviceProperties {
                 create_event: &move |mute| Some(DeviceEvent::Muted(mute)),
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
-                prefix: "Mic connected:",
+                name: "mic_connected",
+                pretty_name: "Mic connected",
                 data: self.mic_connected,
                 suffix: "",
                 property_type: PropertyType::AlwaysReadOnly,
@@ -468,7 +473,8 @@ impl DeviceProperties {
             }),
             PropertyDescriptorWrapper::Int(
                 PropertyDescriptor {
-                    prefix: "Automatic shutdown after:",
+                    name: "automatic_shutdown_interval",
+                    pretty_name: "Automatic shutdown after",
                     data: self
                         .automatic_shutdown_after
                         .map(|t| (t.as_secs() / 60) as u8),
@@ -488,7 +494,8 @@ impl DeviceProperties {
             ),
             PropertyDescriptorWrapper::Int(
                 PropertyDescriptor {
-                    prefix: "Pairing info:",
+                    name: "pairing_info",
+                    pretty_name: "Pairing info",
                     data: self.pairing_info,
                     suffix: "",
                     property_type: PropertyType::AlwaysReadOnly,
@@ -497,14 +504,16 @@ impl DeviceProperties {
                 &[],
             ),
             PropertyDescriptorWrapper::String(PropertyDescriptor {
-                prefix: "Product color:",
+                name: "product_color",
+                pretty_name: "Product color",
                 data: self.product_color.map(|c| c.to_string()),
                 suffix: "",
                 property_type: PropertyType::AlwaysReadOnly,
                 create_event: &|_| None,
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
-                prefix: "Side tone:",
+                name: "side_tone_enabled",
+                pretty_name: "Side tone",
                 data: self.side_tone_on,
                 suffix: "",
                 property_type: if self.can_set_side_tone {
@@ -516,7 +525,8 @@ impl DeviceProperties {
             }),
             PropertyDescriptorWrapper::Int(
                 PropertyDescriptor {
-                    prefix: "Side tone volume:",
+                    name: "side_tone_volume",
+                    pretty_name: "Side tone volume",
                     data: self.side_tone_volume,
                     suffix: "",
                     property_type: if self.can_set_side_tone_volume {
@@ -529,7 +539,8 @@ impl DeviceProperties {
                 &[0, 25, 50, 75, 100, 125, 150, 175, 200, 225, 250],
             ),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
-                prefix: "Surround sound:",
+                name: "surrond_sound_enabled",
+                pretty_name: "Surround sound",
                 data: self.surround_sound,
                 suffix: "",
                 property_type: if self.can_set_surround_sound {
@@ -540,7 +551,8 @@ impl DeviceProperties {
                 create_event: &move |enable| Some(DeviceEvent::SurroundSound(enable)),
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
-                prefix: "Voice prompt:",
+                name: "voice_prompt_enabled",
+                pretty_name: "Voice prompt",
                 data: self.voice_prompt_on,
                 suffix: "",
                 property_type: if self.can_set_voice_prompt {
@@ -551,7 +563,8 @@ impl DeviceProperties {
                 create_event: &move |enable| Some(DeviceEvent::VoicePrompt(enable)),
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
-                prefix: "Playback muted:",
+                name: "playback_muted",
+                pretty_name: "Playback muted",
                 data: self.silent,
                 suffix: "",
                 property_type: if self.can_set_silent_mode {
@@ -562,7 +575,8 @@ impl DeviceProperties {
                 create_event: &move |enable| Some(DeviceEvent::Silent(enable)),
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
-                prefix: "Noise gate active:",
+                name: "noise_gate_enabled",
+                pretty_name: "Noise gate active",
                 data: self.noise_gate_active,
                 suffix: "",
                 property_type: if self.can_set_noise_gate {
@@ -573,7 +587,8 @@ impl DeviceProperties {
                 create_event: &move |enable| Some(DeviceEvent::NoiseGateActive(enable)),
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
-                prefix: "Connected:",
+                name: "connected",
+                pretty_name: "Connected",
                 data: self.connected,
                 suffix: "",
                 property_type: PropertyType::AlwaysReadOnly,
@@ -586,25 +601,25 @@ impl DeviceProperties {
         self.get_properties()
             .iter()
             .filter_map(|prop| {
-                let (prefix, data, suffix) = match prop {
+                let (name, data, suffix) = match prop {
                     PropertyDescriptorWrapper::Int(property_descriptor, _) => (
-                        property_descriptor.prefix,
+                        property_descriptor.pretty_name,
                         &property_descriptor.data.map(|v| v.to_string()),
                         property_descriptor.suffix,
                     ),
                     PropertyDescriptorWrapper::Bool(property_descriptor) => (
-                        property_descriptor.prefix,
+                        property_descriptor.pretty_name,
                         &property_descriptor.data.map(|v| v.to_string()),
                         property_descriptor.suffix,
                     ),
                     PropertyDescriptorWrapper::String(property_descriptor) => (
-                        property_descriptor.prefix,
+                        property_descriptor.pretty_name,
                         &property_descriptor.data,
                         property_descriptor.suffix,
                     ),
                 };
                 data.as_ref()
-                    .map(|data| format!("{:<padding$} {}{}", prefix, data, suffix))
+                    .map(|data| format!("{:<padding$} {}{}", name.to_string() + ":", data, suffix))
             })
             .collect::<Vec<String>>()
             .join("\n")
@@ -614,21 +629,21 @@ impl DeviceProperties {
         self.get_properties()
             .iter()
             .filter_map(|prop| {
-                let (prefix, data, suffix, property_type) = match prop {
+                let (name, data, suffix, property_type) = match prop {
                     PropertyDescriptorWrapper::Int(property_descriptor, _) => (
-                        property_descriptor.prefix,
+                        property_descriptor.pretty_name,
                         &property_descriptor.data.map(|v| v.to_string()),
                         property_descriptor.suffix,
                         property_descriptor.property_type,
                     ),
                     PropertyDescriptorWrapper::Bool(property_descriptor) => (
-                        property_descriptor.prefix,
+                        property_descriptor.pretty_name,
                         &property_descriptor.data.map(|v| v.to_string()),
                         property_descriptor.suffix,
                         property_descriptor.property_type,
                     ),
                     PropertyDescriptorWrapper::String(property_descriptor) => (
-                        property_descriptor.prefix,
+                        property_descriptor.pretty_name,
                         &property_descriptor.data,
                         property_descriptor.suffix,
                         property_descriptor.property_type,
@@ -641,7 +656,13 @@ impl DeviceProperties {
                     } else {
                         ""
                     };
-                    format!("{:<padding$} {}{}{}", prefix, data, suffix, readonly_marker)
+                    format!(
+                        "{:<padding$} {}{}{}",
+                        name.to_string() + ":",
+                        data,
+                        suffix,
+                        readonly_marker
+                    )
                 })
             })
             .collect::<Vec<String>>()
