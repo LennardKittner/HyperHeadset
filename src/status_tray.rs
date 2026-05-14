@@ -161,8 +161,8 @@ impl Tray for StatusTray {
                     menu_items.push(
                         StandardItem {
                             label: format!(
-                                "{} {}{}",
-                                property.prefix, current_value, property.suffix
+                                "{}: {}",
+                                property.pretty_name, format_int_value(current_value, property.suffix)
                             ),
                             enabled: false,
                             activate: Box::new(move |_| {
@@ -199,9 +199,8 @@ impl Tray for StatusTray {
                     menu_items.push(
                         SubMenu {
                             label: format!(
-                                "{} {}",
-                                property.prefix,
-                                format_int_value(current_value, property.suffix)
+                                "{}: {}",
+                                property.pretty_name, format_int_value(current_value, property.suffix)
                             ),
                             enabled: property.property_type == PropertyType::ReadWrite
                                 && property.data.is_some(),
@@ -220,8 +219,8 @@ impl Tray for StatusTray {
                     menu_items.push(
                         StandardItem {
                             label: format!(
-                                "{} {}{}",
-                                property.prefix, current_value, property.suffix
+                                "{}: {}{}",
+                                property.pretty_name, current_value, property.suffix
                             ),
                             enabled: property.property_type == PropertyType::ReadWrite
                                 && property.data.is_some(),
@@ -243,8 +242,8 @@ impl Tray for StatusTray {
                     menu_items.push(
                         StandardItem {
                             label: format!(
-                                "{} {}{}",
-                                property.prefix, current_value, property.suffix
+                                "{}: {}{}",
+                                property.pretty_name, current_value, property.suffix
                             ),
                             enabled: false,
                             activate: Box::new(move |_| {
