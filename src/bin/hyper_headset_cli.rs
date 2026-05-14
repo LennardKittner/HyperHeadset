@@ -232,9 +232,9 @@ fn main() {
     if let Some(output_json) = matches.get_one::<bool>("json") {
         if *output_json {
             let properties = &device.get_device_state().device_properties;
-            let mut headset_info_string = "{\n".to_string();
+            let mut headset_info_json = "{\n  ".to_string();
 
-            let mut json_properties: Vec<String> = properties
+            let json_properties: Vec<String> = properties
                 .get_properties()
                 .iter()
                 .map(|property| match property {
@@ -255,35 +255,17 @@ fn main() {
                         property_descriptor,
                     ) => match &property_descriptor.data {
                         Some(data) => {
-                            format!("  \"{}\": \"{}\",\n", property_descriptor.name, data)
+                            format!("\"{}\": \"{}\"", property_descriptor.name, data)
                         }
                         _ => "".to_string(),
                     },
                 })
                 .collect();
 
-            // The last property needs to end without a comma
-            match json_properties.last_mut() {
-                #[allow(unused_assignments)]
-                Some(mut json_property) => {
-                    let mut last_property = json_property[0..(json_property.len() - 2)].to_string();
-                    last_property += "\n";
-                    json_property = &mut last_property;
-                }
-                None => {
-                    // Unreachable:
-                    // The program exits if no device is found 
-                    // but also has a property for the device being connected
-                    unreachable!();
-                }
-            }
+            headset_info_json += &json_properties.join(",\n   ");
 
-            for json_property in json_properties {
-                headset_info_string += &json_property;
-            }
-
-            headset_info_string += "}";
-            println!("{}", headset_info_string);
+            headset_info_json += "\n}";
+            println!("{}", headset_info_json);
         } else {
             println!("{}", device.get_device_state().device_properties);
         }
