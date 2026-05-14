@@ -443,7 +443,7 @@ impl DeviceProperties {
             PropertyDescriptorWrapper::Int(
                 PropertyDescriptor {
                     name: "battery_level",
-                    pretty_name: "Battery level:",
+                    pretty_name: "Battery level",
                     data: self.battery_level,
                     suffix: "%",
                     property_type: PropertyType::AlwaysReadOnly,
@@ -453,7 +453,7 @@ impl DeviceProperties {
             ),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 name: "mic_muted",
-                pretty_name: "Muted:",
+                pretty_name: "Muted",
                 data: self.muted,
                 suffix: "",
                 property_type: if self.can_set_mute {
@@ -465,7 +465,7 @@ impl DeviceProperties {
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 name: "mic_connected",
-                pretty_name: "Mic connected:",
+                pretty_name: "Mic connected",
                 data: self.mic_connected,
                 suffix: "",
                 property_type: PropertyType::AlwaysReadOnly,
@@ -474,7 +474,7 @@ impl DeviceProperties {
             PropertyDescriptorWrapper::Int(
                 PropertyDescriptor {
                     name: "automatic_shutdown_interval",
-                    pretty_name: "Automatic shutdown after:",
+                    pretty_name: "Automatic shutdown after",
                     data: self
                         .automatic_shutdown_after
                         .map(|t| (t.as_secs() / 60) as u8),
@@ -495,7 +495,7 @@ impl DeviceProperties {
             PropertyDescriptorWrapper::Int(
                 PropertyDescriptor {
                     name: "pairing_info",
-                    pretty_name: "Pairing info:",
+                    pretty_name: "Pairing info",
                     data: self.pairing_info,
                     suffix: "",
                     property_type: PropertyType::AlwaysReadOnly,
@@ -505,7 +505,7 @@ impl DeviceProperties {
             ),
             PropertyDescriptorWrapper::String(PropertyDescriptor {
                 name: "product_color",
-                pretty_name: "Product color:",
+                pretty_name: "Product color",
                 data: self.product_color.map(|c| c.to_string()),
                 suffix: "",
                 property_type: PropertyType::AlwaysReadOnly,
@@ -513,7 +513,7 @@ impl DeviceProperties {
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 name: "side_tone_enabled",
-                pretty_name: "Side tone:",
+                pretty_name: "Side tone",
                 data: self.side_tone_on,
                 suffix: "",
                 property_type: if self.can_set_side_tone {
@@ -526,7 +526,7 @@ impl DeviceProperties {
             PropertyDescriptorWrapper::Int(
                 PropertyDescriptor {
                     name: "side_tone_volume",
-                    pretty_name: "Side tone volume:",
+                    pretty_name: "Side tone volume",
                     data: self.side_tone_volume,
                     suffix: "",
                     property_type: if self.can_set_side_tone_volume {
@@ -540,7 +540,7 @@ impl DeviceProperties {
             ),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 name: "surrond_sound_enabled",
-                pretty_name: "Surround sound:",
+                pretty_name: "Surround sound",
                 data: self.surround_sound,
                 suffix: "",
                 property_type: if self.can_set_surround_sound {
@@ -552,7 +552,7 @@ impl DeviceProperties {
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 name: "voice_prompt_enabled",
-                pretty_name: "Voice prompt:",
+                pretty_name: "Voice prompt",
                 data: self.voice_prompt_on,
                 suffix: "",
                 property_type: if self.can_set_voice_prompt {
@@ -564,7 +564,7 @@ impl DeviceProperties {
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 name: "playback_muted",
-                pretty_name: "Playback muted:",
+                pretty_name: "Playback muted",
                 data: self.silent,
                 suffix: "",
                 property_type: if self.can_set_silent_mode {
@@ -576,7 +576,7 @@ impl DeviceProperties {
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 name: "noise_gate_enabled",
-                pretty_name: "Noise gate active:",
+                pretty_name: "Noise gate active",
                 data: self.noise_gate_active,
                 suffix: "",
                 property_type: if self.can_set_noise_gate {
@@ -588,7 +588,7 @@ impl DeviceProperties {
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 name: "connected",
-                pretty_name: "Connected:",
+                pretty_name: "Connected",
                 data: self.connected,
                 suffix: "",
                 property_type: PropertyType::AlwaysReadOnly,
@@ -601,7 +601,7 @@ impl DeviceProperties {
         self.get_properties()
             .iter()
             .filter_map(|prop| {
-                let (prefix, data, suffix) = match prop {
+                let (name, data, suffix) = match prop {
                     PropertyDescriptorWrapper::Int(property_descriptor, _) => (
                         property_descriptor.pretty_name,
                         &property_descriptor.data.map(|v| v.to_string()),
@@ -619,7 +619,7 @@ impl DeviceProperties {
                     ),
                 };
                 data.as_ref()
-                    .map(|data| format!("{:<padding$} {}{}", prefix, data, suffix))
+                    .map(|data| format!("{:<padding$} {}{}", name.to_string() + ":", data, suffix))
             })
             .collect::<Vec<String>>()
             .join("\n")
@@ -629,7 +629,7 @@ impl DeviceProperties {
         self.get_properties()
             .iter()
             .filter_map(|prop| {
-                let (prefix, data, suffix, property_type) = match prop {
+                let (name, data, suffix, property_type) = match prop {
                     PropertyDescriptorWrapper::Int(property_descriptor, _) => (
                         property_descriptor.pretty_name,
                         &property_descriptor.data.map(|v| v.to_string()),
@@ -657,8 +657,11 @@ impl DeviceProperties {
                         ""
                     };
                     format!(
-                        "{:<padding$}: {}{}{}",
-                        prefix, data, suffix, readonly_marker
+                        "{:<padding$} {}{}{}",
+                        name.to_string() + ":",
+                        data,
+                        suffix,
+                        readonly_marker
                     )
                 })
             })

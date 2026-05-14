@@ -237,32 +237,32 @@ fn main() {
             let json_properties: Vec<String> = properties
                 .get_properties()
                 .iter()
-                .map(|property| match property {
+                .filter_map(|property| match property {
                     hyper_headset::devices::PropertyDescriptorWrapper::Int(
                         property_descriptor,
                         _items,
                     ) => match property_descriptor.data {
-                        Some(data) => format!("  \"{}\": {},\n", property_descriptor.name, data),
-                        _ => "".to_string(),
+                        Some(data) => Some(format!("\"{}\": {}", property_descriptor.name, data)),
+                        _ => None,
                     },
                     hyper_headset::devices::PropertyDescriptorWrapper::Bool(
                         property_descriptor,
                     ) => match property_descriptor.data {
-                        Some(data) => format!("  \"{}\": {},\n", property_descriptor.name, data),
-                        _ => "".to_string(),
+                        Some(data) => Some(format!("\"{}\": {}", property_descriptor.name, data)),
+                        _ => None,
                     },
                     hyper_headset::devices::PropertyDescriptorWrapper::String(
                         property_descriptor,
                     ) => match &property_descriptor.data {
                         Some(data) => {
-                            format!("\"{}\": \"{}\"", property_descriptor.name, data)
+                            Some(format!("\"{}\": \"{}\"", property_descriptor.name, data))
                         }
-                        _ => "".to_string(),
+                        _ => None,
                     },
                 })
                 .collect();
 
-            headset_info_json += &json_properties.join(",\n   ");
+            headset_info_json += &json_properties.join(",\n  ");
 
             headset_info_json += "\n}";
             println!("{}", headset_info_json);
