@@ -190,6 +190,12 @@ fn main() {
             .required(false)
             .help("Use verbose output ")
         )
+        .arg(Arg::new("monochrome_icons")
+            .long("monochrome-icons")
+            .action(ArgAction::SetTrue)
+            .required(false)
+            .help("Use the symbolic (monochrome) variants of the system tray icons")
+        )
         .get_matches();
 
     let press_mute_key = *matches.get_one::<bool>("press_mute_key").unwrap_or(&true);
@@ -205,11 +211,12 @@ fn main() {
         None
     };
     VERBOSE.set(matches.get_flag("verbose")).unwrap();
+    let monochrome_icons = matches.get_flag("monochrome_icons");
 
     let refresh_interval = *matches.get_one::<u64>("refresh_interval").unwrap_or(&3);
     let refresh_interval = Duration::from_secs(refresh_interval);
     let (tx, rx) = mpsc::channel();
-    let tray_handler = TrayHandler::new(StatusTray::new(tx));
+    let tray_handler = TrayHandler::new(StatusTray::new(tx, monochrome_icons));
     loop {
         let mut device = loop {
             match connect_compatible_device() {

@@ -1,6 +1,8 @@
 use std::sync::mpsc::Sender;
 
-use hyper_headset::devices::{DeviceEvent, DeviceProperties, DeviceState, PropertyType};
+use hyper_headset::devices::{
+    format_int_value, DeviceEvent, DeviceProperties, DeviceState, PropertyType,
+};
 use ksni::{
     menu::{StandardItem, SubMenu},
     Handle, MenuItem, ToolTip, Tray, TrayService,
@@ -39,13 +41,31 @@ impl TrayHandler {
 pub struct StatusTray {
     device_properties: Option<DeviceProperties>,
     update_sender: Sender<DeviceEvent>,
+    monochrome_icons: bool,
 }
 
 impl StatusTray {
-    pub fn new(update_sender: Sender<DeviceEvent>) -> Self {
+    pub fn new(update_sender: Sender<DeviceEvent>, monochrome_icons: bool) -> Self {
         StatusTray {
             device_properties: None,
             update_sender,
+            monochrome_icons,
+        }
+    }
+
+    fn fallback_headset_icon(&self) -> &'static str {
+        if self.monochrome_icons {
+            "audio-headset-symbolic"
+        } else {
+            "audio-headset"
+        }
+    }
+
+    fn exit_icon(&self) -> &'static str {
+        if self.monochrome_icons {
+            "application-exit-symbolic"
+        } else {
+            "application-exit"
         }
     }
 }
@@ -57,7 +77,7 @@ impl Tray for StatusTray {
 
     fn icon_name(&self) -> String {
         TrayBatteryIconState::from_device_properties(self.device_properties.as_ref())
-            .linux_icon_name()
+            .linux_icon_name(self.monochrome_icons)
             .to_string()
     }
 
@@ -66,7 +86,7 @@ impl Tray for StatusTray {
             return ToolTip {
                 title: "Unknown".to_string(),
                 description: NO_COMPATIBLE_DEVICE.to_string(),
-                icon_name: "audio-headset".into(),
+                icon_name: self.fallback_headset_icon().into(),
                 icon_pixmap: Vec::new(),
             };
         };
@@ -88,16 +108,17 @@ impl Tray for StatusTray {
                 .unwrap_or("Unknown".to_string()),
             description,
             icon_name: TrayBatteryIconState::from_device_properties(Some(device_properties))
-                .linux_icon_name()
+                .linux_icon_name(self.monochrome_icons)
                 .to_string(),
             icon_pixmap: Vec::new(),
         }
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
+        let exit_icon = self.exit_icon();
         let make_exit = || StandardItem {
             label: "Quit".into(),
-            icon_name: "application-exit".into(),
+            icon_name: exit_icon.into(),
             activate: Box::new(|_| std::process::exit(0)),
             ..Default::default()
         };
@@ -162,7 +183,7 @@ impl Tray for StatusTray {
                         .map(|val| {
                             let update_sender = self.update_sender.clone();
                             StandardItem {
-                                label: format!("{}{}", val, property.suffix),
+                                label: format_int_value(*val, property.suffix),
                                 enabled: property.property_type == PropertyType::ReadWrite
                                     && property.data.is_some(),
                                 activate: Box::new(move |_| {
@@ -178,8 +199,9 @@ impl Tray for StatusTray {
                     menu_items.push(
                         SubMenu {
                             label: format!(
-                                "{} {}{}",
-                                property.prefix, current_value, property.suffix
+                                "{} {}",
+                                property.prefix,
+                                format_int_value(current_value, property.suffix)
                             ),
                             enabled: property.property_type == PropertyType::ReadWrite
                                 && property.data.is_some(),

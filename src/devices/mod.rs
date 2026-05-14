@@ -25,6 +25,14 @@ use thistermination::TerminationFull;
 
 const PASSIVE_REFRESH_TIME_OUT: Duration = Duration::from_secs(2);
 
+pub fn format_int_value(value: u8, suffix: &str) -> String {
+    if value == 0 && suffix == "min" {
+        "never".to_string()
+    } else {
+        format!("{}{}", value, suffix)
+    }
+}
+
 type DeviceFactory = fn(DeviceState) -> Box<dyn Device>;
 
 struct DeviceEntry {
@@ -589,8 +597,8 @@ impl DeviceProperties {
                 let (prefix, data, suffix) = match prop {
                     PropertyDescriptorWrapper::Int(property_descriptor, _) => (
                         property_descriptor.prefix,
-                        &property_descriptor.data.map(|v| v.to_string()),
-                        property_descriptor.suffix,
+                        &property_descriptor.data.map(|v| format_int_value(v, property_descriptor.suffix)),
+                        "",
                     ),
                     PropertyDescriptorWrapper::Bool(property_descriptor) => (
                         property_descriptor.prefix,
@@ -617,8 +625,8 @@ impl DeviceProperties {
                 let (prefix, data, suffix, property_type) = match prop {
                     PropertyDescriptorWrapper::Int(property_descriptor, _) => (
                         property_descriptor.prefix,
-                        &property_descriptor.data.map(|v| v.to_string()),
-                        property_descriptor.suffix,
+                        &property_descriptor.data.map(|v| format_int_value(v, property_descriptor.suffix)),
+                        "",
                         property_descriptor.property_type,
                     ),
                     PropertyDescriptorWrapper::Bool(property_descriptor) => (
