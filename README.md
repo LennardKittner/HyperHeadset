@@ -26,6 +26,7 @@ Both the CLI and tray applications are compatible with Linux, MacOS, and Windows
 - HyperX Cloud III S Wireless
 - HyperX Cloud Stinger 2 Wireless
 - HyperX Cloud Flight S
+- HyperX Cloud Flight Wireless
 - HyperX Cloud Alpha Wireless
 
 If your headset is not supported, feel free to open an issue; be sure to include the name, product ID, and vendor ID.
@@ -37,7 +38,7 @@ No manual setup required (dependencies and udev rules are handled automatically)
 ```bash
 yay -S hyper-headset-git
 ```
-or 
+or
 ```bash
 yay -S hyper-headset-bin
 ```
@@ -80,6 +81,10 @@ MacOS:
 
 `brew install libusb`
 
+GNOME:
+
+You may have to install [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/) and [Status Icons ](https://extensions.gnome.org/extension/7332/status-icons/)
+
 ### Udev (Linux only)
 
 Normally the program installs the required udev rules automatically on first launch.
@@ -101,6 +106,10 @@ SUBSYSTEMS=="usb", ATTRS{idProduct}=="1765", ATTRS{idVendor}=="03f0", MODE="0666
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="1743", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="069f", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="0995", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="02cc", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="0e90", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="1749", ATTRS{idVendor}=="0951", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="16c4", ATTRS{idVendor}=="0951", MODE="0666"
 
 KERNEL=="hidraw*", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666"
@@ -116,6 +125,10 @@ KERNEL=="hidraw*", ATTRS{idProduct}=="1765", ATTRS{idVendor}=="03f0", MODE="0666
 KERNEL=="hidraw*", ATTRS{idProduct}=="1743", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="069f", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="0995", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="02cc", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="0e90", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="1749", ATTRS{idVendor}=="0951", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="16c4", ATTRS{idVendor}=="0951", MODE="0666"
 ```
 
 Once created, replug the wireless dongle.
@@ -146,6 +159,8 @@ Options:
           Mute or unmute playback. [possible values: true, false]
       --activate_noise_gate <activate_noise_gate>
           Activates noise gate. [possible values: true, false]
+  -v, --verbose
+          Use verbose output
   -h, --help
           Print help
   -V, --version
@@ -166,6 +181,8 @@ Options:
           Set the refresh interval (in seconds) [default: 3]
       --press_mute_key <press_mute_key>
           The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted. [default: true] [possible values: true, false]
+  -v, --verbose
+          Use verbose output
   -h, --help
           Print help
   -V, --version
