@@ -234,37 +234,52 @@ fn main() {
             let properties = &device.get_device_state().device_properties;
             let mut headset_info_string = "{\n".to_string();
 
-            macro_rules! append_json_property {
-                ($val:expr, $name:ident) => {
-                    if let Some($name) = $val {
-                        headset_info_string +=
-                            &format!("    \"{}\": \"{}\",\n", stringify!($name), $name);
-                    }
-                };
+            let mut json_properties: Vec<String> = properties
+                .get_properties()
+                .iter()
+                .map(|property| match property {
+                    hyper_headset::devices::PropertyDescriptorWrapper::Int(
+                        property_descriptor,
+                        _items,
+                    ) => match property_descriptor.data {
+                        Some(data) => format!("  \"{}\": {},\n", property_descriptor.name, data),
+                        _ => "".to_string(),
+                    },
+                    hyper_headset::devices::PropertyDescriptorWrapper::Bool(
+                        property_descriptor,
+                    ) => match property_descriptor.data {
+                        Some(data) => format!("  \"{}\": {},\n", property_descriptor.name, data),
+                        _ => "".to_string(),
+                    },
+                    hyper_headset::devices::PropertyDescriptorWrapper::String(
+                        property_descriptor,
+                    ) => match &property_descriptor.data {
+                        Some(data) => {
+                            format!("  \"{}\": \"{}\",\n", property_descriptor.name, data)
+                        }
+                        _ => "".to_string(),
+                    },
+                })
+                .collect();
+
+            // The last property needs to end without a comma
+            match json_properties.last_mut() {
+                #[allow(unused_assignments)]
+                Some(mut json_property) => {
+                    let mut last_property = json_property[0..(json_property.len() - 2)].to_string();
+                    last_property += "\n";
+                    json_property = &mut last_property;
+                }
+                None => {
+                    // Unreachable:
+                    // The program exits if no device is found 
+                    // but also has a property for the device being connected
+                    unreachable!();
+                }
             }
 
-            append_json_property!(&properties.device_name, device_name);
-            append_json_property!(properties.battery_level, battery_level);
-            append_json_property!(properties.charging, charging);
-            append_json_property!(properties.muted, muted);
-            append_json_property!(properties.mic_connected, mic_connected);
-            append_json_property!(properties.pairing_info, pairing_info);
-            append_json_property!(properties.product_color, product_color);
-            append_json_property!(properties.side_tone_on, side_tone_on);
-            append_json_property!(properties.side_tone_volume, side_tone_volume);
-            append_json_property!(properties.surround_sound, surround_sound);
-            append_json_property!(properties.voice_prompt_on, voice_prompt_on);
-            append_json_property!(properties.connected, connected);
-            append_json_property!(properties.silent, silent);
-            append_json_property!(properties.noise_gate_active, noise_gate_active);
-
-            // This is the last property so it shouldn't have a comma at the end
-            // Durations also do not implement `Display` so this needs to be output manually
-            if let Some(automatic_shutdown_interval) = properties.automatic_shutdown_after {
-                headset_info_string += &format!(
-                    "    \"automatic_shutdown_interval\": \"{}\"\n",
-                    automatic_shutdown_interval.as_secs()
-                );
+            for json_property in json_properties {
+                headset_info_string += &json_property;
             }
 
             headset_info_string += "}";
