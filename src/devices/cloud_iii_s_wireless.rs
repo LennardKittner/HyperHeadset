@@ -8,15 +8,7 @@ const HP: u16 = 0x03F0;
 pub const VENDOR_IDS: [u16; 1] = [HP];
 pub const PRODUCT_IDS: [u16; 2] = [0x06BE, 0x02CC];
 
-// Cloud III S uses a different protocol than Cloud III
-// Header 0x05 for mic control, 20-byte packets
-const PACKET_SIZE: usize = 20;
 const MIC_HEADER: u8 = 0x05;
-
-// Mic control commands (byte 1 after header)
-// Pattern: (cmd & 0x02) == 0 means ON
-const MIC_ON_CMD: u8 = 0x00;
-const MIC_OFF_CMD: u8 = 0x02;
 
 // Auto-shutdown control (via SET_REPORT, report ID 0x0c)
 // Packet structure: 0c 02 03 00 00 4a XX 00... (64 bytes total)
@@ -34,8 +26,8 @@ const EQ_CMD: [u8; 5] = [0x02, 0x03, 0x00, 0x00, 0x5f];
 const EQ_PACKET_SIZE: usize = 64;
 
 // Battery packet
-const BASE_PACKET: [u8; 62] = {
-    let mut packet = [0u8; 62];
+const BASE_PACKET: [u8; 64] = {
+    let mut packet = [0u8; 64];
     packet[0] = 0x0C;
     packet[1] = 0x02;
     packet[2] = 0x03;
@@ -51,6 +43,7 @@ const DONGLE_CONNECTED_COMMAND_ID: u8 = 0x02;
 const COLOR_COMMAND_ID: u8 = 0x4D;
 const CHARGE_STATE_COMMAND_ID: u8 = 0x48;
 const GET_MIC_MUTE_COMMAND_ID: u8 = 0x04;
+const SET_MIC_MUTE_COMMAND_ID: u8 = 0x01;
 const GET_SIDE_TONE_COMMAND_ID: u8 = 0x16;
 const SET_SIDE_TONE_COMMAND_ID: u8 = 0x0D;
 const GET_AUTO_POWER_OFF_COMMAND_ID: u8 = 0x4B;
@@ -63,13 +56,6 @@ const CONSUMER_CONTROL_HEADER: u8 = 0x0f;
 const _VOL_UP: u8 = 0x01;
 const _VOL_DOWN: u8 = 0x02;
 const _PLAY_PAUSE: u8 = 0x08;
-
-fn make_mic_packet(mute: bool) -> Vec<u8> {
-    let mut packet = vec![0u8; PACKET_SIZE];
-    packet[0] = MIC_HEADER;
-    packet[1] = if mute { MIC_OFF_CMD } else { MIC_ON_CMD };
-    packet
-}
 
 fn make_auto_shutdown_packet(minutes: u64) -> Vec<u8> {
     let mut packet = vec![0u8; AUTO_SHUTDOWN_PACKET_SIZE];
@@ -179,9 +165,12 @@ impl Device for CloudIIISWireless {
         Some(packet)
     }
 
-    // Cloud III S: Mic control - CONFIRMED WORKING
     fn set_mute_packet(&self, mute: bool) -> Option<Vec<u8>> {
-        Some(make_mic_packet(mute))
+        let mut packet = BASE_PACKET.to_vec();
+        packet[3] = 0x00;
+        packet[5] = SET_MIC_MUTE_COMMAND_ID;
+        packet[6] = mute as u8;
+        Some(packet)
     }
 
     fn get_surround_sound_packet(&self) -> Option<Vec<u8>> {
