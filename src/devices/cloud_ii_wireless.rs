@@ -267,7 +267,7 @@ impl Device for CloudIIWireless {
         input_report_buffer[0] = 6;
         let _ = self
             .state
-            .transport
+            .hid_device
             .get_input_report(&mut input_report_buffer);
     }
 
