@@ -241,13 +241,20 @@ fn main() {
                     hyper_headset::devices::PropertyDescriptorWrapper::Int(
                         property_descriptor,
                         _items,
-                    ) => property_descriptor.data.map(|data| format!("\"{}\": {}", property_descriptor.name, data)),
+                    ) => property_descriptor
+                        .data
+                        .map(|data| format!("\"{}\": {}", property_descriptor.name, data)),
                     hyper_headset::devices::PropertyDescriptorWrapper::Bool(
                         property_descriptor,
-                    ) => property_descriptor.data.map(|data| format!("\"{}\": {}", property_descriptor.name, data)),
+                    ) => property_descriptor
+                        .data
+                        .map(|data| format!("\"{}\": {}", property_descriptor.name, data)),
                     hyper_headset::devices::PropertyDescriptorWrapper::String(
                         property_descriptor,
-                    ) => property_descriptor.data.as_ref().map(|data| format!("\"{}\": \"{}\"", property_descriptor.name, data)),
+                    ) => property_descriptor
+                        .data
+                        .as_ref()
+                        .map(|data| format!("\"{}\": \"{}\"", property_descriptor.name, data)),
                 })
                 .collect();
 

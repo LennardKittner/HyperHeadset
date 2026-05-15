@@ -162,7 +162,8 @@ impl Tray for StatusTray {
                         StandardItem {
                             label: format!(
                                 "{}: {}",
-                                property.pretty_name, format_int_value(current_value, property.suffix)
+                                property.pretty_name,
+                                format_int_value(current_value, property.suffix)
                             ),
                             enabled: false,
                             activate: Box::new(move |_| {
@@ -200,7 +201,8 @@ impl Tray for StatusTray {
                         SubMenu {
                             label: format!(
                                 "{}: {}",
-                                property.pretty_name, format_int_value(current_value, property.suffix)
+                                property.pretty_name,
+                                format_int_value(current_value, property.suffix)
                             ),
                             enabled: property.property_type == PropertyType::ReadWrite
                                 && property.data.is_some(),

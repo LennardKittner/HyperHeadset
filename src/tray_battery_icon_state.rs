@@ -5,10 +5,7 @@ pub enum TrayBatteryIconState {
     NoDevice,
     Disconnected,
     ConnectedUnknown,
-    Connected {
-        percent: u8,
-        charging: bool,
-    },
+    Connected { percent: u8, charging: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -3,10 +3,10 @@ use std::{
     sync::{mpsc::Sender, Arc, Mutex},
 };
 
+use hyper_headset::devices::{format_int_value, DeviceEvent, DeviceProperties, PropertyType};
 use hyper_headset::devices::{DeviceEvent, DeviceProperties, PropertyType};
 #[cfg(target_os = "windows")]
 use image::{Rgba, RgbaImage};
-use hyper_headset::devices::{format_int_value, DeviceEvent, DeviceProperties, PropertyType};
 use tray_icon::{
     menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu},
     TrayIcon, TrayIconBuilder,
@@ -407,7 +407,8 @@ impl TrayApp {
                     let menu_item = MenuItem::new(
                         format!(
                             "{}: {}",
-                            property.pretty_name, format_int_value(current_value, property.suffix)
+                            property.pretty_name,
+                            format_int_value(current_value, property.suffix)
                         ),
                         false,
                         None,
@@ -421,14 +422,18 @@ impl TrayApp {
                     let submenu = Submenu::new(
                         format!(
                             "{}: {}",
-                            property.pretty_name, format_int_value(current_value, property.suffix),
+                            property.pretty_name,
+                            format_int_value(current_value, property.suffix),
                         ),
                         property.property_type == PropertyType::ReadWrite,
                     );
 
                     for item_value in items {
-                        let entry = 
-                            MenuItem::new(format_int_value(*item_value, property.suffix), true, None, );
+                        let entry = MenuItem::new(
+                            format_int_value(*item_value, property.suffix),
+                            true,
+                            None,
+                        );
                         submenu.append(&entry).unwrap();
 
                         let create_event = property.create_event;
