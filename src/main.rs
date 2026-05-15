@@ -6,6 +6,7 @@ mod status_tray;
 #[cfg(not(target_os = "linux"))]
 mod status_tray_not_linux;
 
+#[cfg(not(target_os = "macos"))]
 mod tray_battery_icon_state;
 
 #[cfg(not(target_os = "linux"))]

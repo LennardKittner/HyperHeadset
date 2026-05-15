@@ -4,11 +4,12 @@ use std::{
 };
 
 use hyper_headset::devices::{format_int_value, DeviceEvent, DeviceProperties, PropertyType};
-use hyper_headset::devices::{DeviceEvent, DeviceProperties, PropertyType};
 #[cfg(target_os = "windows")]
 use image::{Rgba, RgbaImage};
+#[cfg(target_os = "windows")]
+use tray_icon::menu::CheckMenuItem;
 use tray_icon::{
-    menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu},
     TrayIcon, TrayIconBuilder,
 };
 use winit::{application::ApplicationHandler, event::StartCause};
@@ -30,6 +31,7 @@ const STARTUP_APPROVED_RUN_KEY_PATH: &str =
     r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
 #[cfg(target_os = "windows")]
 const STARTUP_VALUE_NAME: &str = "HyperHeadset";
+#[cfg(target_os = "windows")]
 const WINDOWS_ICON_SIZE: u32 = 16;
 
 #[cfg(target_os = "windows")]
