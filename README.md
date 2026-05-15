@@ -161,6 +161,8 @@ Options:
           Activates noise gate. [possible values: true, false]
   -v, --verbose
           Use verbose output
+      --json
+          Use JSON output. Time is in seconds.
   -h, --help
           Print help
   -V, --version
@@ -183,6 +185,8 @@ Options:
           The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted. [default: true] [possible values: true, false]
   -v, --verbose
           Use verbose output
+      --monochrome-icons
+          Use the symbolic (monochrome) variants of the system tray icons
   -h, --help
           Print help
   -V, --version
@@ -208,8 +212,8 @@ Because the action only toggles Discord's state, you may need to synchronize it 
 - [ ] Add Docs
 - [ ] Add to crates.io
 - [ ] Let CLI periodically output the state 
-- [ ] Optional CLI output in JSON
 - [ ] Waybar applet
+- [x] Optional CLI output in JSON
 - [x] Menu bar app for MacOS.
 - [x] Windows support
 - [x] Allow configuration via tray app
