@@ -1,6 +1,9 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 #[cfg(target_os = "linux")]
+mod bluetooth;
+
+#[cfg(target_os = "linux")]
 mod status_tray;
 
 #[cfg(not(target_os = "linux"))]
@@ -222,10 +225,16 @@ fn main() {
         let mut device = loop {
             match connect_compatible_device() {
                 Ok(d) => break d,
-                Err(e) => {
-                    tray_handler.clear_state();
-                    eprintln!("Connecting failed with error: {e}")
-                }
+                Err(e) => match bluetooth::BluetoothHeadset::find() {
+                    Ok(Some(bt)) => {
+                        let level = bt.battery().ok().flatten();
+                        tray_handler.update(&bluetooth::to_device_properties(&bt, level));
+                    }
+                    _ => {
+                        tray_handler.clear_state();
+                        eprintln!("Connecting failed with error: {e}");
+                    }
+                },
             }
             std::thread::sleep(Duration::from_secs(1));
         };
@@ -242,7 +251,7 @@ fn main() {
                 Ok(()) => (),
                 Err(error) => {
                     eprintln!("{error}");
-                    tray_handler.update(device.get_device_state());
+                    tray_handler.update(&device.get_device_state().device_properties);
                     break; // try to reconnect
                 }
             };
@@ -265,7 +274,7 @@ fn main() {
                 let _ = device.active_refresh_state();
             }
 
-            tray_handler.update(device.get_device_state());
+            tray_handler.update(&device.get_device_state().device_properties);
             run_counter += 1;
         }
     }
