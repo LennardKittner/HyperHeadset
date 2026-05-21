@@ -1,6 +1,9 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 #[cfg(target_os = "linux")]
+mod airoha_race;
+
+#[cfg(target_os = "linux")]
 mod bluetooth;
 
 #[cfg(target_os = "linux")]
@@ -142,6 +145,38 @@ fn main() {
     event_loop.run_app(&mut TrayApp::new(tx)).unwrap();
 }
 
+/// Caches that smooth the BT path: `last_battery` keeps the most recent
+/// non-stub HFP reading visible across transient disruptions, and
+/// `airoha_cache` is populated lazily until a useful snapshot lands.
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct BtSnapshotState {
+    airoha_cache: Option<bluetooth::AirohaSnapshot>,
+    last_battery: Option<u8>,
+}
+
+#[cfg(target_os = "linux")]
+impl BtSnapshotState {
+    fn snapshot(&mut self) -> Option<hyper_headset::devices::DeviceProperties> {
+        let bt = bluetooth::BluetoothHeadset::find().ok().flatten()?;
+        let level = bt.battery().ok().flatten();
+        if level.is_some() {
+            self.last_battery = level;
+        }
+        if self.airoha_cache.as_ref().is_none_or(|s| s.is_empty()) {
+            let snap = bt.read_airoha_snapshot();
+            if !snap.is_empty() {
+                self.airoha_cache = Some(snap);
+            }
+        }
+        Some(bluetooth::to_device_properties(
+            &bt,
+            level.or(self.last_battery),
+            self.airoha_cache.as_ref(),
+        ))
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn main() {
     use clap::ArgAction;
@@ -221,25 +256,27 @@ fn main() {
     let refresh_interval = Duration::from_secs(refresh_interval);
     let (tx, rx) = mpsc::channel();
     let tray_handler = TrayHandler::new(StatusTray::new(tx, monochrome_icons));
+    // BT-side caches; persist across HID takeover so a later BT-only
+    // reconnect doesn't re-probe from scratch.
+    let mut bt_state = BtSnapshotState::default();
     loop {
         let mut device = loop {
             match connect_compatible_device() {
                 Ok(d) => break d,
-                Err(e) => match bluetooth::BluetoothHeadset::find() {
-                    Ok(Some(bt)) => {
-                        let level = bt.battery().ok().flatten();
-                        tray_handler.update(&bluetooth::to_device_properties(&bt, level));
-                    }
-                    _ => {
+                Err(e) => {
+                    if let Some(props) = bt_state.snapshot() {
+                        tray_handler.set_bt_source(true);
+                        tray_handler.update(&props);
+                    } else {
+                        tray_handler.set_bt_source(false);
                         tray_handler.clear_state();
                         eprintln!("Connecting failed with error: {e}");
                     }
-                },
+                }
             }
             std::thread::sleep(Duration::from_secs(1));
         };
 
-        // Run loop
         let mut run_counter = 0;
         loop {
             let mute_state = device.get_device_state().device_properties.muted;
@@ -274,7 +311,20 @@ fn main() {
                 let _ = device.active_refresh_state();
             }
 
-            tray_handler.update(&device.get_device_state().device_properties);
+            // When the dongle's wireless link is down, overlay BT data so
+            // the tray reflects the actually-active connection rather than
+            // a stale "headset off" view.
+            let hid_props = device.get_device_state().device_properties.clone();
+            let (display_props, on_bt) = if hid_props.connected == Some(false) {
+                match bt_state.snapshot() {
+                    Some(p) => (p, true),
+                    None => (hid_props, false),
+                }
+            } else {
+                (hid_props, false)
+            };
+            tray_handler.set_bt_source(on_bt);
+            tray_handler.update(&display_props);
             run_counter += 1;
         }
     }
