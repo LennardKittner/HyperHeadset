@@ -23,7 +23,7 @@ Both the CLI and tray applications are compatible with Linux, MacOS, and Windows
 - HyperX Cloud II Wireless HyperX vendor ID
 - HyperX Cloud II Core Wireless
 - HyperX Cloud III Wireless
-- HyperX Cloud III S Wireless
+- HyperX Cloud III S Wireless (known issue: may not respond correctly to some queries, see: [#36](https://github.com/LennardKittner/HyperHeadset/issues/36))
 - HyperX Cloud Stinger 2 Wireless
 - HyperX Cloud Flight S
 - HyperX Cloud Flight Wireless
