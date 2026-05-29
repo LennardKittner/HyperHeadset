@@ -127,7 +127,7 @@ pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
         let mut device = None;
         for state in states {
             eprintln!(
-                "Try to connecting to {}",
+                "Try to connect to {}",
                 state
                     .device_properties
                     .device_name

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{process::exit, time::Duration};
 
 use clap::{Arg, ArgAction, Command};
 use hyper_headset::{
@@ -16,36 +16,114 @@ where
     device.as_ref().map(f).unwrap_or(false)
 }
 
-fn main() {
-    let pre = Command::new(env!("CARGO_PKG_NAME"))
+fn create_command(device: &Result<Box<dyn Device>, DeviceError>) -> Command {
+    Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
-        .disable_version_flag(true) // we have to implement version manually
+        .disable_version_flag(false)
         .disable_help_flag(true)
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about("A CLI application for monitoring and managing HyperX headsets.")
+        .after_help("Help only lists commands supported by this headset.")
+        .arg(
+            Arg::new("automatic_shutdown")
+                .long("automatic_shutdown")
+                .required(false)
+                .help(
+                    "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
+                )
+                    .hide(!SHOW_ALL_OPTIONS
+                        && !device_supports(device, |d| d.can_set_automatic_shutdown()))
+                .value_parser(clap::value_parser!(u8)),
+        )
+        .arg(
+            Arg::new("mute")
+                .long("mute")
+                .required(false)
+                .help("Mute or unmute the headset.")
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device_supports(device, |d| d.can_set_mute()))
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("enable_side_tone")
+                .long("enable_side_tone")
+                .required(false)
+                .help("Enable or disable side tone.")
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device_supports(device, |d| d.can_set_side_tone()))
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("side_tone_volume")
+                .long("side_tone_volume")
+                .required(false)
+                .help("Set the side tone volume.")
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device_supports(device, |d| d.can_set_side_tone_volume()))
+                .value_parser(clap::value_parser!(u8)),
+        )
+        .arg(
+            Arg::new("enable_voice_prompt")
+                .long("enable_voice_prompt")
+                .required(false)
+                .help("Enable voice prompt. This may not be supported on your device.")
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device_supports(device, |d| d.can_set_voice_prompt()))
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("surround_sound")
+                .long("surround_sound")
+                .required(false)
+                .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device_supports(device, |d| d.can_set_surround_sound()))
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("mute_playback")
+                .long("mute_playback")
+                .required(false)
+                .help("Mute or unmute playback.")
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device_supports(device, |d| d.can_set_silent_mode()))
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("activate_noise_gate")
+                .long("activate_noise_gate")
+                .required(false)
+                .help("Activates noise gate.")
+                .hide(!SHOW_ALL_OPTIONS
+                    && !device_supports(device, |d| d.can_set_silent_mode()))
+                .value_parser(clap::value_parser!(bool)),
+        )
         .arg(
             Arg::new("verbose")
                 .long("verbose")
                 .short('v')
                 .action(ArgAction::SetTrue)
                 .required(false)
-                .help("Use verbose output "),
+                .help("Use verbose output"),
         )
         .arg(
-            Arg::new("version")
-                .long("version")
-                .short('V')
-                .action(ArgAction::SetTrue),
+            Arg::new("help")
+                .long("help")
+                .short('h')
+                .action(ArgAction::SetTrue)
+                .help("Print help"),
         )
-        .allow_external_subcommands(true)
-        .try_get_matches();
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .default_value("false")
+                .action(ArgAction::SetTrue)
+                .required(false)
+                .help("Use JSON output. Time is in seconds."),
+        )
+}
 
-    if let Ok(pre) = pre {
-        VERBOSE.set(pre.get_flag("verbose")).unwrap();
-        if pre.get_flag("version") {
-            println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-            return;
-        }
-    }
-
+fn main() {
     #[cfg(target_os = "linux")]
     {
         use hyper_headset::act_as_askpass_handler;
@@ -63,105 +141,21 @@ fn main() {
         prompt_user_for_udev_rule();
     }
 
+    let device = Err(DeviceError::NoDeviceFound());
+
+    // prep help without any headset specific options
+    let command = create_command(&device);
+    let matches = command.get_matches();
+    VERBOSE.set(matches.get_flag("verbose")).unwrap();
+
     let device = connect_compatible_device();
 
-    let matches = Command::new(env!("CARGO_PKG_NAME"))
-        .version(env!("CARGO_PKG_VERSION"))
-        .disable_version_flag(false)
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .about("A CLI application for monitoring and managing HyperX headsets.")
-        .after_help("Help only lists commands supported by this headset.")
-        .arg(
-            Arg::new("automatic_shutdown")
-                .long("automatic_shutdown")
-                .required(false)
-                .help(
-                    "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
-                )
-                    .hide(!SHOW_ALL_OPTIONS
-                        && !device_supports(&device, |d| d.can_set_automatic_shutdown()))
-                .value_parser(clap::value_parser!(u8)),
-        )
-        .arg(
-            Arg::new("mute")
-                .long("mute")
-                .required(false)
-                .help("Mute or unmute the headset.")
-                .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(&device, |d| d.can_set_mute()))
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("enable_side_tone")
-                .long("enable_side_tone")
-                .required(false)
-                .help("Enable or disable side tone.")
-                .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(&device, |d| d.can_set_side_tone()))
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("side_tone_volume")
-                .long("side_tone_volume")
-                .required(false)
-                .help("Set the side tone volume.")
-                .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(&device, |d| d.can_set_side_tone_volume()))
-                .value_parser(clap::value_parser!(u8)),
-        )
-        .arg(
-            Arg::new("enable_voice_prompt")
-                .long("enable_voice_prompt")
-                .required(false)
-                .help("Enable voice prompt. This may not be supported on your device.")
-                .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(&device, |d| d.can_set_voice_prompt()))
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("surround_sound")
-                .long("surround_sound")
-                .required(false)
-                .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
-                .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(&device, |d| d.can_set_surround_sound()))
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("mute_playback")
-                .long("mute_playback")
-                .required(false)
-                .help("Mute or unmute playback.")
-                .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(&device, |d| d.can_set_silent_mode()))
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("activate_noise_gate")
-                .long("activate_noise_gate")
-                .required(false)
-                .help("Activates noise gate.")
-                .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(&device, |d| d.can_set_silent_mode()))
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("verbose")
-                .long("verbose")
-                .short('v')
-                .action(ArgAction::SetTrue)
-                .required(false)
-                .help("Use verbose output "),
-        )
-        .arg(
-            Arg::new("json")
-                .long("json")
-                .default_value("false")
-                .action(ArgAction::SetTrue)
-                .required(false)
-                .help("Use JSON output. Time is in seconds."),
-        )
-        .get_matches();
+    // print help with headset specific options
+    if matches.get_flag("help") {
+        let mut command = create_command(&device);
+        command.print_long_help().unwrap();
+        exit(0);
+    }
 
     let mut device = match device {
         Ok(device) => device,
