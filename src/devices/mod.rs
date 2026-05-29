@@ -1000,7 +1000,7 @@ pub trait Device {
             DeviceEvent::AutomaticShutdownAfter(delay) => {
                 if let Some(packet) = self.set_automatic_shut_down_packet(delay) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!(
                             "Failed to set automatic shutdown with error: {:?}",
                             err
@@ -1013,7 +1013,7 @@ pub trait Device {
             DeviceEvent::Muted(mute) => {
                 if let Some(packet) = self.set_mute_packet(mute) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!("Failed to mute with error: {:?}", err))?;
                     }
                 } else {
@@ -1023,7 +1023,7 @@ pub trait Device {
             DeviceEvent::SideToneOn(enable) => {
                 if let Some(packet) = self.set_side_tone_packet(enable) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!("Failed to enable side tone with error: {:?}", err))?;
                     }
                 } else {
@@ -1033,7 +1033,7 @@ pub trait Device {
             DeviceEvent::SideToneVolume(volume) => {
                 if let Some(packet) = self.set_side_tone_volume_packet(volume) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!(
                             "Failed to set side tone volume with error: {:?}",
                             err
@@ -1049,7 +1049,7 @@ pub trait Device {
             DeviceEvent::VoicePrompt(enable) => {
                 if let Some(packet) = self.set_voice_prompt_packet(enable) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!(
                             "Failed to enable voice prompt with error: {:?}",
                             err
@@ -1062,7 +1062,7 @@ pub trait Device {
             DeviceEvent::SurroundSound(surround_sound) => {
                 if let Some(packet) = self.set_surround_sound_packet(surround_sound) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!(
                             "Failed to set surround sound with error: {:?}",
                             err
@@ -1075,7 +1075,7 @@ pub trait Device {
             DeviceEvent::Silent(mute_playback) => {
                 if let Some(packet) = self.set_silent_mode_packet(mute_playback) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!("Failed to mute playback with error: {:?}", err))?;
                     }
                 } else {
@@ -1085,7 +1085,7 @@ pub trait Device {
             DeviceEvent::NoiseGateActive(activate) => {
                 if let Some(packet) = self.set_noise_gate_packet(activate) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!(
                             "Failed to activate noise gate with error: {:?}",
                             err
