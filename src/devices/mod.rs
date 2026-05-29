@@ -82,7 +82,77 @@ const DEVICE_REGISTER: &[DeviceEntry] = &[
 const RESPONSE_BUFFER_SIZE: usize = 256;
 pub const RESPONSE_DELAY: Duration = Duration::from_millis(50);
 
-pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
+/// A connected headset, either over USB HID (the dongle) or, as a fallback on
+/// Linux, over Bluetooth. Frontends (tray, CLI) consume this uniformly via the
+/// small interface below, regardless of the underlying backend.
+pub enum Headset {
+    Hid(Box<dyn Device>),
+    #[cfg(target_os = "linux")]
+    Bluetooth(crate::bluetooth::BluetoothHeadset),
+}
+
+impl Headset {
+    pub fn device_properties(&self) -> DeviceProperties {
+        match self {
+            Headset::Hid(device) => device.get_device_state().device_properties.clone(),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(bt) => bt.device_properties(),
+        }
+    }
+
+    pub fn active_refresh_state(&mut self) -> Result<(), DeviceError> {
+        match self {
+            Headset::Hid(device) => device.active_refresh_state(),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(bt) => bt.refresh(),
+        }
+    }
+
+    pub fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
+        match self {
+            Headset::Hid(device) => device.passive_refresh_state(),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(bt) => bt.refresh(),
+        }
+    }
+
+    pub fn allow_passive_refresh(&mut self) -> bool {
+        match self {
+            Headset::Hid(device) => device.allow_passive_refresh(),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(_) => false,
+        }
+    }
+
+    pub fn try_apply(&mut self, command: DeviceEvent) -> Result<(), String> {
+        match self {
+            Headset::Hid(device) => device.try_apply(command),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(_) => {
+                Err("This setting cannot be changed over Bluetooth".to_string())
+            }
+        }
+    }
+}
+
+/// Connect to a compatible headset: a USB HID dongle if present, otherwise
+/// (on Linux) fall back to a Bluetooth-connected HyperX headset.
+pub fn connect_compatible_device() -> Result<Headset, DeviceError> {
+    match connect_hid_device() {
+        Ok(device) => Ok(Headset::Hid(device)),
+        Err(error) => {
+            #[cfg(target_os = "linux")]
+            {
+                if let Ok(Some(bt)) = crate::bluetooth::BluetoothHeadset::find() {
+                    return Ok(Headset::Bluetooth(bt));
+                }
+            }
+            Err(error)
+        }
+    }
+}
+
+fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
     let all_product_ids: Vec<u16> = DEVICE_REGISTER
         .iter()
         .flat_map(|e| e.product_ids.iter().copied())
