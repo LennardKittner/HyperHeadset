@@ -23,6 +23,7 @@ pub struct BluetoothHeadset {
     path: Path<'static>,
     name: Option<String>,
     battery_level: Option<u8>,
+    connected: bool,
 }
 
 impl BluetoothHeadset {
@@ -61,6 +62,7 @@ impl BluetoothHeadset {
                     path,
                     name,
                     battery_level: None,
+                    connected: true,
                 };
                 headset.battery_level = headset.read_battery().ok().flatten();
                 return Ok(Some(headset));
@@ -88,8 +90,10 @@ impl BluetoothHeadset {
     }
 
     /// Re-locate the headset and refresh the cached battery. The last good
-    /// reading is kept across transient HFP disruptions. An error (including
-    /// the headset no longer being connected) signals the caller to reconnect.
+    /// reading is kept across transient HFP disruptions. When the headset can
+    /// no longer be reached, `connected` is cleared so the next
+    /// `device_properties()` reflects it, and an error signals the caller to
+    /// reconnect.
     pub fn refresh(&mut self) -> Result<(), DeviceError> {
         match BluetoothHeadset::find() {
             Ok(Some(fresh)) => {
@@ -98,7 +102,10 @@ impl BluetoothHeadset {
                 self.battery_level = battery_level;
                 Ok(())
             }
-            _ => Err(DeviceError::NoDeviceFound()),
+            _ => {
+                self.connected = false;
+                Err(DeviceError::NoDeviceFound())
+            }
         }
     }
 
@@ -108,7 +115,7 @@ impl BluetoothHeadset {
     pub fn device_properties(&self) -> DeviceProperties {
         let mut props = DeviceProperties::new(0, 0, self.name.clone());
         props.battery_level = self.battery_level;
-        props.connected = Some(true);
+        props.connected = Some(self.connected);
         props
     }
 }
