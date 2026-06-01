@@ -133,6 +133,17 @@ impl Headset {
             }
         }
     }
+
+    /// `true` when the active backend is the Bluetooth fallback. Frontends use
+    /// this to gate BT-only affordances, e.g. the tray's click-to-reconnect
+    /// battery entry.
+    pub fn on_bluetooth(&self) -> bool {
+        match self {
+            Headset::Hid(_) => false,
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(_) => true,
+        }
+    }
 }
 
 /// Connect to a compatible headset: a USB HID dongle if present, otherwise

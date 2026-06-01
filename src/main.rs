@@ -229,6 +229,8 @@ fn main() {
             }
             std::thread::sleep(Duration::from_secs(1));
         };
+        // Gate the tray's click-to-reconnect battery entry on the active backend.
+        tray_handler.set_bt_source(device.on_bluetooth());
 
         // Run loop
         let mut run_counter = 0;

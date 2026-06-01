@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use dbus::arg::{PropMap, RefArg};
@@ -46,47 +47,23 @@ impl BluetoothHeadset {
     /// The Airoha config is not read here: probing the vendor BLE service
     /// renegotiates the RFCOMM/HFP session and transiently disrupts the battery
     /// indicator, so it is filled lazily by [`refresh`](Self::refresh) instead.
+    /// The snapshot is seeded from the process-wide [`AIROHA_CACHE`] so a
+    /// headset re-found after a reconnect keeps the last known values.
     pub fn find() -> Result<Option<Self>, dbus::Error> {
         let conn = Connection::new_system()?;
-        let proxy = conn.with_proxy("org.bluez", "/", DBUS_TIMEOUT);
-        let (objects,): (HashMap<Path<'static>, HashMap<String, PropMap>>,) = proxy.method_call(
-            "org.freedesktop.DBus.ObjectManager",
-            "GetManagedObjects",
-            (),
-        )?;
-
-        for (path, ifaces) in objects {
-            let Some(dev) = ifaces.get("org.bluez.Device1") else {
-                continue;
-            };
-            let connected = dev
-                .get("Connected")
-                .and_then(|v| v.0.as_any().downcast_ref::<bool>().copied())
-                .unwrap_or(false);
-            if !connected {
-                continue;
-            }
-            let name = dev
-                .get("Name")
-                .or_else(|| dev.get("Alias"))
-                .and_then(|v| v.0.as_str().map(str::to_string));
-            if name
-                .as_deref()
-                .is_some_and(|n| n.contains(HYPERX_NAME_HINT))
-            {
-                let mut headset = Self {
-                    conn,
-                    path,
-                    name,
-                    battery_level: None,
-                    connected: true,
-                    airoha: AirohaSnapshot::default(),
-                };
-                headset.battery_level = headset.read_battery().ok().flatten();
-                return Ok(Some(headset));
-            }
-        }
-        Ok(None)
+        let Some((path, name)) = find_connected_hyperx(&conn)? else {
+            return Ok(None);
+        };
+        let mut headset = Self {
+            conn,
+            path,
+            name,
+            battery_level: None,
+            connected: true,
+            airoha: *AIROHA_CACHE.lock().unwrap(),
+        };
+        headset.battery_level = headset.read_battery().ok().flatten();
+        Ok(Some(headset))
     }
 
     /// Reads `org.bluez.Battery1.Percentage`. Returns `None` if the interface
@@ -141,9 +118,11 @@ impl BluetoothHeadset {
     /// `device_properties()` reflects it, and an error signals the caller to
     /// reconnect.
     ///
-    /// The Airoha snapshot is carried across refreshes and read lazily: it is
-    /// (re)probed only while still empty, so a successful read is cached and we
-    /// avoid repeatedly disturbing the HFP battery indicator.
+    /// The Airoha snapshot is read lazily and only while still empty, so a
+    /// successful read is cached (both on this instance and in the process-wide
+    /// [`AIROHA_CACHE`]) and we avoid repeatedly disturbing the HFP battery
+    /// indicator. Because `find` seeds from that cache, the values also survive
+    /// the reconnect triggered from the tray.
     pub fn refresh(&mut self) -> Result<(), DeviceError> {
         match BluetoothHeadset::find() {
             Ok(Some(fresh)) => {
@@ -153,7 +132,11 @@ impl BluetoothHeadset {
                 self.battery_level = battery_level;
                 self.airoha = airoha;
                 if self.airoha.is_empty() {
-                    self.airoha = self.read_airoha_snapshot();
+                    let snap = self.read_airoha_snapshot();
+                    if !snap.is_empty() {
+                        self.airoha = snap;
+                        *AIROHA_CACHE.lock().unwrap() = snap;
+                    }
                 }
                 Ok(())
             }
@@ -193,6 +176,12 @@ pub struct AirohaSnapshot {
 }
 
 impl AirohaSnapshot {
+    const EMPTY: Self = Self {
+        voice_prompt_on: None,
+        auto_power_off_enabled: None,
+        auto_power_off_minutes: None,
+    };
+
     /// `true` when none of the individual reads succeeded — treat as a
     /// retryable failure rather than a valid cache.
     pub fn is_empty(&self) -> bool {
@@ -200,6 +189,75 @@ impl AirohaSnapshot {
             && self.auto_power_off_enabled.is_none()
             && self.auto_power_off_minutes.is_none()
     }
+}
+
+/// Process-wide cache of the last good Airoha snapshot.
+///
+/// The vendor BLE/GATT link is torn down on every reconnect (see
+/// [`reconnect_paired_hyperx`]) and only comes back after a physical
+/// power-cycle, so a fresh [`BluetoothHeadset`] created after a reconnect can no
+/// longer read the voice-prompt / auto-power-off config. Caching it here — at
+/// the process level rather than per-instance — keeps those values visible
+/// across reconnects instead of reverting to "unknown".
+static AIROHA_CACHE: Mutex<AirohaSnapshot> = Mutex::new(AirohaSnapshot::EMPTY);
+
+/// Force a BT reconnect on the paired HyperX headset to trigger a fresh HFP
+/// BIND/BIA handshake. Wired to the tray's "Battery level: -" entry: BlueZ only
+/// exposes a real percentage once the headset re-announces it over HFP
+/// `AT+BIEV`, so when that source has gone stale a reconnect is the only way to
+/// recover the reading.
+///
+/// Side effect: the firmware also tears down the BLE/GATT link until the next
+/// physical power-cycle, so any cached Airoha values are transiently lost.
+pub fn reconnect_paired_hyperx() -> Result<(), dbus::Error> {
+    let conn = Connection::new_system()?;
+    let Some((path, _)) = find_connected_hyperx(&conn)? else {
+        return Err(dbus::Error::new_custom(
+            "com.hyperheadset.NotConnected",
+            "no connected HyperX headset to reconnect",
+        ));
+    };
+    let dev_proxy = conn.with_proxy("org.bluez", &path, DBUS_TIMEOUT);
+    let _ = dev_proxy.method_call::<(), _, _, _>("org.bluez.Device1", "Disconnect", ());
+    std::thread::sleep(Duration::from_secs(2));
+    dev_proxy.method_call::<(), _, _, _>("org.bluez.Device1", "Connect", ())?;
+    Ok(())
+}
+
+/// Scan BlueZ for a connected device whose name advertises HyperX, returning
+/// its object path and reported name.
+fn find_connected_hyperx(
+    conn: &Connection,
+) -> Result<Option<(Path<'static>, Option<String>)>, dbus::Error> {
+    let proxy = conn.with_proxy("org.bluez", "/", DBUS_TIMEOUT);
+    let (objects,): (HashMap<Path<'static>, HashMap<String, PropMap>>,) = proxy.method_call(
+        "org.freedesktop.DBus.ObjectManager",
+        "GetManagedObjects",
+        (),
+    )?;
+    for (path, ifaces) in objects {
+        let Some(dev) = ifaces.get("org.bluez.Device1") else {
+            continue;
+        };
+        let connected = dev
+            .get("Connected")
+            .and_then(|v| v.0.as_any().downcast_ref::<bool>().copied())
+            .unwrap_or(false);
+        if !connected {
+            continue;
+        }
+        let name = dev
+            .get("Name")
+            .or_else(|| dev.get("Alias"))
+            .and_then(|v| v.0.as_str().map(str::to_string));
+        if name
+            .as_deref()
+            .is_some_and(|n| n.contains(HYPERX_NAME_HINT))
+        {
+            return Ok(Some((path, name)));
+        }
+    }
+    Ok(None)
 }
 
 fn u16_le(bytes: &[u8]) -> u16 {
