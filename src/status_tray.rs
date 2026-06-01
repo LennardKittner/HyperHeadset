@@ -1,7 +1,7 @@
 use std::sync::mpsc::Sender;
 
 use hyper_headset::devices::{
-    format_int_value, DeviceEvent, DeviceProperties, DeviceState, PropertyType,
+    format_int_value, DeviceEvent, DeviceProperties, PropertyType,
 };
 use ksni::{
     menu::{StandardItem, SubMenu},
@@ -25,9 +25,9 @@ impl TrayHandler {
         TrayHandler { handle }
     }
 
-    pub fn update(&self, device_state: &DeviceState) {
+    pub fn update(&self, properties: &DeviceProperties) {
         self.handle.update(|tray| {
-            tray.device_properties = Some(device_state.device_properties.clone());
+            tray.device_properties = Some(properties.clone());
         })
     }
 

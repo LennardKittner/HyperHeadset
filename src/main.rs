@@ -97,7 +97,7 @@ fn main() {
             // Run loop
             let mut run_counter = 0;
             loop {
-                let mute_state = device.get_device_state().device_properties.muted;
+                let mute_state = device.device_properties().muted;
                 match if run_counter % 30 == 0 {
                     device.active_refresh_state()
                 } else {
@@ -107,12 +107,12 @@ fn main() {
                     Err(error) => {
                         eprintln!("{error}");
                         let _ = proxy
-                            .send_event(Some(device.get_device_state().device_properties.clone()));
+                            .send_event(Some(device.device_properties()));
                         break; // try to reconnect
                     }
                 };
                 if mute_state.is_some()
-                    && mute_state != device.get_device_state().device_properties.muted
+                    && mute_state != device.device_properties().muted
                 {
                     if let Some(enigo) = &mut enigo {
                         if let Err(e) = enigo.key(Key::F20, Direction::Click) {
@@ -130,7 +130,7 @@ fn main() {
                     let _ = device.active_refresh_state();
                 }
 
-                let _ = proxy.send_event(Some(device.get_device_state().device_properties.clone()));
+                let _ = proxy.send_event(Some(device.device_properties()));
                 run_counter += 1;
             }
         }
@@ -224,7 +224,7 @@ fn main() {
                 Ok(d) => break d,
                 Err(e) => {
                     tray_handler.clear_state();
-                    eprintln!("Connecting failed with error: {e}")
+                    eprintln!("Connecting failed with error: {e}");
                 }
             }
             std::thread::sleep(Duration::from_secs(1));
@@ -233,7 +233,7 @@ fn main() {
         // Run loop
         let mut run_counter = 0;
         loop {
-            let mute_state = device.get_device_state().device_properties.muted;
+            let mute_state = device.device_properties().muted;
             match if run_counter % 30 == 0 {
                 device.active_refresh_state()
             } else {
@@ -242,12 +242,12 @@ fn main() {
                 Ok(()) => (),
                 Err(error) => {
                     eprintln!("{error}");
-                    tray_handler.update(device.get_device_state());
+                    tray_handler.update(&device.device_properties());
                     break; // try to reconnect
                 }
             };
             if mute_state.is_some()
-                && mute_state != device.get_device_state().device_properties.muted
+                && mute_state != device.device_properties().muted
             {
                 if let Some(enigo) = &mut enigo {
                     if let Err(e) = enigo.key(Key::MicMute, Direction::Click) {
@@ -265,7 +265,7 @@ fn main() {
                 let _ = device.active_refresh_state();
             }
 
-            tray_handler.update(device.get_device_state());
+            tray_handler.update(&device.device_properties());
             run_counter += 1;
         }
     }
