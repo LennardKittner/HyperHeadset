@@ -31,19 +31,9 @@ impl TrayHandler {
         })
     }
 
-    /// Toggles whether the battery menu entry is clickable to trigger a BT
-    /// reconnect. Set to `true` while displaying Bluetooth-sourced data,
-    /// `false` on the HID dongle path or when no device is visible.
-    pub fn set_bt_source(&self, on: bool) {
-        self.handle.update(move |tray| {
-            tray.bt_source = on;
-        })
-    }
-
     pub fn clear_state(&self) {
         self.handle.update(|tray| {
             tray.device_properties = None;
-            tray.bt_source = false;
         })
     }
 }
@@ -52,9 +42,6 @@ pub struct StatusTray {
     device_properties: Option<DeviceProperties>,
     update_sender: Sender<DeviceEvent>,
     monochrome_icons: bool,
-    /// True when the displayed data comes from the Bluetooth backend. Gates the
-    /// click-to-reconnect action on the battery menu entry.
-    bt_source: bool,
 }
 
 impl StatusTray {
@@ -63,7 +50,6 @@ impl StatusTray {
             device_properties: None,
             update_sender,
             monochrome_icons,
-            bt_source: false,
         }
     }
 
@@ -165,46 +151,8 @@ impl Tray for StatusTray {
             menu_items.push(make_exit().into());
             return menu_items;
         }
-        let bt_source = self.bt_source;
         for property in device_properties.get_properties() {
             match property {
-                // On the BT backend keep the battery line always visible: when
-                // the value is unknown the entry becomes clickable to force a BT
-                // reconnect (Device1.Disconnect/Connect) and get the HFP
-                // `AT+BIEV` battery indicator flowing again. On HID we fall
-                // through to the generic arm (unknown values stay hidden).
-                hyper_headset::devices::PropertyDescriptorWrapper::Int(property, [])
-                    if bt_source && property.name == "battery_level" =>
-                {
-                    let can_refresh = property.data.is_none();
-                    let label = match property.data {
-                        Some(v) => format!(
-                            "{}: {}",
-                            property.pretty_name,
-                            format_int_value(v, property.suffix)
-                        ),
-                        None => format!("{}: -", property.pretty_name),
-                    };
-                    menu_items.push(
-                        StandardItem {
-                            label,
-                            enabled: can_refresh,
-                            activate: Box::new(move |_| {
-                                // Thread off: D-Bus + a 2 s sleep between
-                                // disconnect and reconnect.
-                                std::thread::spawn(|| {
-                                    if let Err(err) =
-                                        hyper_headset::bluetooth::reconnect_paired_hyperx()
-                                    {
-                                        eprintln!("BT reconnect failed: {err}");
-                                    }
-                                });
-                            }),
-                            ..Default::default()
-                        }
-                        .into(),
-                    );
-                }
                 hyper_headset::devices::PropertyDescriptorWrapper::Int(property, []) => {
                     let Some(current_value) = property.data else {
                         continue;

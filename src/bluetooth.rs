@@ -1,9 +1,7 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use dbus::arg::{PropMap, RefArg};
-use dbus::blocking::stdintf::org_freedesktop_dbus::Properties;
 use dbus::blocking::Connection;
 use dbus::Path;
 
@@ -17,8 +15,7 @@ const DBUS_TIMEOUT: Duration = Duration::from_millis(2000);
 const MOD_AUTO_POWER_OFF: u16 = 1;
 const MOD_VOICE_PROMPT: u16 = 6;
 const RACE_GET_MMI_COMMON_CONFIG: u16 = 0x2C83;
-/// RACE_GET_BATTERY (`0x0CD6` RaceGetBattery in the Airoha SDK) — reads the
-/// battery level over the vendor BLE service instead of HFP. Takes a `role`
+/// RACE_GET_BATTERY (`0x0CD6` RaceGetBattery in the Airoha SDK). Takes a `role`
 /// byte; the `0x5B` response is a status-only ack and the level arrives in a
 /// `0x5D` indication. (The AirReps table's `0x0C02` is unimplemented on this
 /// firmware — no response.)
@@ -32,78 +29,52 @@ const BATTERY_ROLE: u8 = 0x00;
 // reverts on (re)connect. Persistent settings would require writing the
 // matching NVKEY via the dongle's USB path.
 
-/// Read the battery over a single long-lived RACE session (battery +
-/// voice-prompt + auto-power-off all on one subscribe) instead of the HFP
-/// `AT+BIEV` indicator. This sidesteps the HFP↔GATT conflict and removes the
-/// need for the destructive tray reconnect; validated stable over a held-session
-/// poll on Cloud III S (see `local/tools/airoha_battery_stability.py`).
-///
-/// On by default. Set `HYPERHEADSET_RACE_BATTERY=0` (or `false`) to fall back to
-/// the legacy HFP battery path (which re-enables the tray click-to-reconnect).
-pub fn race_battery_enabled() -> bool {
-    !std::env::var("HYPERHEADSET_RACE_BATTERY")
-        .map(|v| v == "0" || v.eq_ignore_ascii_case("false"))
-        .unwrap_or(false)
-}
-
 /// A HyperX headset reached over Bluetooth (BlueZ), used as a fallback backend
 /// when no USB HID dongle is present.
 ///
-/// Read-only: battery and name come from BlueZ, while voice-prompt and
-/// auto-power-off are read over the Airoha vendor BLE service (RACE). Settings
-/// are not writable here because RACE writes don't persist on this firmware,
-/// so [`Headset::try_apply`](crate::devices::Headset::try_apply) rejects
-/// changes on the Bluetooth backend.
+/// Read-only: name comes from BlueZ, while battery, voice-prompt and
+/// auto-power-off are all read over the Airoha vendor BLE service (RACE) on a
+/// single long-lived session. Settings are not writable because RACE writes
+/// don't persist on this firmware, so
+/// [`Headset::try_apply`](crate::devices::Headset::try_apply) rejects changes on
+/// the Bluetooth backend.
 pub struct BluetoothHeadset {
-    conn: Connection,
     path: Path<'static>,
     name: Option<String>,
     battery_level: Option<u8>,
     connected: bool,
     airoha: AirohaSnapshot,
-    /// Long-lived RACE session, populated only on the experimental
-    /// `race_battery_enabled()` path. Held open so battery polls reuse one
-    /// subscribe instead of cycling StartNotify/StopNotify (which is what
-    /// eventually locks up the vendor service). Boxed to keep `BluetoothHeadset`
-    /// (and the `Headset` enum) small on the common HFP path.
+    /// Long-lived RACE session. Held open so battery polls reuse one subscribe
+    /// instead of cycling StartNotify/StopNotify (which eventually locks up the
+    /// vendor service). Boxed to keep `BluetoothHeadset` (and the `Headset`
+    /// enum) small.
     race: Option<Box<RaceClient>>,
 }
 
 impl BluetoothHeadset {
-    /// Locate a connected HyperX headset on the system bus and read its battery.
-    /// Returns `Ok(None)` when no connected HyperX device is present.
-    ///
-    /// The Airoha config is not read here: probing the vendor BLE service
-    /// renegotiates the RFCOMM/HFP session and transiently disrupts the battery
-    /// indicator, so it is filled lazily by [`refresh`](Self::refresh) instead.
-    /// The snapshot is seeded from the process-wide [`AIROHA_CACHE`] so a
-    /// headset re-found after a reconnect keeps the last known values.
+    /// Locate a connected HyperX headset on the system bus and open its RACE
+    /// session (reading the initial battery + Airoha config). Returns
+    /// `Ok(None)` when no connected HyperX device is present.
     pub fn find() -> Result<Option<Self>, dbus::Error> {
         let conn = Connection::new_system()?;
         let Some((path, name)) = find_connected_hyperx(&conn)? else {
             return Ok(None);
         };
         let mut headset = Self {
-            conn,
             path,
             name,
             battery_level: None,
             connected: true,
-            airoha: *AIROHA_CACHE.lock().unwrap(),
+            airoha: AirohaSnapshot::default(),
             race: None,
         };
-        if race_battery_enabled() {
-            headset.open_race_session();
-        } else {
-            headset.battery_level = headset.read_battery().ok().flatten();
-        }
+        headset.open_race_session();
         Ok(Some(headset))
     }
 
     /// Open the long-lived RACE session and take the first battery + Airoha
     /// reads over it. On failure `race` stays `None` and the next `refresh`
-    /// retries — we never fall back to HFP here, since the whole point of this
-    /// path is to avoid the HFP indicator.
+    /// retries.
     fn open_race_session(&mut self) {
         let Ok(client) = RaceClient::open(&self.path.to_string()) else {
             return;
@@ -113,60 +84,26 @@ impl BluetoothHeadset {
             let snap = read_airoha_via(&client);
             if !snap.is_empty() {
                 self.airoha = snap;
-                *AIROHA_CACHE.lock().unwrap() = snap;
             }
         }
         self.race = Some(Box::new(client));
     }
 
-    /// Reads `org.bluez.Battery1.Percentage`. Returns `None` if the interface
-    /// is absent, or if the value is reported by the GATT Battery Service which
-    /// the HyperX firmware exposes as a stub always returning `0`. The real
-    /// value comes from the HFP `AT+BIEV` indicator pushed by PipeWire/oFono.
-    fn read_battery(&self) -> Result<Option<u8>, dbus::Error> {
-        let proxy = self.conn.with_proxy("org.bluez", &self.path, DBUS_TIMEOUT);
-        let Ok(percentage) = proxy.get::<u8>("org.bluez.Battery1", "Percentage") else {
-            return Ok(None);
-        };
-        let source = proxy
-            .get::<String>("org.bluez.Battery1", "Source")
-            .unwrap_or_default();
-        if percentage == 0 && source == "GATT Battery Service" {
-            return Ok(None);
-        }
-        Ok(Some(percentage))
-    }
-
-    /// Best-effort read of the Airoha vendor BLE features over a throwaway RACE
-    /// session (HFP path). Returns an empty snapshot when the vendor service is
-    /// unreachable; callers retry until [`AirohaSnapshot::is_empty`] is false.
-    fn read_airoha_snapshot(&self) -> AirohaSnapshot {
-        match RaceClient::open(&self.path.to_string()) {
-            Ok(client) => read_airoha_via(&client),
-            Err(_) => AirohaSnapshot::default(),
-        }
-    }
-
-    /// Refresh the cached battery (and lazily the Airoha config). Dispatches to
-    /// the experimental RACE path or the default HFP path based on
-    /// [`race_battery_enabled`]. On failure `connected` is cleared and an error
-    /// signals the caller to reconnect.
+    /// Poll the battery over the held RACE session, reusing the single
+    /// subscribe. If the session is gone (first run after a failure) it is
+    /// re-established via `find`. A failed battery read tears the session down
+    /// so the next cycle re-subscribes (a fresh, non-destructive GATT session).
+    /// The Airoha config is read lazily and only while still empty.
     pub fn refresh(&mut self) -> Result<(), DeviceError> {
-        if race_battery_enabled() {
-            self.refresh_via_race()
-        } else {
-            self.refresh_via_hfp()
-        }
-    }
-
-    /// Poll battery over the held RACE session, reusing the single subscribe. If
-    /// the session is gone (first run after a failure) it is re-established via
-    /// `find`. A failed battery read tears the session down so the next cycle
-    /// re-subscribes — the non-destructive equivalent of the HFP reconnect.
-    fn refresh_via_race(&mut self) -> Result<(), DeviceError> {
         if self.race.is_none() {
+            let airoha = self.airoha; // keep last known config across the re-subscribe
             match BluetoothHeadset::find() {
-                Ok(Some(fresh)) => *self = fresh,
+                Ok(Some(fresh)) => {
+                    *self = fresh;
+                    if self.airoha.is_empty() {
+                        self.airoha = airoha;
+                    }
+                }
                 _ => {
                     self.connected = false;
                     return Err(DeviceError::NoDeviceFound());
@@ -184,50 +121,12 @@ impl BluetoothHeadset {
                     let snap = read_airoha_via(client);
                     if !snap.is_empty() {
                         self.airoha = snap;
-                        *AIROHA_CACHE.lock().unwrap() = snap;
                     }
                 }
                 Ok(())
             }
             None => {
-                // Session likely locked up: drop it so the next cycle opens a
-                // fresh subscribe instead of polling a dead one.
                 self.race = None;
-                self.connected = false;
-                Err(DeviceError::NoDeviceFound())
-            }
-        }
-    }
-
-    /// Re-locate the headset and refresh the cached battery from HFP. The last
-    /// good reading is kept across transient HFP disruptions. When the headset
-    /// can no longer be reached, `connected` is cleared so the next
-    /// `device_properties()` reflects it, and an error signals the caller to
-    /// reconnect.
-    ///
-    /// The Airoha snapshot is read lazily and only while still empty, so a
-    /// successful read is cached (both on this instance and in the process-wide
-    /// [`AIROHA_CACHE`]) and we avoid repeatedly disturbing the HFP battery
-    /// indicator. Because `find` seeds from that cache, the values also survive
-    /// the reconnect triggered from the tray.
-    fn refresh_via_hfp(&mut self) -> Result<(), DeviceError> {
-        match BluetoothHeadset::find() {
-            Ok(Some(fresh)) => {
-                let battery_level = fresh.battery_level.or(self.battery_level);
-                let airoha = self.airoha;
-                *self = fresh;
-                self.battery_level = battery_level;
-                self.airoha = airoha;
-                if self.airoha.is_empty() {
-                    let snap = self.read_airoha_snapshot();
-                    if !snap.is_empty() {
-                        self.airoha = snap;
-                        *AIROHA_CACHE.lock().unwrap() = snap;
-                    }
-                }
-                Ok(())
-            }
-            _ => {
                 self.connected = false;
                 Err(DeviceError::NoDeviceFound())
             }
@@ -300,12 +199,6 @@ pub struct AirohaSnapshot {
 }
 
 impl AirohaSnapshot {
-    const EMPTY: Self = Self {
-        voice_prompt_on: None,
-        auto_power_off_enabled: None,
-        auto_power_off_minutes: None,
-    };
-
     /// `true` when none of the individual reads succeeded — treat as a
     /// retryable failure rather than a valid cache.
     pub fn is_empty(&self) -> bool {
@@ -313,39 +206,6 @@ impl AirohaSnapshot {
             && self.auto_power_off_enabled.is_none()
             && self.auto_power_off_minutes.is_none()
     }
-}
-
-/// Process-wide cache of the last good Airoha snapshot.
-///
-/// The vendor BLE/GATT link is torn down on every reconnect (see
-/// [`reconnect_paired_hyperx`]) and only comes back after a physical
-/// power-cycle, so a fresh [`BluetoothHeadset`] created after a reconnect can no
-/// longer read the voice-prompt / auto-power-off config. Caching it here — at
-/// the process level rather than per-instance — keeps those values visible
-/// across reconnects instead of reverting to "unknown".
-static AIROHA_CACHE: Mutex<AirohaSnapshot> = Mutex::new(AirohaSnapshot::EMPTY);
-
-/// Force a BT reconnect on the paired HyperX headset to trigger a fresh HFP
-/// BIND/BIA handshake. Wired to the tray's "Battery level: -" entry: BlueZ only
-/// exposes a real percentage once the headset re-announces it over HFP
-/// `AT+BIEV`, so when that source has gone stale a reconnect is the only way to
-/// recover the reading.
-///
-/// Side effect: the firmware also tears down the BLE/GATT link until the next
-/// physical power-cycle, so any cached Airoha values are transiently lost.
-pub fn reconnect_paired_hyperx() -> Result<(), dbus::Error> {
-    let conn = Connection::new_system()?;
-    let Some((path, _)) = find_connected_hyperx(&conn)? else {
-        return Err(dbus::Error::new_custom(
-            "com.hyperheadset.NotConnected",
-            "no connected HyperX headset to reconnect",
-        ));
-    };
-    let dev_proxy = conn.with_proxy("org.bluez", &path, DBUS_TIMEOUT);
-    let _ = dev_proxy.method_call::<(), _, _, _>("org.bluez.Device1", "Disconnect", ());
-    std::thread::sleep(Duration::from_secs(2));
-    dev_proxy.method_call::<(), _, _, _>("org.bluez.Device1", "Connect", ())?;
-    Ok(())
 }
 
 /// Scan BlueZ for a connected device whose name advertises HyperX, returning

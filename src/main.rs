@@ -229,12 +229,6 @@ fn main() {
             }
             std::thread::sleep(Duration::from_secs(1));
         };
-        // Gate the tray's click-to-reconnect battery entry on the active backend.
-        // It recovers the HFP indicator, so it's meaningless — and harmful, since
-        // it tears down the held GATT session — on the RACE-battery path.
-        tray_handler.set_bt_source(
-            device.on_bluetooth() && !hyper_headset::bluetooth::race_battery_enabled(),
-        );
 
         // Run loop
         let mut run_counter = 0;
