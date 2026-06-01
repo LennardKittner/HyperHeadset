@@ -1,11 +1,12 @@
 //! Minimal Airoha RACE client over BlueZ GATT (Linux only).
 //!
-//! Used to read configuration items exposed by the headset's Airoha vendor
-//! BLE service (write to TX, listen for notifications on RX). Each `request`
-//! is one round-trip; callers should batch reads into a single `RaceClient`
-//! to minimize how many times we subscribe — every notify-subscribe causes
-//! the firmware to renegotiate its RFCOMM/HFP session, which temporarily
-//! disrupts the HFP `AT+BIEV` battery indicator (see [[bluetooth.rs]]).
+//! Reads the battery and configuration items (voice prompt, auto power off)
+//! exposed by the headset's Airoha vendor BLE service: write to TX, listen for
+//! notifications on RX. Callers should hold a single long-lived `RaceClient`
+//! for many reads rather than reopening one each time — every notify-subscribe
+//! makes the firmware renegotiate its session, and repeated subscribe cycles
+//! eventually lock up the vendor service. A single held session stays
+//! responsive (validated by a long-running battery poll).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

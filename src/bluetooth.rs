@@ -92,7 +92,7 @@ impl BluetoothHeadset {
     /// Poll the battery over the held RACE session, reusing the single
     /// subscribe. If the session is gone (first run after a failure) it is
     /// re-established via `find`. A failed battery read tears the session down
-    /// so the next cycle re-subscribes (a fresh, non-destructive GATT session).
+    /// so the next cycle opens a fresh subscribe instead of polling a dead one.
     /// The Airoha config is read lazily and only while still empty.
     pub fn refresh(&mut self) -> Result<(), DeviceError> {
         if self.race.is_none() {
