@@ -11,6 +11,9 @@ pub mod devices;
 #[cfg(target_os = "linux")]
 pub mod bluetooth;
 
+#[cfg(target_os = "linux")]
+mod airoha_race;
+
 pub static VERBOSE: OnceLock<bool> = OnceLock::new();
 
 #[macro_export]
