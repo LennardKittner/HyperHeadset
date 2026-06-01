@@ -82,7 +82,77 @@ const DEVICE_REGISTER: &[DeviceEntry] = &[
 const RESPONSE_BUFFER_SIZE: usize = 256;
 pub const RESPONSE_DELAY: Duration = Duration::from_millis(50);
 
-pub fn connect_compatible_device() -> Result<Box<dyn Device>, DeviceError> {
+/// A connected headset, either over USB HID (the dongle) or, as a fallback on
+/// Linux, over Bluetooth. Frontends (tray, CLI) consume this uniformly via the
+/// small interface below, regardless of the underlying backend.
+pub enum Headset {
+    Hid(Box<dyn Device>),
+    #[cfg(target_os = "linux")]
+    Bluetooth(crate::bluetooth::BluetoothHeadset),
+}
+
+impl Headset {
+    pub fn device_properties(&self) -> DeviceProperties {
+        match self {
+            Headset::Hid(device) => device.get_device_state().device_properties.clone(),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(bt) => bt.device_properties(),
+        }
+    }
+
+    pub fn active_refresh_state(&mut self) -> Result<(), DeviceError> {
+        match self {
+            Headset::Hid(device) => device.active_refresh_state(),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(bt) => bt.refresh(),
+        }
+    }
+
+    pub fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
+        match self {
+            Headset::Hid(device) => device.passive_refresh_state(),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(bt) => bt.refresh(),
+        }
+    }
+
+    pub fn allow_passive_refresh(&mut self) -> bool {
+        match self {
+            Headset::Hid(device) => device.allow_passive_refresh(),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(_) => false,
+        }
+    }
+
+    pub fn try_apply(&mut self, command: DeviceEvent) -> Result<(), String> {
+        match self {
+            Headset::Hid(device) => device.try_apply(command),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(_) => {
+                Err("This setting cannot be changed over Bluetooth".to_string())
+            }
+        }
+    }
+}
+
+/// Connect to a compatible headset: a USB HID dongle if present, otherwise
+/// (on Linux) fall back to a Bluetooth-connected HyperX headset.
+pub fn connect_compatible_device() -> Result<Headset, DeviceError> {
+    match connect_hid_device() {
+        Ok(device) => Ok(Headset::Hid(device)),
+        Err(error) => {
+            #[cfg(target_os = "linux")]
+            {
+                if let Ok(Some(bt)) = crate::bluetooth::BluetoothHeadset::find() {
+                    return Ok(Headset::Bluetooth(bt));
+                }
+            }
+            Err(error)
+        }
+    }
+}
+
+fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
     let all_product_ids: Vec<u16> = DEVICE_REGISTER
         .iter()
         .flat_map(|e| e.product_ids.iter().copied())
@@ -1000,7 +1070,7 @@ pub trait Device {
             DeviceEvent::AutomaticShutdownAfter(delay) => {
                 if let Some(packet) = self.set_automatic_shut_down_packet(delay) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!(
                             "Failed to set automatic shutdown with error: {:?}",
                             err
@@ -1013,7 +1083,7 @@ pub trait Device {
             DeviceEvent::Muted(mute) => {
                 if let Some(packet) = self.set_mute_packet(mute) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!("Failed to mute with error: {:?}", err))?;
                     }
                 } else {
@@ -1023,7 +1093,7 @@ pub trait Device {
             DeviceEvent::SideToneOn(enable) => {
                 if let Some(packet) = self.set_side_tone_packet(enable) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!("Failed to enable side tone with error: {:?}", err))?;
                     }
                 } else {
@@ -1033,7 +1103,7 @@ pub trait Device {
             DeviceEvent::SideToneVolume(volume) => {
                 if let Some(packet) = self.set_side_tone_volume_packet(volume) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!(
                             "Failed to set side tone volume with error: {:?}",
                             err
@@ -1049,7 +1119,7 @@ pub trait Device {
             DeviceEvent::VoicePrompt(enable) => {
                 if let Some(packet) = self.set_voice_prompt_packet(enable) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!(
                             "Failed to enable voice prompt with error: {:?}",
                             err
@@ -1062,7 +1132,7 @@ pub trait Device {
             DeviceEvent::SurroundSound(surround_sound) => {
                 if let Some(packet) = self.set_surround_sound_packet(surround_sound) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!(
                             "Failed to set surround sound with error: {:?}",
                             err
@@ -1075,7 +1145,7 @@ pub trait Device {
             DeviceEvent::Silent(mute_playback) => {
                 if let Some(packet) = self.set_silent_mode_packet(mute_playback) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!("Failed to mute playback with error: {:?}", err))?;
                     }
                 } else {
@@ -1085,7 +1155,7 @@ pub trait Device {
             DeviceEvent::NoiseGateActive(activate) => {
                 if let Some(packet) = self.set_noise_gate_packet(activate) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().hid_device.write(&packet) {
+                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
                         Err(format!(
                             "Failed to activate noise gate with error: {:?}",
                             err

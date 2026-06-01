@@ -8,6 +8,9 @@ use dialog::{Choice, DialogBox};
 // #![warn(missing_docs)]
 pub mod devices;
 
+#[cfg(target_os = "linux")]
+pub mod bluetooth;
+
 pub static VERBOSE: OnceLock<bool> = OnceLock::new();
 
 #[macro_export]

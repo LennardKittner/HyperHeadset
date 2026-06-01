@@ -2,21 +2,24 @@ use std::{process::exit, time::Duration};
 
 use clap::{Arg, ArgAction, Command};
 use hyper_headset::{
-    devices::{connect_compatible_device, Device, DeviceError, DeviceEvent},
+    devices::{connect_compatible_device, DeviceError, DeviceEvent, DeviceProperties, Headset},
     VERBOSE,
 };
 
 const SHOW_ALL_OPTIONS: bool = false;
 
 /// helper function to enable help messages
-fn device_supports<F>(device: &Result<Box<dyn Device>, DeviceError>, f: F) -> bool
+fn device_supports<F>(device: &Result<Headset, DeviceError>, f: F) -> bool
 where
-    F: FnOnce(&Box<dyn Device>) -> bool,
+    F: FnOnce(&DeviceProperties) -> bool,
 {
-    device.as_ref().map(f).unwrap_or(false)
+    device
+        .as_ref()
+        .map(|headset| f(&headset.device_properties()))
+        .unwrap_or(false)
 }
 
-fn create_command(device: &Result<Box<dyn Device>, DeviceError>) -> Command {
+fn create_command(device: &Result<Headset, DeviceError>) -> Command {
     Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .disable_version_flag(false)
@@ -32,7 +35,7 @@ fn create_command(device: &Result<Box<dyn Device>, DeviceError>) -> Command {
                     "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
                 )
                     .hide(!SHOW_ALL_OPTIONS
-                        && !device_supports(device, |d| d.can_set_automatic_shutdown()))
+                        && !device_supports(device, |d| d.can_set_automatic_shutdown))
                 .value_parser(clap::value_parser!(u8)),
         )
         .arg(
@@ -41,7 +44,7 @@ fn create_command(device: &Result<Box<dyn Device>, DeviceError>) -> Command {
                 .required(false)
                 .help("Mute or unmute the headset.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(device, |d| d.can_set_mute()))
+                    && !device_supports(device, |d| d.can_set_mute))
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -50,7 +53,7 @@ fn create_command(device: &Result<Box<dyn Device>, DeviceError>) -> Command {
                 .required(false)
                 .help("Enable or disable side tone.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(device, |d| d.can_set_side_tone()))
+                    && !device_supports(device, |d| d.can_set_side_tone))
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -59,7 +62,7 @@ fn create_command(device: &Result<Box<dyn Device>, DeviceError>) -> Command {
                 .required(false)
                 .help("Set the side tone volume.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(device, |d| d.can_set_side_tone_volume()))
+                    && !device_supports(device, |d| d.can_set_side_tone_volume))
                 .value_parser(clap::value_parser!(u8)),
         )
         .arg(
@@ -68,7 +71,7 @@ fn create_command(device: &Result<Box<dyn Device>, DeviceError>) -> Command {
                 .required(false)
                 .help("Enable voice prompt. This may not be supported on your device.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(device, |d| d.can_set_voice_prompt()))
+                    && !device_supports(device, |d| d.can_set_voice_prompt))
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -77,7 +80,7 @@ fn create_command(device: &Result<Box<dyn Device>, DeviceError>) -> Command {
                 .required(false)
                 .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(device, |d| d.can_set_surround_sound()))
+                    && !device_supports(device, |d| d.can_set_surround_sound))
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -86,7 +89,7 @@ fn create_command(device: &Result<Box<dyn Device>, DeviceError>) -> Command {
                 .required(false)
                 .help("Mute or unmute playback.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(device, |d| d.can_set_silent_mode()))
+                    && !device_supports(device, |d| d.can_set_silent_mode))
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -95,7 +98,7 @@ fn create_command(device: &Result<Box<dyn Device>, DeviceError>) -> Command {
                 .required(false)
                 .help("Activates noise gate.")
                 .hide(!SHOW_ALL_OPTIONS
-                    && !device_supports(device, |d| d.can_set_silent_mode()))
+                    && !device_supports(device, |d| d.can_set_silent_mode))
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
@@ -225,7 +228,7 @@ fn main() {
 
     if let Some(output_json) = matches.get_one::<bool>("json") {
         if *output_json {
-            let properties = &device.get_device_state().device_properties;
+            let properties = device.device_properties();
             let mut headset_info_json = "{\n  ".to_string();
 
             let json_properties: Vec<String> = properties
@@ -257,9 +260,9 @@ fn main() {
             headset_info_json += "\n}";
             println!("{}", headset_info_json);
         } else {
-            println!("{}", device.get_device_state().device_properties);
+            println!("{}", device.device_properties());
         }
     } else {
-        println!("{}", device.get_device_state().device_properties);
+        println!("{}", device.device_properties());
     }
 }
