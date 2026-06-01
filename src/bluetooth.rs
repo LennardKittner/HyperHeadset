@@ -17,11 +17,34 @@ const DBUS_TIMEOUT: Duration = Duration::from_millis(2000);
 const MOD_AUTO_POWER_OFF: u16 = 1;
 const MOD_VOICE_PROMPT: u16 = 6;
 const RACE_GET_MMI_COMMON_CONFIG: u16 = 0x2C83;
+/// RACE_GET_BATTERY (`0x0CD6` RaceGetBattery in the Airoha SDK) — reads the
+/// battery level over the vendor BLE service instead of HFP. Takes a `role`
+/// byte; the `0x5B` response is a status-only ack and the level arrives in a
+/// `0x5D` indication. (The AirReps table's `0x0C02` is unimplemented on this
+/// firmware — no response.)
+const RACE_GET_BATTERY: u16 = 0x0CD6;
+/// Battery `role` argument. Confirmed on Cloud III S: role 0 = the headset
+/// (role 1 errors — no second battery on this non-TWS device).
+const BATTERY_ROLE: u8 = 0x00;
 
 // Writes are intentionally not implemented: `RACE_SET_MMI_COMMON_CONFIG`
 // (0x2C82) is acknowledged but only updates a volatile RAM mirror that
 // reverts on (re)connect. Persistent settings would require writing the
 // matching NVKEY via the dongle's USB path.
+
+/// Read the battery over a single long-lived RACE session (battery +
+/// voice-prompt + auto-power-off all on one subscribe) instead of the HFP
+/// `AT+BIEV` indicator. This sidesteps the HFP↔GATT conflict and removes the
+/// need for the destructive tray reconnect; validated stable over a held-session
+/// poll on Cloud III S (see `local/tools/airoha_battery_stability.py`).
+///
+/// On by default. Set `HYPERHEADSET_RACE_BATTERY=0` (or `false`) to fall back to
+/// the legacy HFP battery path (which re-enables the tray click-to-reconnect).
+pub fn race_battery_enabled() -> bool {
+    !std::env::var("HYPERHEADSET_RACE_BATTERY")
+        .map(|v| v == "0" || v.eq_ignore_ascii_case("false"))
+        .unwrap_or(false)
+}
 
 /// A HyperX headset reached over Bluetooth (BlueZ), used as a fallback backend
 /// when no USB HID dongle is present.
@@ -38,6 +61,12 @@ pub struct BluetoothHeadset {
     battery_level: Option<u8>,
     connected: bool,
     airoha: AirohaSnapshot,
+    /// Long-lived RACE session, populated only on the experimental
+    /// `race_battery_enabled()` path. Held open so battery polls reuse one
+    /// subscribe instead of cycling StartNotify/StopNotify (which is what
+    /// eventually locks up the vendor service). Boxed to keep `BluetoothHeadset`
+    /// (and the `Headset` enum) small on the common HFP path.
+    race: Option<Box<RaceClient>>,
 }
 
 impl BluetoothHeadset {
@@ -61,9 +90,33 @@ impl BluetoothHeadset {
             battery_level: None,
             connected: true,
             airoha: *AIROHA_CACHE.lock().unwrap(),
+            race: None,
         };
-        headset.battery_level = headset.read_battery().ok().flatten();
+        if race_battery_enabled() {
+            headset.open_race_session();
+        } else {
+            headset.battery_level = headset.read_battery().ok().flatten();
+        }
         Ok(Some(headset))
+    }
+
+    /// Open the long-lived RACE session and take the first battery + Airoha
+    /// reads over it. On failure `race` stays `None` and the next `refresh`
+    /// retries — we never fall back to HFP here, since the whole point of this
+    /// path is to avoid the HFP indicator.
+    fn open_race_session(&mut self) {
+        let Ok(client) = RaceClient::open(&self.path.to_string()) else {
+            return;
+        };
+        self.battery_level = read_race_battery(&client);
+        if self.airoha.is_empty() {
+            let snap = read_airoha_via(&client);
+            if !snap.is_empty() {
+                self.airoha = snap;
+                *AIROHA_CACHE.lock().unwrap() = snap;
+            }
+        }
+        self.race = Some(Box::new(client));
     }
 
     /// Reads `org.bluez.Battery1.Percentage`. Returns `None` if the interface
@@ -84,37 +137,71 @@ impl BluetoothHeadset {
         Ok(Some(percentage))
     }
 
-    /// Best-effort read of the Airoha vendor BLE features. Returns an empty
-    /// snapshot when the headset's GATT vendor service is unreachable;
-    /// callers should retry until [`AirohaSnapshot::is_empty`] is false.
+    /// Best-effort read of the Airoha vendor BLE features over a throwaway RACE
+    /// session (HFP path). Returns an empty snapshot when the vendor service is
+    /// unreachable; callers retry until [`AirohaSnapshot::is_empty`] is false.
     fn read_airoha_snapshot(&self) -> AirohaSnapshot {
-        let mut snap = AirohaSnapshot::default();
-        let Ok(client) = RaceClient::open(&self.path.to_string()) else {
-            return snap;
-        };
-        // Voice prompt — response: [status, module_id_le16, value_le16].
-        // value 0x0000 = off, non-zero (typically 0xFFFF) = on.
-        if let Ok(body) = client.request(RACE_GET_MMI_COMMON_CONFIG, &MOD_VOICE_PROMPT.to_le_bytes())
-        {
-            if body.len() >= 5 && body[0] == 0 && u16_le(&body[1..3]) == MOD_VOICE_PROMPT {
-                snap.voice_prompt_on = Some(u16_le(&body[3..5]) != 0);
-            }
+        match RaceClient::open(&self.path.to_string()) {
+            Ok(client) => read_airoha_via(&client),
+            Err(_) => AirohaSnapshot::default(),
         }
-        // Auto power off — response: [status, module_id_le16, enabled_le16, timeout_minutes_le16, …].
-        if let Ok(body) =
-            client.request(RACE_GET_MMI_COMMON_CONFIG, &MOD_AUTO_POWER_OFF.to_le_bytes())
-        {
-            if body.len() >= 7 && body[0] == 0 && u16_le(&body[1..3]) == MOD_AUTO_POWER_OFF {
-                snap.auto_power_off_enabled = Some(u16_le(&body[3..5]) != 0);
-                snap.auto_power_off_minutes = Some(u16_le(&body[5..7]));
-            }
-        }
-        snap
     }
 
-    /// Re-locate the headset and refresh the cached battery. The last good
-    /// reading is kept across transient HFP disruptions. When the headset can
-    /// no longer be reached, `connected` is cleared so the next
+    /// Refresh the cached battery (and lazily the Airoha config). Dispatches to
+    /// the experimental RACE path or the default HFP path based on
+    /// [`race_battery_enabled`]. On failure `connected` is cleared and an error
+    /// signals the caller to reconnect.
+    pub fn refresh(&mut self) -> Result<(), DeviceError> {
+        if race_battery_enabled() {
+            self.refresh_via_race()
+        } else {
+            self.refresh_via_hfp()
+        }
+    }
+
+    /// Poll battery over the held RACE session, reusing the single subscribe. If
+    /// the session is gone (first run after a failure) it is re-established via
+    /// `find`. A failed battery read tears the session down so the next cycle
+    /// re-subscribes — the non-destructive equivalent of the HFP reconnect.
+    fn refresh_via_race(&mut self) -> Result<(), DeviceError> {
+        if self.race.is_none() {
+            match BluetoothHeadset::find() {
+                Ok(Some(fresh)) => *self = fresh,
+                _ => {
+                    self.connected = false;
+                    return Err(DeviceError::NoDeviceFound());
+                }
+            }
+        }
+        let Some(client) = self.race.as_ref() else {
+            self.connected = false;
+            return Err(DeviceError::NoDeviceFound());
+        };
+        match read_race_battery(client) {
+            Some(level) => {
+                self.battery_level = Some(level);
+                if self.airoha.is_empty() {
+                    let snap = read_airoha_via(client);
+                    if !snap.is_empty() {
+                        self.airoha = snap;
+                        *AIROHA_CACHE.lock().unwrap() = snap;
+                    }
+                }
+                Ok(())
+            }
+            None => {
+                // Session likely locked up: drop it so the next cycle opens a
+                // fresh subscribe instead of polling a dead one.
+                self.race = None;
+                self.connected = false;
+                Err(DeviceError::NoDeviceFound())
+            }
+        }
+    }
+
+    /// Re-locate the headset and refresh the cached battery from HFP. The last
+    /// good reading is kept across transient HFP disruptions. When the headset
+    /// can no longer be reached, `connected` is cleared so the next
     /// `device_properties()` reflects it, and an error signals the caller to
     /// reconnect.
     ///
@@ -123,7 +210,7 @@ impl BluetoothHeadset {
     /// [`AIROHA_CACHE`]) and we avoid repeatedly disturbing the HFP battery
     /// indicator. Because `find` seeds from that cache, the values also survive
     /// the reconnect triggered from the tray.
-    pub fn refresh(&mut self) -> Result<(), DeviceError> {
+    fn refresh_via_hfp(&mut self) -> Result<(), DeviceError> {
         match BluetoothHeadset::find() {
             Ok(Some(fresh)) => {
                 let battery_level = fresh.battery_level.or(self.battery_level);
@@ -165,6 +252,43 @@ impl BluetoothHeadset {
         }
         props
     }
+}
+
+/// Read voice-prompt and auto-power-off over an already-open RACE session.
+fn read_airoha_via(client: &RaceClient) -> AirohaSnapshot {
+    let mut snap = AirohaSnapshot::default();
+    // Voice prompt — response: [status, module_id_le16, value_le16].
+    // value 0x0000 = off, non-zero (typically 0xFFFF) = on.
+    if let Ok(body) = client.request(RACE_GET_MMI_COMMON_CONFIG, &MOD_VOICE_PROMPT.to_le_bytes()) {
+        if body.len() >= 5 && body[0] == 0 && u16_le(&body[1..3]) == MOD_VOICE_PROMPT {
+            snap.voice_prompt_on = Some(u16_le(&body[3..5]) != 0);
+        }
+    }
+    // Auto power off — response: [status, module_id_le16, enabled_le16, timeout_minutes_le16, …].
+    if let Ok(body) = client.request(RACE_GET_MMI_COMMON_CONFIG, &MOD_AUTO_POWER_OFF.to_le_bytes()) {
+        if body.len() >= 7 && body[0] == 0 && u16_le(&body[1..3]) == MOD_AUTO_POWER_OFF {
+            snap.auto_power_off_enabled = Some(u16_le(&body[3..5]) != 0);
+            snap.auto_power_off_minutes = Some(u16_le(&body[5..7]));
+        }
+    }
+    snap
+}
+
+/// Read the battery percentage over an already-open RACE session.
+///
+/// `0x0CD6` acks with a status-only `0x5B`; the data lands in a `0x5D`
+/// indication with body `[status, role, level]`. Confirmed on Cloud III S:
+/// role 0 → `00 00 53` (`0x53` = 83%). An invalid role (or any error) yields no
+/// indication, so `request_indication` times out and we return `None`.
+fn read_race_battery(client: &RaceClient) -> Option<u8> {
+    let body = client
+        .request_indication(RACE_GET_BATTERY, &[BATTERY_ROLE])
+        .ok()?;
+    if body.len() < 3 || body[0] != 0 {
+        return None;
+    }
+    let level = body[2];
+    (level <= 100).then_some(level)
 }
 
 /// Cached snapshot of the Airoha vendor-BLE config we read over RACE.
