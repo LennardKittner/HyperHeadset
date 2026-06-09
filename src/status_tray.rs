@@ -1,5 +1,7 @@
 use std::sync::mpsc::Sender;
 
+use dialog::DialogBox;
+
 use hyper_headset::devices::{
     format_int_value, DeviceEvent, DeviceProperties, PropertyType,
 };
@@ -395,4 +397,13 @@ fn launch_eq_editor() {
             return;
         }
     }
+
+    let error_msg = "Could not find a supported terminal emulator.\n\n\
+                     Please install one of the following:\n\
+                     xdg-terminal-exec, gnome-terminal, konsole, xfce4-terminal, mate-terminal, lxterminal, alacritty, kitty, xterm\n\n\
+                     Or run manually from a terminal:\n\
+                     hyper_headset_cli --eq";
+    let _ = dialog::Message::new(error_msg)
+        .title("HyperX Equalizer Editor")
+        .show();
 }
