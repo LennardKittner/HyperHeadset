@@ -1,6 +1,6 @@
 use std::sync::mpsc::Sender;
 
-use dialog::DialogBox;
+use dialog::{Choice, DialogBox};
 
 use hyper_headset::devices::{
     format_int_value, DeviceEvent, DeviceProperties, PropertyType,
@@ -398,12 +398,69 @@ fn launch_eq_editor() {
         }
     }
 
-    let error_msg = "Could not find a supported terminal emulator.\n\n\
-                     Please install one of the following:\n\
-                     xdg-terminal-exec, gnome-terminal, konsole, xfce4-terminal, mate-terminal, lxterminal, alacritty, kitty, xterm\n\n\
-                     Or run manually from a terminal:\n\
-                     hyper_headset_cli --eq";
-    let _ = dialog::Message::new(error_msg)
+    let error_msg = "Could not open the terminal emulator.\n\n\
+                     Would you like to copy the CLI command to your clipboard?";
+    let choice = dialog::Question::new(error_msg)
         .title("HyperX Equalizer Editor")
         .show();
+
+    if let Ok(Choice::Yes) = choice {
+        if copy_to_clipboard("hyper_headset_cli --eq") {
+            let _ = dialog::Message::new("Command copied to clipboard.")
+                .title("HyperX Equalizer Editor")
+                .show();
+        } else {
+            let _ = dialog::Message::new("Failed to copy to clipboard. Please run manually:\n\nhyper_headset_cli --eq")
+                .title("HyperX Equalizer Editor")
+                .show();
+        }
+    }
+}
+
+fn copy_to_clipboard(text: &str) -> bool {
+    // Try wl-copy first (Wayland)
+    if let Ok(mut child) = std::process::Command::new("wl-copy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        use std::io::Write;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if child.wait().is_ok() {
+            return true;
+        }
+    }
+
+    // Try xclip (X11)
+    if let Ok(mut child) = std::process::Command::new("xclip")
+        .args(&["-selection", "clipboard"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        use std::io::Write;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if child.wait().is_ok() {
+            return true;
+        }
+    }
+
+    // Try xsel (X11 alternative)
+    if let Ok(mut child) = std::process::Command::new("xsel")
+        .args(&["--clipboard", "--input"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        use std::io::Write;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if child.wait().is_ok() {
+            return true;
+        }
+    }
+
+    false
 }
