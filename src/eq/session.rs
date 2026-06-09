@@ -3,6 +3,7 @@
 //! Per-tick methods load disk changes into the device's properties and
 //! sync the active preset to the headset on connection transitions.
 
+use crate::debug_println;
 use crate::devices::{Device, DeviceEvent};
 use crate::eq::presets;
 use crate::eq::presets::ConfigWatcher;
@@ -86,7 +87,7 @@ impl EqSession {
         if profile.synced {
             return true;
         }
-        println!("Syncing EQ preset '{}' to headset...", name);
+        debug_println!("Syncing EQ preset '{}' to headset...", name);
         match device.try_apply(DeviceEvent::EqualizerPreset(name.clone())) {
             Ok(()) => true,
             Err(e) => {

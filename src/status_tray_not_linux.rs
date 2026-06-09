@@ -499,23 +499,22 @@ impl TrayApp {
                     active_preset,
                     synced,
                 } => {
-                    let Some(ref current_value) = descriptor.data else {
-                        continue;
-                    };
-
                     if options.is_empty() {
-                        let menu_item = MenuItem::new(
-                            format!(
-                                "{}: {}{}",
-                                descriptor.pretty_name, current_value, descriptor.suffix
-                            ),
-                            false,
-                            None,
-                        );
-                        let _ = menu.append(&menu_item);
+                        if let Some(ref current_value) = descriptor.data {
+                            let menu_item = MenuItem::new(
+                                format!(
+                                    "{}: {}{}",
+                                    descriptor.pretty_name, current_value, descriptor.suffix
+                                ),
+                                false,
+                                None,
+                            );
+                            let _ = menu.append(&menu_item);
+                        }
                         continue;
                     }
 
+                    let current_value = descriptor.data.as_deref().unwrap_or("Unknown");
                     let submenu = Submenu::new(
                         format!("{}: {}", descriptor.pretty_name, current_value),
                         true,
@@ -557,6 +556,10 @@ impl TrayApp {
                         );
                         let _ = submenu.append(&entry);
                     }
+
+                    let _ = submenu.append(&PredefinedMenuItem::separator());
+                    let edit_item = MenuItem::new("Edit with: hyper_headset_cli --eq", false, None);
+                    let _ = submenu.append(&edit_item);
 
                     let _ = menu.append(&submenu);
                 }
@@ -711,3 +714,4 @@ unsafe fn enable_dark_context_menus() {
         flush();
     }
 }
+

@@ -274,10 +274,10 @@ impl Tray for StatusTray {
                         if let Some(ref current_value) = descriptor.data {
                             menu_items.push(
                                 StandardItem {
-                                    label: format!(
+                                    label: escape_label(&format!(
                                         "{}: {}{}",
                                         descriptor.pretty_name, current_value, descriptor.suffix
-                                    ),
+                                    )),
                                     enabled: false,
                                     ..Default::default()
                                 }
@@ -327,7 +327,7 @@ impl Tray for StatusTray {
                     submenu_items.push(MenuItem::Separator);
                     submenu_items.push(
                         StandardItem {
-                            label: "Edit with: hyper__headset__cli --eq".into(),
+                            label: escape_label("Edit with: hyper_headset_cli --eq"),
                             enabled: false,
                             ..Default::default()
                         }
@@ -336,7 +336,7 @@ impl Tray for StatusTray {
 
                     menu_items.push(
                         SubMenu {
-                            label: format!("{}: {}", descriptor.pretty_name, descriptor.data.as_deref().unwrap_or("None")),
+                            label: escape_label(&format!("{}: {}", descriptor.pretty_name, descriptor.data.as_deref().unwrap_or("Unknown"))),
                             submenu: submenu_items,
                             ..Default::default()
                         }
