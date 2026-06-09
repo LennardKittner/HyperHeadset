@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 #[cfg(target_os = "linux")]
 use std::{fs, io, process::Command, time::Duration};
 
@@ -9,11 +10,24 @@ pub mod devices;
 #[cfg(feature = "eq-support")]
 pub mod eq;
 
+#[cfg(target_os = "linux")]
+pub mod bluetooth;
+
+#[cfg(target_os = "linux")]
+mod airoha_race;
+
+pub static VERBOSE: OnceLock<bool> = OnceLock::new();
+
 #[macro_export]
 macro_rules! debug_println {
     ($($args:tt)*) => {
         #[cfg(debug_assertions)]
         println!($($args)*);
+
+        #[cfg(not(debug_assertions))]
+        if *$crate::VERBOSE.get().unwrap_or(&false) {
+            println!($($args)*);
+        }
     };
 }
 

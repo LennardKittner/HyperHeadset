@@ -136,7 +136,7 @@ jobs:
           sed -i "/sha256sums=/,/^)/c\sha256sums=(\n  '${{ steps.checksums.outputs.zip }}'\n  '${{ steps.checksums.outputs.rules }}'\n  '${{ steps.checksums.outputs.desktop }}'\n)" aur-bin-pkg/PKGBUILD
 
       - name: Publish to AUR
-        uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.3
         with:
           pkgname: hyper-headset-bin
           pkgbuild: ./aur-bin-pkg/PKGBUILD

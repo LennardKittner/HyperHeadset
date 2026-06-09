@@ -1,10 +1,14 @@
 #[cfg(feature = "eq-editor")]
 mod eq_editor;
 
-use std::time::Duration;
+use std::{process::exit, time::Duration};
 
 use clap::{Arg, ArgAction, Command};
-use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
+use hyper_headset::{
+    devices::{connect_compatible_device, DeviceError, DeviceEvent, DeviceProperties, Headset},
+    VERBOSE,
+};
+
 
 const SHOW_ALL_OPTIONS: bool = false;
 
@@ -129,6 +133,166 @@ fn parse_eq_pair(s: &str) -> Result<(u8, f32), String> {
     Ok((band_index, db_value))
 }
 
+/// helper function to enable help messages
+fn device_supports<F>(device: &Result<Headset, DeviceError>, f: F) -> bool
+where
+    F: FnOnce(&DeviceProperties) -> bool,
+{
+    device
+        .as_ref()
+        .map(|headset| f(&headset.device_properties()))
+        .unwrap_or(false)
+}
+
+fn create_command(device: &Result<Headset, DeviceError>) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(env!("CARGO_PKG_NAME"))
+        .version(env!("CARGO_PKG_VERSION"))
+        .disable_version_flag(false)
+        .disable_help_flag(true)
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about("A CLI application for monitoring and managing HyperX headsets.")
+        .after_help("Help only lists commands supported by this headset.")
+        .arg(
+            Arg::new("automatic-shutdown")
+                .long("automatic-shutdown")
+                .alias("automatic_shutdown")
+                .required(false)
+                .help(
+                    "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
+                )
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_automatic_shutdown))
+                .value_parser(clap::value_parser!(u8)),
+        )
+        .arg(
+            Arg::new("mute")
+                .long("mute")
+                .required(false)
+                .help("Mute or unmute the headset.")
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_mute))
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("enable-side-tone")
+                .long("enable-side-tone")
+                .alias("enable_side_tone")
+                .required(false)
+                .help("Enable or disable side tone.")
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_side_tone))
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("side-tone-volume")
+                .long("side-tone-volume")
+                .alias("side_tone_volume")
+                .required(false)
+                .help("Set the side tone volume.")
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_side_tone_volume))
+                .value_parser(clap::value_parser!(u8)),
+        )
+        .arg(
+            Arg::new("enable-voice-prompt")
+                .long("enable-voice-prompt")
+                .alias("enable_voice_prompt")
+                .required(false)
+                .help("Enable voice prompt. This may not be supported on your device.")
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_voice_prompt))
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("surround-sound")
+                .long("surround-sound")
+                .alias("surround_sound")
+                .required(false)
+                .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_surround_sound))
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("mute-playback")
+                .long("mute-playback")
+                .alias("mute_playback")
+                .required(false)
+                .help("Mute or unmute playback. This may not be supported on your device.")
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_silent_mode))
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("activate-noise-gate")
+                .long("activate-noise-gate")
+                .alias("activate_noise_gate")
+                .required(false)
+                .help("Activates noise gate.")
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_noise_gate))
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("eq-profile")
+                .long("eq-profile")
+                .required(false)
+                .value_name("BAND=DB,...")
+                .help(
+                    "Set full EQ profile. Unspecified bands reset to 0 dB.\n\
+                     BAND: index 0-9 or frequency (1khz, 250hz). Bare integers are indices, not Hz.\n\
+                     \x20 [0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz]\n\
+                     DB: -12.0 to 12.0.\n\
+                     Example: --eq-profile 5=-12.0,1khz=3.0,16khz=4.0",
+                )
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_equalizer)),
+        )
+        .arg(
+            Arg::new("eq-band")
+                .long("eq-band")
+                .required(false)
+                .action(ArgAction::Append)
+                .value_name("BAND=DB[,...]")
+                .help(
+                    "Adjust specific bands. Repeatable, comma-separated (last write wins per band).\n\
+                     Others unchanged. Use alone or with --eq-profile (overrides on top of the profile).\n\
+                     See --eq-profile for band/dB reference.\n\
+                     Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0",
+                )
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_equalizer)),
+        )
+        .arg(
+            Arg::new("verbose")
+                .long("verbose")
+                .short('v')
+                .action(ArgAction::SetTrue)
+                .required(false)
+                .help("Use verbose output"),
+        )
+        .arg(
+            Arg::new("help")
+                .long("help")
+                .short('h')
+                .action(ArgAction::SetTrue)
+                .help("Print help"),
+        )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .default_value("false")
+                .action(ArgAction::SetTrue)
+                .required(false)
+                .help("Use JSON output. Time is in seconds."),
+        );
+
+    // Feature-gated TUI editor arg
+    #[cfg(feature = "eq-editor")]
+    {
+        cmd = cmd.arg(
+            Arg::new("eq")
+                .long("eq")
+                .action(ArgAction::SetTrue)
+                .help("Open interactive EQ editor (TUI).\nThis may not be supported on your device.")
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_equalizer)),
+        );
+    }
+
+    cmd
+}
+
 fn main() {
     #[cfg(target_os = "linux")]
     {
@@ -146,146 +310,42 @@ fn main() {
         }
         prompt_user_for_udev_rule();
     }
-    let mut device = match connect_compatible_device() {
+
+    let device = Err(DeviceError::NoDeviceFound());
+
+    // prep help without any headset specific options
+    let command = create_command(&device);
+    let matches = command.get_matches();
+    VERBOSE.set(matches.get_flag("verbose")).unwrap();
+
+    let device = connect_compatible_device();
+
+    // print help with headset specific options
+    if matches.get_flag("help") {
+        let mut command = create_command(&device);
+        command.print_long_help().unwrap();
+        exit(0);
+    }
+
+    let mut device = match device {
         Ok(device) => device,
-        Err(error) => {
-            eprintln!("{error}");
-            std::process::exit(1);
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1)
         }
     };
 
-    let can_set_eq = device.can_set_equalizer();
+
+    let _can_set_eq = device.device_properties().can_set_equalizer;
 
     #[cfg(not(feature = "eq-support"))]
-    if can_set_eq {
+    if _can_set_eq {
         eprintln!("Tip: This headset supports EQ. Rebuild with --features eq-support for EQ presets, or --features eq-editor for the TUI equalizer.");
     }
     #[cfg(all(feature = "eq-support", not(feature = "eq-editor")))]
-    if can_set_eq {
+    if _can_set_eq {
         eprintln!("Tip: This headset supports EQ. Rebuild with --features eq-editor for the TUI equalizer.");
     }
-
-    #[allow(unused_mut)]
-    let mut cmd = Command::new(env!("CARGO_PKG_NAME"))
-        .version(env!("CARGO_PKG_VERSION"))
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .about("A CLI application for monitoring and managing HyperX headsets.")
-        .after_help("Help only lists commands supported by this headset.")
-        .arg(
-            Arg::new("automatic-shutdown")
-                .long("automatic-shutdown")
-                .alias("automatic_shutdown")
-                .required(false)
-                .help(
-                    "Set the delay in minutes after which the headset will automatically shutdown.\n0 will disable automatic shutdown.",
-                )
-                    .hide(!SHOW_ALL_OPTIONS && !device.can_set_automatic_shutdown())
-                .value_parser(clap::value_parser!(u8)),
-        )
-        .arg(
-            Arg::new("mute")
-                .long("mute")
-                .required(false)
-                .help("Mute or unmute the headset.")
-                .hide(!SHOW_ALL_OPTIONS && !device.can_set_mute())
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("enable-side-tone")
-                .long("enable-side-tone")
-                .alias("enable_side_tone")
-                .required(false)
-                .help("Enable or disable side tone.")
-                .hide(!SHOW_ALL_OPTIONS && !device.can_set_side_tone())
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("side-tone-volume")
-                .long("side-tone-volume")
-                .alias("side_tone_volume")
-                .required(false)
-                .help("Set the side tone volume.")
-                .hide(!SHOW_ALL_OPTIONS && !device.can_set_side_tone_volume())
-                .value_parser(clap::value_parser!(u8)),
-        )
-        .arg(
-            Arg::new("enable-voice-prompt")
-                .long("enable-voice-prompt")
-                .alias("enable_voice_prompt")
-                .required(false)
-                .help("Enable voice prompt. This may not be supported on your device.")
-                .hide(!SHOW_ALL_OPTIONS && !device.can_set_voice_prompt())
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("surround-sound")
-                .long("surround-sound")
-                .alias("surround_sound")
-                .required(false)
-                .help("Enables surround sound. This may be on by default and cannot be changed on your device.")
-                .hide(!SHOW_ALL_OPTIONS && !device.can_set_surround_sound())
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("mute-playback")
-                .long("mute-playback")
-                .alias("mute_playback")
-                .required(false)
-                .help("Mute or unmute playback. This may not be supported on your device.")
-                .hide(!SHOW_ALL_OPTIONS && !device.can_set_silent_mode())
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("activate-noise-gate")
-                .long("activate-noise-gate")
-                .alias("activate_noise_gate")
-                .required(false)
-                .help("Activates noise gate.")
-                .hide(!SHOW_ALL_OPTIONS && !device.can_set_noise_gate())
-                .value_parser(clap::value_parser!(bool)),
-        )
-        .arg(
-            Arg::new("eq-profile")
-                .long("eq-profile")
-                .required(false)
-                .value_name("BAND=DB,...")
-                .help(
-                    "Set full EQ profile. Unspecified bands reset to 0 dB.\n\
-                     BAND: index 0-9 or frequency (1khz, 250hz). Bare integers are indices, not Hz.\n\
-                     \x20 [0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz]\n\
-                     DB: -12.0 to 12.0.\n\
-                     Example: --eq-profile 5=-12.0,1khz=3.0,16khz=4.0",
-                )
-                .hide(!SHOW_ALL_OPTIONS && !can_set_eq),
-        )
-        .arg(
-            Arg::new("eq-band")
-                .long("eq-band")
-                .required(false)
-                .action(ArgAction::Append)
-                .value_name("BAND=DB[,...]")
-                .help(
-                    "Adjust specific bands. Repeatable, comma-separated (last write wins per band).\n\
-                     Others unchanged. Use alone or with --eq-profile (overrides on top of the profile).\n\
-                     See --eq-profile for band/dB reference.\n\
-                     Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0",
-                )
-                .hide(!SHOW_ALL_OPTIONS && !can_set_eq),
-        );
-
-    // Feature-gated TUI editor arg
-    #[cfg(feature = "eq-editor")]
-    {
-        cmd = cmd.arg(
-            Arg::new("eq")
-                .long("eq")
-                .action(ArgAction::SetTrue)
-                .help("Open interactive EQ editor (TUI).\nThis may not be supported on your device.")
-                .hide(!SHOW_ALL_OPTIONS && !can_set_eq),
-        );
-    }
-
-    let matches = cmd.get_matches();
 
     // EQ TUI editor (--eq) - returns early
     #[cfg(feature = "eq-editor")]
@@ -294,57 +354,62 @@ fn main() {
             use crate::eq_editor::{EditorResult, EqEditor};
             use hyper_headset::eq::presets;
 
-            // Capture current profile state before TUI starts (for restore on cancel)
-            let previous_profile = presets::load_selected_profile();
+            if let Headset::Hid(ref mut dev) = device {
+                // Capture current profile state before TUI starts (for restore on cancel)
+                let previous_profile = presets::load_selected_profile();
 
-            let editor = EqEditor::new();
-            match editor.run(Some(&mut *device)) {
-                Ok(EditorResult::Saved { name, bands }) => {
-                    // Save preset file
-                    let preset = presets::EqPreset {
-                        name: name.clone(),
-                        bands,
-                    };
-                    if let Err(err) = presets::save_preset(&preset) {
-                        eprintln!("Failed to save preset: {:?}", err);
-                    }
-                    // Always keep TUI.json in sync with last TUI session state
-                    if name != "TUI" {
-                        let tui_preset = presets::EqPreset {
-                            name: "TUI".to_string(),
+                let editor = EqEditor::new();
+                match editor.run(Some(&mut **dev)) {
+                    Ok(EditorResult::Saved { name, bands }) => {
+                        // Save preset file
+                        let preset = presets::EqPreset {
+                            name: name.clone(),
                             bands,
                         };
-                        if let Err(err) = presets::save_preset(&tui_preset) {
-                            eprintln!("Failed to update TUI preset: {:?}", err);
+                        if let Err(err) = presets::save_preset(&preset) {
+                            eprintln!("Failed to save preset: {:?}", err);
                         }
+                        // Always keep TUI.json in sync with last TUI session state
+                        if name != "TUI" {
+                            let tui_preset = presets::EqPreset {
+                                name: "TUI".to_string(),
+                                bands,
+                            };
+                            if let Err(err) = presets::save_preset(&tui_preset) {
+                                eprintln!("Failed to update TUI preset: {:?}", err);
+                            }
+                        }
+                        // TUI sends bands live — headset already has them, so synced=true
+                        let profile = presets::SelectedProfile {
+                            active_preset: Some(name.clone()),
+                            synced: true,
+                        };
+                        if let Err(err) = presets::save_selected_profile(&profile) {
+                            eprintln!("Failed to save selected profile: {:?}", err);
+                        }
+                        println!("EQ preset '{}' saved.", name);
+                        std::process::exit(0);
                     }
-                    // TUI sends bands live — headset already has them, so synced=true
-                    let profile = presets::SelectedProfile {
-                        active_preset: Some(name.clone()),
-                        synced: true,
-                    };
-                    if let Err(err) = presets::save_selected_profile(&profile) {
-                        eprintln!("Failed to save selected profile: {:?}", err);
+                    Ok(EditorResult::Cancelled { name }) => {
+                        // Restore previous profile with its original synced state
+                        let profile = presets::SelectedProfile {
+                            active_preset: Some(name),
+                            synced: previous_profile.synced,
+                        };
+                        if let Err(err) = presets::save_selected_profile(&profile) {
+                            eprintln!("Failed to restore selected profile: {:?}", err);
+                        }
+                        println!("EQ editing cancelled.");
+                        std::process::exit(0);
                     }
-                    println!("EQ preset '{}' saved.", name);
-                    std::process::exit(0);
-                }
-                Ok(EditorResult::Cancelled { name }) => {
-                    // Restore previous profile with its original synced state
-                    let profile = presets::SelectedProfile {
-                        active_preset: Some(name),
-                        synced: previous_profile.synced,
-                    };
-                    if let Err(err) = presets::save_selected_profile(&profile) {
-                        eprintln!("Failed to restore selected profile: {:?}", err);
+                    Err(e) => {
+                        eprintln!("EQ editor error: {}", e);
+                        std::process::exit(1);
                     }
-                    println!("EQ editing cancelled.");
-                    std::process::exit(0);
                 }
-                Err(e) => {
-                    eprintln!("EQ editor error: {}", e);
-                    std::process::exit(1);
-                }
+            } else {
+                eprintln!("ERROR: EQ editor is not supported over Bluetooth");
+                std::process::exit(1);
             }
         }
     }
@@ -438,17 +503,22 @@ fn main() {
     }
 
     if let Some(ref pairs) = eq_pairs {
-        if let Some(packets) = device.set_equalizer_bands_packets(pairs) {
-            for packet in packets {
-                device.prepare_write();
-                if let Err(err) = device.write_hid_report(&packet) {
-                    eprintln!("Failed to set equalizer with error: {:?}", err);
-                    std::process::exit(1);
+        if let Headset::Hid(ref mut dev) = device {
+            if let Some(packets) = dev.set_equalizer_bands_packets(pairs) {
+                for packet in packets {
+                    dev.prepare_write();
+                    if let Err(err) = dev.write_hid_report(&packet) {
+                        eprintln!("Failed to set equalizer with error: {:?}", err);
+                        std::process::exit(1);
+                    }
+                    std::thread::sleep(Duration::from_millis(3));
                 }
-                std::thread::sleep(Duration::from_millis(3));
+            } else {
+                eprintln!("ERROR: Equalizer control is not supported on this device");
+                std::process::exit(1);
             }
         } else {
-            eprintln!("ERROR: Equalizer control is not supported on this device");
+            eprintln!("ERROR: Equalizer control is not supported over Bluetooth");
             std::process::exit(1);
         }
     }
@@ -468,19 +538,68 @@ fn main() {
         std::process::exit(1);
     };
 
+    let props = device.device_properties();
+
     // Populate EQ state from disk so it appears in the output.
     // Note: the firmware does not respond to EQ-query reads, so disk is the only
     // source of truth. This may be stale if EQ was changed by another tool
     // (e.g. NGenuity on Windows) — re-applying via the tray or `--eq-profile`
     // re-syncs it.
     #[cfg(feature = "eq-support")]
-    if device.get_device_state().device_properties.can_set_equalizer {
-        use hyper_headset::eq::presets;
-        let profile = presets::load_selected_profile();
-        let props = &mut device.get_device_state_mut().device_properties;
-        props.active_eq_preset = profile.active_preset;
-        props.eq_synced = Some(profile.synced);
-    }
+    let props = {
+        let mut props = props;
+        if props.can_set_equalizer {
+            use hyper_headset::eq::presets;
+            let profile = presets::load_selected_profile();
+            props.active_eq_preset = profile.active_preset;
+            props.eq_synced = Some(profile.synced);
+        }
+        props
+    };
 
-    println!("{}", device.get_device_state().device_properties);
+    if let Some(output_json) = matches.get_one::<bool>("json") {
+        if *output_json {
+            let mut headset_info_json = "{\n  ".to_string();
+
+            let json_properties: Vec<String> = props
+                .get_properties()
+                .iter()
+                .filter_map(|property| match property {
+                    hyper_headset::devices::PropertyDescriptorWrapper::Int(
+                        property_descriptor,
+                        _items,
+                    ) => property_descriptor
+                        .data
+                        .map(|data| format!("\"{}\": {}", property_descriptor.name, data)),
+                    hyper_headset::devices::PropertyDescriptorWrapper::Bool(
+                        property_descriptor,
+                    ) => property_descriptor
+                        .data
+                        .map(|data| format!("\"{}\": {}", property_descriptor.name, data)),
+                    hyper_headset::devices::PropertyDescriptorWrapper::String(
+                        property_descriptor,
+                    ) => property_descriptor
+                        .data
+                        .as_ref()
+                        .map(|data| format!("\"{}\": \"{}\"", property_descriptor.name, data)),
+                    hyper_headset::devices::PropertyDescriptorWrapper::SelectEQ {
+                        descriptor,
+                        ..
+                    } => descriptor
+                        .data
+                        .as_ref()
+                        .map(|data| format!("\"{}\": \"{}\"", descriptor.name, data)),
+                })
+                .collect();
+
+            headset_info_json += &json_properties.join(",\n  ");
+
+            headset_info_json += "\n}";
+            println!("{}", headset_info_json);
+        } else {
+            println!("{}", props);
+        }
+    } else {
+        println!("{}", props);
+    }
 }

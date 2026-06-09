@@ -1657,11 +1657,12 @@ dependencies = [
 
 [[package]]
 name = "hyper_headset"
-version = "1.7.0"
+version = "1.9.1"
 dependencies = [
  "cfg-if 1.0.4",
  "clap 4.6.0",
  "crossterm",
+ "dbus",
  "dialog",
  "dirs 6.0.0",
  "enigo",

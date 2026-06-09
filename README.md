@@ -1,4 +1,5 @@
 # HyperHeadset
+
 [![AUR Git Version](https://img.shields.io/aur/version/hyper-headset-git)](https://aur.archlinux.org/packages/hyper-headset-git)
 [![AUR Bin Version](https://img.shields.io/aur/version/hyper-headset-bin)](https://aur.archlinux.org/packages/hyper-headset-bin)
 [![GitHub Release](https://img.shields.io/github/v/release/LennardKittner/HyperHeadset)](https://github.com/LennardKittner/HyperHeadset/releases)
@@ -7,25 +8,28 @@
 
 A CLI and tray application for monitoring and managing HyperX headsets.
 
-| OS | Tooltip | Context Menu |
-|:---:|:---:|:---:|
-| **Linux** | <img src=./screenshots/tray_linux.png width="280"> | <img src=./screenshots/tray_linux_2.png width="280"> |
-| **macOS** | <img src=./screenshots/tray_macOS.png width="280"> | <img src=./screenshots/tray_macOS_2.png width="280"> |
+|     OS      |                       Tooltip                        |                      Context Menu                      |
+| :---------: | :--------------------------------------------------: | :----------------------------------------------------: |
+|  **Linux**  |  <img src=./screenshots/tray_linux.png width="280">  |  <img src=./screenshots/tray_linux_2.png width="280">  |
+|  **macOS**  |  <img src=./screenshots/tray_macOS.png width="280">  |  <img src=./screenshots/tray_macOS_2.png width="280">  |
 | **Windows** | <img src=./screenshots/tray_windows.png width="280"> | <img src=./screenshots/tray_windows_2.png width="280"> |
 
 This project is not affiliated with, endorsed by, or associated with HyperX or its parent company in any way. All trademarks and brand names belong to their respective owners.
 
 ## Compatibility
+
 Both the CLI and tray applications are compatible with Linux, MacOS, and Windows.
 
 **Supported Headsets**:
+
 - HyperX Cloud II Wireless HP vendor ID
 - HyperX Cloud II Wireless HyperX vendor ID
 - HyperX Cloud II Core Wireless
 - HyperX Cloud III Wireless
-- HyperX Cloud III S Wireless
+- HyperX Cloud III S Wireless (known issue: may not respond correctly to some queries, see: [#36](https://github.com/LennardKittner/HyperHeadset/issues/36))
 - HyperX Cloud Stinger 2 Wireless
 - HyperX Cloud Flight S
+- HyperX Cloud Flight Wireless
 - HyperX Cloud Alpha Wireless
 
 If your headset is not supported, feel free to open an issue; be sure to include the name, product ID, and vendor ID.
@@ -33,11 +37,15 @@ If your headset is not supported, feel free to open an issue; be sure to include
 ## Installation
 
 ### Arch Linux (AUR)
+
 No manual setup required (dependencies and udev rules are handled automatically):
+
 ```bash
 yay -S hyper-headset-git
 ```
-or 
+
+or
+
 ```bash
 yay -S hyper-headset-bin
 ```
@@ -115,6 +123,10 @@ SUBSYSTEMS=="usb", ATTRS{idProduct}=="1765", ATTRS{idVendor}=="03f0", MODE="0666
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="1743", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="069f", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="0995", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="02cc", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="0e90", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="1749", ATTRS{idVendor}=="0951", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="16c4", ATTRS{idVendor}=="0951", MODE="0666"
 
 KERNEL=="hidraw*", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666"
@@ -130,6 +142,10 @@ KERNEL=="hidraw*", ATTRS{idProduct}=="1765", ATTRS{idVendor}=="03f0", MODE="0666
 KERNEL=="hidraw*", ATTRS{idProduct}=="1743", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="069f", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="0995", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="02cc", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="0e90", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="1749", ATTRS{idVendor}=="0951", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="16c4", ATTRS{idVendor}=="0951", MODE="0666"
 ```
 
 Once created, replug the wireless dongle.
@@ -176,6 +192,10 @@ Options:
           Others unchanged. Use alone or with --eq-profile (overrides on top of the profile).
           See --eq-profile for band/dB reference.
           Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0
+  -v, --verbose
+          Use verbose output
+      --json
+          Use JSON output. Time is in seconds.
   -h, --help
           Print help
   -V, --version
@@ -197,6 +217,10 @@ Options:
           Set the refresh interval (in seconds) [default: 3]
       --press-mute-key <press-mute-key>
           The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted. [default: true] [possible values: true, false]
+  -v, --verbose
+          Use verbose output
+      --monochrome-icons
+          Use the symbolic (monochrome) variants of the system tray icons
   -h, --help
           Print help
   -V, --version
@@ -211,7 +235,7 @@ Since there is no MicMute key on Windows and MacOS f20 is used instead.
 This allows applications such as Discord to react when the hardware mute button on the headset is pressed.
 
 To set this up, start the tray app, open Discord, and create a new keybind via **User Settings** -> **Keybinds** -> **Add a Keybind**.
-For the action, select *Toggle Mute*, then click *Record Keybind* and press the headset's mute button while recording.
+For the action, select _Toggle Mute_, then click _Record Keybind_ and press the headset's mute button while recording.
 
 Discord should now automatically mute and unmute when the headset does.
 Because the action only toggles Discord's state, you may need to synchronize it once by manually muting or unmuting Discord.
@@ -221,9 +245,9 @@ Because the action only toggles Discord's state, you may need to synchronize it 
 - [ ] Update ksni
 - [ ] Add Docs
 - [ ] Add to crates.io
-- [ ] Let CLI periodically output the state 
-- [ ] Optional CLI output in JSON
+- [ ] Let CLI periodically output the state
 - [ ] Waybar applet
+- [x] Optional CLI output in JSON
 - [x] Menu bar app for MacOS.
 - [x] Windows support
 - [x] Allow configuration via tray app
@@ -248,4 +272,5 @@ Once you have set the filters, you can perform various actions and review the pa
 This project was inspired by [hyperx-cloud-flight](https://github.com/kondinskis/hyperx-cloud-flight).
 
 ## Attribution
+
 <a href="https://www.flaticon.com/free-icons/headphones" title="headphones icons">Headphones icons created by sonnycandra - Flaticon</a>
