@@ -123,8 +123,57 @@ fn show_message(message: &str) {
 }
 
 #[cfg(target_os = "linux")]
+fn print_udev_rules_diff(path: &str, expected_rules: &str) {
+    use std::io::Write;
+    if !std::fs::metadata(path).is_ok() {
+        return;
+    }
+
+    let mut child = match Command::new("diff")
+        .arg("-u")
+        .arg(path)
+        .arg("-")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(expected_rules.as_bytes());
+    }
+
+    let output = match child.wait_with_output() {
+        Ok(o) => o,
+        Err(_) => return,
+    };
+
+    let diff_text = String::from_utf8_lossy(&output.stdout);
+    println!("\n--- Diff for {} ---", path);
+    for line in diff_text.lines() {
+        if line.starts_with("---") {
+            println!("\x1b[31m{}\x1b[0m", line); // Red
+        } else if line.starts_with("+++") {
+            println!("\x1b[32m{}\x1b[0m", line); // Green
+        } else if line.starts_with('-') {
+            println!("\x1b[31m{}\x1b[0m", line); // Red
+        } else if line.starts_with('+') {
+            println!("\x1b[32m{}\x1b[0m", line); // Green
+        } else if line.starts_with("@@") {
+            println!("\x1b[36m{}\x1b[0m", line); // Cyan
+        } else {
+            println!("{}", line);
+        }
+    }
+    println!("-------------------\n");
+}
+
+#[cfg(target_os = "linux")]
 fn handle_udev_rule_user_interaction(path: &str, ask_message: &str, decline_message: &str) {
     if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        print_udev_rules_diff(path, UDEV_RULES);
         print!("{ask_message} (y/N): ");
         io::Write::flush(&mut io::stdout()).unwrap();
         let mut input = String::new();
