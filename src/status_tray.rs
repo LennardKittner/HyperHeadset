@@ -1,7 +1,5 @@
 use std::sync::mpsc::Sender;
 
-use dialog::{Choice, DialogBox};
-
 use hyper_headset::devices::{
     format_int_value, DeviceEvent, DeviceProperties, PropertyType,
 };
@@ -332,7 +330,7 @@ impl Tray for StatusTray {
                             label: escape_label("Edit with: hyper_headset_cli --eq"),
                             enabled: true,
                             activate: Box::new(|_| {
-                                launch_eq_editor();
+                                hyper_headset::launch_eq_editor();
                             }),
                             ..Default::default()
                         }
@@ -355,112 +353,4 @@ impl Tray for StatusTray {
         menu_items.push(make_exit().into());
         menu_items
     }
-}
-
-fn launch_eq_editor() {
-    let mut exe_path = match std::env::current_exe() {
-        Ok(path) => path,
-        Err(_) => return,
-    };
-    exe_path.set_file_name("hyper_headset_cli");
-    let cli_path = if exe_path.exists() {
-        exe_path
-    } else {
-        std::path::PathBuf::from("hyper_headset_cli")
-    };
-
-    let cli_str = cli_path.to_string_lossy();
-    let shell_cmd = format!(
-        "\"{}\" --eq; echo; echo 'Press Enter to close...'; read _",
-        cli_str.replace('"', "\\\"")
-    );
-    let command_args = ["/bin/sh", "-c", &shell_cmd];
-
-    let terminals = [
-        ("xdg-terminal-exec", vec![]),
-        ("x-terminal-emulator", vec!["-e"]),
-        ("gnome-terminal", vec!["--"]),
-        ("konsole", vec!["-e"]),
-        ("xfce4-terminal", vec!["-x"]),
-        ("mate-terminal", vec!["-e"]),
-        ("lxterminal", vec!["-e"]),
-        ("alacritty", vec!["-e"]),
-        ("kitty", vec![]),
-        ("xterm", vec!["-e"]),
-    ];
-
-    for (term, term_args) in terminals {
-        let mut cmd = std::process::Command::new(term);
-        cmd.args(&term_args);
-        cmd.args(&command_args);
-        if cmd.spawn().is_ok() {
-            return;
-        }
-    }
-
-    let error_msg = "Could not open the terminal emulator.\n\n\
-                     Would you like to copy the CLI command to your clipboard?";
-    let choice = dialog::Question::new(error_msg)
-        .title("HyperX Equalizer Editor")
-        .show();
-
-    if let Ok(Choice::Yes) = choice {
-        if copy_to_clipboard("hyper_headset_cli --eq") {
-            let _ = dialog::Message::new("Command copied to clipboard.")
-                .title("HyperX Equalizer Editor")
-                .show();
-        } else {
-            let _ = dialog::Message::new("Failed to copy to clipboard. Please run manually:\n\nhyper_headset_cli --eq")
-                .title("HyperX Equalizer Editor")
-                .show();
-        }
-    }
-}
-
-fn copy_to_clipboard(text: &str) -> bool {
-    // Try wl-copy first (Wayland)
-    if let Ok(mut child) = std::process::Command::new("wl-copy")
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-    {
-        use std::io::Write;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        if child.wait().is_ok() {
-            return true;
-        }
-    }
-
-    // Try xclip (X11)
-    if let Ok(mut child) = std::process::Command::new("xclip")
-        .args(&["-selection", "clipboard"])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-    {
-        use std::io::Write;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        if child.wait().is_ok() {
-            return true;
-        }
-    }
-
-    // Try xsel (X11 alternative)
-    if let Ok(mut child) = std::process::Command::new("xsel")
-        .args(&["--clipboard", "--input"])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-    {
-        use std::io::Write;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        if child.wait().is_ok() {
-            return true;
-        }
-    }
-
-    false
 }

@@ -563,7 +563,7 @@ impl TrayApp {
                     new_callbacks.insert(
                         edit_id,
                         Box::new(move || {
-                            launch_eq_editor();
+                            hyper_headset::launch_eq_editor();
                         }),
                     );
                     let _ = submenu.append(&edit_item);
@@ -722,35 +722,4 @@ unsafe fn enable_dark_context_menus() {
     }
 }
 
-fn launch_eq_editor() {
-    let mut exe_path = match std::env::current_exe() {
-        Ok(path) => path,
-        Err(_) => return,
-    };
-    exe_path.set_file_name("hyper_headset_cli");
-    let cli_path = if exe_path.exists() {
-        exe_path
-    } else {
-        std::path::PathBuf::from("hyper_headset_cli")
-    };
-
-    let cli_str = cli_path.to_string_lossy();
-
-    #[cfg(target_os = "windows")]
-    {
-        let mut cmd = std::process::Command::new("cmd.exe");
-        cmd.args(&["/c", "start", "cmd", "/k", &format!("\"{}\" --eq", cli_str)]);
-        let _ = cmd.spawn();
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let mut cmd = std::process::Command::new("osascript");
-        let shell_cmd = format!(
-            "\"{}\" --eq; echo; echo 'Press Enter to close...'; read _",
-            cli_str.replace('"', "\\\"")
-        );
-        cmd.args(&["-e", &format!("tell app \"Terminal\" to do script \"/bin/sh -c \\\"{}\\\"\"", shell_cmd)]);
-        let _ = cmd.spawn();
-    }
-}
 
