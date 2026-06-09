@@ -328,7 +328,10 @@ impl Tray for StatusTray {
                     submenu_items.push(
                         StandardItem {
                             label: escape_label("Edit with: hyper_headset_cli --eq"),
-                            enabled: false,
+                            enabled: true,
+                            activate: Box::new(|_| {
+                                launch_eq_editor();
+                            }),
                             ..Default::default()
                         }
                         .into(),
@@ -349,5 +352,47 @@ impl Tray for StatusTray {
         menu_items.push(MenuItem::Separator);
         menu_items.push(make_exit().into());
         menu_items
+    }
+}
+
+fn launch_eq_editor() {
+    let mut exe_path = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+    exe_path.set_file_name("hyper_headset_cli");
+    let cli_path = if exe_path.exists() {
+        exe_path
+    } else {
+        std::path::PathBuf::from("hyper_headset_cli")
+    };
+
+    let cli_str = cli_path.to_string_lossy();
+    let shell_cmd = format!(
+        "\"{}\" --eq; echo; echo 'Press Enter to close...'; read _",
+        cli_str.replace('"', "\\\"")
+    );
+    let command_args = ["/bin/sh", "-c", &shell_cmd];
+
+    let terminals = [
+        ("xdg-terminal-exec", vec![]),
+        ("x-terminal-emulator", vec!["-e"]),
+        ("gnome-terminal", vec!["--"]),
+        ("konsole", vec!["-e"]),
+        ("xfce4-terminal", vec!["-x"]),
+        ("mate-terminal", vec!["-e"]),
+        ("lxterminal", vec!["-e"]),
+        ("alacritty", vec!["-e"]),
+        ("kitty", vec![]),
+        ("xterm", vec!["-e"]),
+    ];
+
+    for (term, term_args) in terminals {
+        let mut cmd = std::process::Command::new(term);
+        cmd.args(&term_args);
+        cmd.args(&command_args);
+        if cmd.spawn().is_ok() {
+            return;
+        }
     }
 }
