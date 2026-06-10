@@ -229,6 +229,7 @@ pub fn prompt_user_for_udev_rule() {
     }
 }
 
+#[cfg(feature = "eq-editor")]
 pub fn launch_eq_editor() {
     let mut exe_path = match std::env::current_exe() {
         Ok(path) => path,
@@ -308,7 +309,7 @@ pub fn launch_eq_editor() {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "eq-editor"))]
 fn copy_to_clipboard(text: &str) -> bool {
     // Try wl-copy first (Wayland)
     if let Ok(mut child) = std::process::Command::new("wl-copy")

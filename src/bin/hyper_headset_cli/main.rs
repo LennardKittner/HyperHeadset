@@ -582,6 +582,7 @@ fn main() {
                         .data
                         .as_ref()
                         .map(|data| format!("\"{}\": \"{}\"", property_descriptor.name, data)),
+                    #[cfg(feature = "eq-support")]
                     hyper_headset::devices::PropertyDescriptorWrapper::SelectEQ {
                         descriptor,
                         ..

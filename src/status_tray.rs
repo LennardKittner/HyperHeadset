@@ -3,14 +3,17 @@ use std::sync::mpsc::Sender;
 use hyper_headset::devices::{
     format_int_value, DeviceEvent, DeviceProperties, PropertyType,
 };
+#[cfg(feature = "eq-support")]
+use ksni::menu::{RadioGroup, RadioItem};
 use ksni::{
-    menu::{RadioGroup, RadioItem, StandardItem, SubMenu},
+    menu::{StandardItem, SubMenu},
     Handle, MenuItem, ToolTip, Tray, TrayService,
 };
 
 use crate::tray_battery_icon_state::TrayBatteryIconState;
 
 /// Escape underscores for ksni labels (single `_` is an accelerator prefix).
+#[cfg(feature = "eq-support")]
 fn escape_label(s: &str) -> String {
     s.replace('_', "__")
 }
@@ -263,6 +266,7 @@ impl Tray for StatusTray {
                         .into(),
                     );
                 }
+                #[cfg(feature = "eq-support")]
                 hyper_headset::devices::PropertyDescriptorWrapper::SelectEQ {
                     descriptor,
                     options,
@@ -311,21 +315,22 @@ impl Tray for StatusTray {
                         .collect();
 
                     let options_clone = options.clone();
-                    let mut submenu_items: Vec<MenuItem<Self>> = vec![
-                        RadioGroup {
-                            selected: active_index.unwrap_or(usize::MAX),
-                            select: Box::new(move |this: &mut Self, index| {
-                                if let Some(name) = options_clone.get(index).cloned() {
-                                    let _ = this.update_sender.send(DeviceEvent::EqualizerPreset(name));
-                                }
-                            }),
-                            options: radio_options,
-                        }
-                        .into(),
-                    ];
+                    let radio_group = RadioGroup {
+                        selected: active_index.unwrap_or(usize::MAX),
+                        select: Box::new(move |this: &mut Self, index| {
+                            if let Some(name) = options_clone.get(index).cloned() {
+                                let _ = this.update_sender.send(DeviceEvent::EqualizerPreset(name));
+                            }
+                        }),
+                        options: radio_options,
+                    }
+                    .into();
 
-                    submenu_items.push(MenuItem::Separator);
-                    submenu_items.push(
+                    let submenu_items = vec![
+                        radio_group,
+                        #[cfg(feature = "eq-editor")]
+                        MenuItem::Separator,
+                        #[cfg(feature = "eq-editor")]
                         StandardItem {
                             label: escape_label("Edit with: hyper_headset_cli --eq"),
                             enabled: true,
@@ -335,7 +340,7 @@ impl Tray for StatusTray {
                             ..Default::default()
                         }
                         .into(),
-                    );
+                    ];
 
                     menu_items.push(
                         SubMenu {

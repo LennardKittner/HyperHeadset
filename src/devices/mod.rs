@@ -440,6 +440,7 @@ pub enum PropertyDescriptorWrapper {
     Int(PropertyDescriptor<u8>, &'static [u8]),
     Bool(PropertyDescriptor<bool>),
     String(PropertyDescriptor<String>),
+    #[cfg(feature = "eq-support")]
     SelectEQ {
         descriptor: PropertyDescriptor<String>,
         options: Vec<String>,
@@ -667,6 +668,7 @@ impl DeviceProperties {
                 property_type: PropertyType::AlwaysReadOnly,
                 create_event: &|_| None,
             }),
+            #[cfg(feature = "eq-support")]
             PropertyDescriptorWrapper::SelectEQ {
                 descriptor: PropertyDescriptor {
                     name: "active_eq_preset",
@@ -715,6 +717,7 @@ impl DeviceProperties {
                         &property_descriptor.data,
                         property_descriptor.suffix,
                     ),
+                    #[cfg(feature = "eq-support")]
                     PropertyDescriptorWrapper::SelectEQ { descriptor, .. } => (
                         descriptor.pretty_name,
                         &descriptor.data,
@@ -753,6 +756,7 @@ impl DeviceProperties {
                         property_descriptor.suffix,
                         property_descriptor.property_type,
                     ),
+                    #[cfg(feature = "eq-support")]
                     PropertyDescriptorWrapper::SelectEQ { descriptor, .. } => (
                         descriptor.pretty_name,
                         &descriptor.data,

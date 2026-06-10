@@ -493,6 +493,7 @@ impl TrayApp {
                     );
                     let _ = menu.append(&menu_item);
                 }
+                #[cfg(feature = "eq-support")]
                 hyper_headset::devices::PropertyDescriptorWrapper::SelectEQ {
                     descriptor,
                     options,
@@ -557,16 +558,19 @@ impl TrayApp {
                         let _ = submenu.append(&entry);
                     }
 
-                    let _ = submenu.append(&PredefinedMenuItem::separator());
-                    let edit_item = MenuItem::new("Edit with: hyper_headset_cli --eq", true, None);
-                    let edit_id = edit_item.id().clone();
-                    new_callbacks.insert(
-                        edit_id,
-                        Box::new(move || {
-                            hyper_headset::launch_eq_editor();
-                        }),
-                    );
-                    let _ = submenu.append(&edit_item);
+                    #[cfg(feature = "eq-editor")]
+                    {
+                        let _ = submenu.append(&PredefinedMenuItem::separator());
+                        let edit_item = MenuItem::new("Edit with: hyper_headset_cli --eq", true, None);
+                        let edit_id = edit_item.id().clone();
+                        new_callbacks.insert(
+                            edit_id,
+                            Box::new(move || {
+                                hyper_headset::launch_eq_editor();
+                            }),
+                        );
+                        let _ = submenu.append(&edit_item);
+                    }
 
                     let _ = menu.append(&submenu);
                 }
