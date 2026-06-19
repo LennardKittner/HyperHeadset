@@ -106,14 +106,11 @@ fn main() {
                     Ok(()) => (),
                     Err(error) => {
                         eprintln!("{error}");
-                        let _ = proxy
-                            .send_event(Some(device.device_properties()));
+                        let _ = proxy.send_event(Some(device.device_properties()));
                         break; // try to reconnect
                     }
                 };
-                if mute_state.is_some()
-                    && mute_state != device.device_properties().muted
-                {
+                if mute_state.is_some() && mute_state != device.device_properties().muted {
                     if let Some(enigo) = &mut enigo {
                         if let Err(e) = enigo.key(Key::F20, Direction::Click) {
                             eprintln!("Failed to press key on mute: {e}");
@@ -246,9 +243,7 @@ fn main() {
                     break; // try to reconnect
                 }
             };
-            if mute_state.is_some()
-                && mute_state != device.device_properties().muted
-            {
+            if mute_state.is_some() && mute_state != device.device_properties().muted {
                 if let Some(enigo) = &mut enigo {
                     if let Err(e) = enigo.key(Key::MicMute, Direction::Click) {
                         eprintln!("Failed to press key on mute: {e}");

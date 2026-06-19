@@ -1,8 +1,6 @@
 use std::sync::mpsc::Sender;
 
-use hyper_headset::devices::{
-    format_int_value, DeviceEvent, DeviceProperties, PropertyType,
-};
+use hyper_headset::devices::{format_int_value, DeviceEvent, DeviceProperties, PropertyType};
 use ksni::{
     menu::{StandardItem, SubMenu},
     Handle, MenuItem, ToolTip, Tray, TrayService,

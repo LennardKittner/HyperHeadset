@@ -164,7 +164,10 @@ fn read_airoha_via(client: &RaceClient) -> AirohaSnapshot {
         }
     }
     // Auto power off — response: [status, module_id_le16, enabled_le16, timeout_minutes_le16, …].
-    if let Ok(body) = client.request(RACE_GET_MMI_COMMON_CONFIG, &MOD_AUTO_POWER_OFF.to_le_bytes()) {
+    if let Ok(body) = client.request(
+        RACE_GET_MMI_COMMON_CONFIG,
+        &MOD_AUTO_POWER_OFF.to_le_bytes(),
+    ) {
         if body.len() >= 7 && body[0] == 0 && u16_le(&body[1..3]) == MOD_AUTO_POWER_OFF {
             snap.auto_power_off_enabled = Some(u16_le(&body[3..5]) != 0);
             snap.auto_power_off_minutes = Some(u16_le(&body[5..7]));
