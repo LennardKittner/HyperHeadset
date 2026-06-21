@@ -31,6 +31,7 @@ Both the CLI and tray applications are compatible with Linux, MacOS, and Windows
 - HyperX Cloud Flight S
 - HyperX Cloud Flight Wireless
 - HyperX Cloud Alpha Wireless
+- HyperX Cloud Stinger Core Wireless
 - [WIP] HyperX Cloud Mix 2 ([Test Branch](https://github.com/LennardKittner/HyperHeadset/tree/cloud_mix_2) [Give feedback](https://github.com/LennardKittner/HyperHeadset/issues/35))
 - [WIP] HyperX Cloud Core Wireless ([Test Branch](https://github.com/LennardKittner/HyperHeadset/tree/cloud-core) [Help add support](https://github.com/LennardKittner/HyperHeadset/issues/59))
 
@@ -129,6 +130,8 @@ SUBSYSTEMS=="usb", ATTRS{idProduct}=="0e90", ATTRS{idVendor}=="03f0", MODE="0666
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="1749", ATTRS{idVendor}=="0951", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="16c4", ATTRS{idVendor}=="0951", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="1723", ATTRS{idVendor}=="0951", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="170b", ATTRS{idVendor}=="03f0", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="170b", ATTRS{idVendor}=="0951", MODE="0666"
 
 KERNEL=="hidraw*", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666"
@@ -149,6 +152,8 @@ KERNEL=="hidraw*", ATTRS{idProduct}=="0e90", ATTRS{idVendor}=="03f0", MODE="0666
 KERNEL=="hidraw*", ATTRS{idProduct}=="1749", ATTRS{idVendor}=="0951", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="16c4", ATTRS{idVendor}=="0951", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="1723", ATTRS{idVendor}=="0951", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="170b", ATTRS{idVendor}=="03f0", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="170b", ATTRS{idVendor}=="0951", MODE="0666"
 ```
 
 Once created, replug the wireless dongle or run `sudo udevadm control --reload-rules && sudo udevadm trigger`.
