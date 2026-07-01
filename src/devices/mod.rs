@@ -164,7 +164,11 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
     let states = DeviceState::new(&all_product_ids, &all_vendor_ids)?;
     debug_println!("Found device selecting handler");
 
-    // On Linux and MacOS we can just take the first
+    // Linux/macOS: take the first matching interface. hidapi enumerates one
+    // entry per HID interface; the first one is the control interface for
+    // every supported device. Probing every interface (as Windows does) sends
+    // a burst of HID writes per connect attempt, which has been observed to
+    // destabilise the Cloud III S wireless dongle.
     #[cfg(not(target_os = "windows"))]
     {
         let state = states
@@ -191,18 +195,22 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
         device.init_capabilities();
         Ok(device)
     }
-    // On Windows we have to check which interface can be used
+    // On Windows we have to probe each HID interface to find the one that
+    // accepts control writes.
     #[cfg(target_os = "windows")]
     {
         let mut device = None;
-        for state in states {
-            eprintln!(
-                "Try to connect to {}",
+        let total = states.len();
+        for (idx, state) in states.into_iter().enumerate() {
+            println!(
+                "Try to connecting to {} (interface {}/{})",
                 state
                     .device_properties
                     .device_name
                     .clone()
-                    .unwrap_or("???".to_string())
+                    .unwrap_or("???".to_string()),
+                idx + 1,
+                total
             );
             let entry = DEVICE_REGISTER
                 .iter()
@@ -218,17 +226,24 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
             let probe_packet = test_device
                 .get_query_packets()
                 .into_iter()
-                .next()
+                .nth(2)
                 .expect("Why is there a device without packets ???");
 
             test_device.prepare_write();
-            if let Err(_e) = test_device
-                .get_device_state()
-                .write_hid_report(&probe_packet)
-            {
+            if let Err(_e) = test_device.write_hid_report(&probe_packet) {
                 debug_println!("Failed to open: {_e:?}");
                 continue;
             } else {
+                std::thread::sleep(RESPONSE_DELAY);
+
+                if let Some(events) = test_device.wait_for_updates(Duration::from_secs(1)) {
+                    for _event in events {
+                        debug_println!("got response {_event:?}");
+                    }
+                } else {
+                    continue;
+                }
+
                 device = Some(test_device);
                 break;
             }
@@ -262,6 +277,10 @@ pub struct DeviceProperties {
     pub connected: Option<bool>,
     pub silent: Option<bool>,
     pub noise_gate_active: Option<bool>,
+    // EQ state — managed by the application, not queried from firmware
+    pub active_eq_preset: Option<String>,
+    pub eq_synced: Option<bool>,
+    pub eq_preset_options: Vec<String>,
     // Capability flags - set once during device initialization
     pub can_set_mute: bool,
     pub can_set_surround_sound: bool,
@@ -370,43 +389,6 @@ impl DeviceState {
             .collect())
     }
 
-    /// Write a HID report to the device.
-    ///
-    /// On Windows, some HyperX dongles expose commands as **Feature reports** only.
-    /// In that case, `hidapi::HidDevice::write()` fails with:
-    /// `WriteFile: (0x00000001) Incorrect function.`
-    ///
-    /// Linux/macOS hidraw paths often accept the same bytes via output reports, so this can look
-    /// "Windows-exclusive". We transparently fall back to `send_feature_report` when we detect
-    /// this specific failure.
-    /// Adapted from PR #20 by @navrozashvili
-    /// Source: https://github.com/LennardKittner/HyperHeadset/pull/20
-    pub fn write_hid_report(&self, packet: &[u8]) -> Result<(), HidError> {
-        match self.hid_device.write(packet) {
-            Ok(_) => Ok(()),
-            Err(write_err) => {
-                #[cfg(target_os = "windows")]
-                {
-                    if let HidError::HidApiError { message } = &write_err {
-                        // Windows HID stack returns ERROR_INVALID_FUNCTION (0x1) when the device
-                        // doesn't support output reports / interrupt OUT.
-                        if message.contains("Incorrect function")
-                            || message.contains("(0x00000001)")
-                        {
-                            // If the feature report also fails, prefer returning the original
-                            // write() error since that's what callers attempted.
-                            if let Err(_feature_err) = self.hid_device.send_feature_report(packet) {
-                                return Err(write_err);
-                            }
-                            return Ok(());
-                        }
-                    }
-                }
-                Err(write_err)
-            }
-        }
-    }
-
     fn update_self_with_event(&mut self, event: &DeviceEvent) {
         match event {
             DeviceEvent::BatterLevel(level) => self.device_properties.battery_level = Some(*level),
@@ -438,6 +420,10 @@ impl DeviceState {
             DeviceEvent::NoiseGateActive(on) => {
                 self.device_properties.noise_gate_active = Some(*on)
             }
+            DeviceEvent::EqualizerPreset(ref name) => {
+                self.device_properties.active_eq_preset = Some(name.clone());
+                self.device_properties.eq_synced = Some(true);
+            }
         };
     }
 }
@@ -454,6 +440,13 @@ pub enum PropertyDescriptorWrapper {
     Int(PropertyDescriptor<u8>, &'static [u8]),
     Bool(PropertyDescriptor<bool>),
     String(PropertyDescriptor<String>),
+    #[cfg(feature = "eq-support")]
+    SelectEQ {
+        descriptor: PropertyDescriptor<String>,
+        options: Vec<String>,
+        active_preset: Option<String>,
+        synced: bool,
+    },
 }
 
 pub struct PropertyDescriptor<T: 'static> {
@@ -505,6 +498,9 @@ impl DeviceProperties {
             can_set_silent_mode: false,
             can_set_equalizer: false,
             can_set_noise_gate: false,
+            active_eq_preset: None,
+            eq_synced: None,
+            eq_preset_options: Vec::new(),
         }
     }
 
@@ -672,6 +668,30 @@ impl DeviceProperties {
                 property_type: PropertyType::AlwaysReadOnly,
                 create_event: &|_| None,
             }),
+            #[cfg(feature = "eq-support")]
+            PropertyDescriptorWrapper::SelectEQ {
+                descriptor: PropertyDescriptor {
+                    name: "active_eq_preset",
+                    pretty_name: "Active EQ preset",
+                    data: self.active_eq_preset.as_ref().map(|name| {
+                        if self.eq_synced == Some(true) {
+                            name.clone()
+                        } else {
+                            format!("{} (not synced)", name)
+                        }
+                    }),
+                    suffix: "",
+                    property_type: if self.can_set_equalizer {
+                        PropertyType::ReadWrite
+                    } else {
+                        PropertyType::AlwaysReadOnly
+                    },
+                    create_event: &|name| Some(DeviceEvent::EqualizerPreset(name)),
+                },
+                options: self.eq_preset_options.clone(),
+                active_preset: self.active_eq_preset.clone(),
+                synced: self.eq_synced.unwrap_or(false),
+            },
         ]
     }
 
@@ -696,6 +716,12 @@ impl DeviceProperties {
                         property_descriptor.pretty_name,
                         &property_descriptor.data,
                         property_descriptor.suffix,
+                    ),
+                    #[cfg(feature = "eq-support")]
+                    PropertyDescriptorWrapper::SelectEQ { descriptor, .. } => (
+                        descriptor.pretty_name,
+                        &descriptor.data,
+                        descriptor.suffix,
                     ),
                 };
                 data.as_ref()
@@ -729,6 +755,13 @@ impl DeviceProperties {
                         &property_descriptor.data,
                         property_descriptor.suffix,
                         property_descriptor.property_type,
+                    ),
+                    #[cfg(feature = "eq-support")]
+                    PropertyDescriptorWrapper::SelectEQ { descriptor, .. } => (
+                        descriptor.pretty_name,
+                        &descriptor.data,
+                        descriptor.suffix,
+                        descriptor.property_type,
                     ),
                 };
 
@@ -766,7 +799,7 @@ pub enum DeviceError {
     UnknownResponse([u8; 8], usize),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum DeviceEvent {
     BatterLevel(u8),
     Muted(bool),
@@ -783,6 +816,7 @@ pub enum DeviceEvent {
     Silent(bool),
     RequireSIRKReset(bool),
     NoiseGateActive(bool),
+    EqualizerPreset(String),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -854,6 +888,47 @@ impl From<u8> for ChargingStatus {
 }
 
 pub trait Device {
+    /// Write a HID report to the device.
+    ///
+    /// On Windows, some HyperX dongles expose commands as **Feature reports** only.
+    /// In that case, `hidapi::HidDevice::write()` fails with:
+    /// `WriteFile: (0x00000001) Incorrect function.`
+    ///
+    /// Linux/macOS hidraw paths often accept the same bytes via output reports, so this can look
+    /// "Windows-exclusive". We transparently fall back to `send_feature_report` when we detect
+    /// this specific failure.
+    /// Adapted from PR #20 by @navrozashvili
+    /// Source: https://github.com/LennardKittner/HyperHeadset/pull/20
+    fn write_hid_report(&mut self, packet: &[u8]) -> Result<(), HidError> {
+        match self.get_device_state_mut().hid_device.write(packet) {
+            Ok(_) => Ok(()),
+            Err(write_err) => {
+                #[cfg(target_os = "windows")]
+                {
+                    if let HidError::HidApiError { message } = &write_err {
+                        // Windows HID stack returns ERROR_INVALID_FUNCTION (0x1) when the device
+                        // doesn't support output reports / interrupt OUT.
+                        if message.contains("Incorrect function")
+                            || message.contains("(0x00000001)")
+                        {
+                            // If the feature report also fails, prefer returning the original
+                            // write() error since that's what callers attempted.
+                            if let Err(_feature_err) = self
+                                .get_device_state_mut()
+                                .hid_device
+                                .send_feature_report(packet)
+                            {
+                                return Err(write_err);
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
+                Err(write_err)
+            }
+        }
+    }
+
     fn get_response_buffer(&self) -> Vec<u8> {
         [0u8; RESPONSE_BUFFER_SIZE].to_vec()
     }
@@ -879,9 +954,10 @@ pub trait Device {
     fn reset_sirk_packet(&self) -> Option<Vec<u8>>;
     fn get_silent_mode_packet(&self) -> Option<Vec<u8>>;
     fn set_silent_mode_packet(&self, silence: bool) -> Option<Vec<u8>>;
-    /// Set equalizer band (0-9) to dB value (-12.0 to +12.0)
+    /// Build EQ packets — one packet per band (firmware only accepts one band per write).
     /// Bands: 0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz
-    fn set_equalizer_band_packet(&self, _band_index: u8, _db_value: f32) -> Option<Vec<u8>> {
+    /// dB values: -12.0 to +12.0
+    fn set_equalizer_bands_packets(&self, _bands: &[(u8, f32)]) -> Option<Vec<Vec<u8>>> {
         None
     }
     fn get_noise_gate_packet(&self) -> Option<Vec<u8>> {
@@ -921,7 +997,7 @@ pub trait Device {
         self.set_silent_mode_packet(false).is_some()
     }
     fn can_set_equalizer(&self) -> bool {
-        self.set_equalizer_band_packet(0, 0.0).is_some()
+        self.set_equalizer_bands_packets(&[(0, 0.0)]).is_some()
     }
     fn can_set_noise_gate(&self) -> bool {
         self.set_noise_gate_packet(true).is_some()
@@ -1004,7 +1080,7 @@ pub trait Device {
         for packet in packets.into_iter() {
             self.prepare_write();
             debug_println!("Write packet: {packet:?}");
-            self.get_device_state().write_hid_report(&packet)?;
+            self.write_hid_report(&packet)?;
             std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
@@ -1045,7 +1121,7 @@ pub trait Device {
         }
         if let Some(batter_packet) = self.get_battery_packet() {
             self.prepare_write();
-            self.get_device_state().write_hid_report(&batter_packet)?;
+            self.write_hid_report(&batter_packet)?;
             std::thread::sleep(RESPONSE_DELAY);
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
@@ -1070,7 +1146,7 @@ pub trait Device {
             DeviceEvent::AutomaticShutdownAfter(delay) => {
                 if let Some(packet) = self.set_automatic_shut_down_packet(delay) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
+                    if let Err(err) = self.write_hid_report(&packet) {
                         Err(format!(
                             "Failed to set automatic shutdown with error: {:?}",
                             err
@@ -1083,7 +1159,7 @@ pub trait Device {
             DeviceEvent::Muted(mute) => {
                 if let Some(packet) = self.set_mute_packet(mute) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
+                    if let Err(err) = self.write_hid_report(&packet) {
                         Err(format!("Failed to mute with error: {:?}", err))?;
                     }
                 } else {
@@ -1093,7 +1169,7 @@ pub trait Device {
             DeviceEvent::SideToneOn(enable) => {
                 if let Some(packet) = self.set_side_tone_packet(enable) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
+                    if let Err(err) = self.write_hid_report(&packet) {
                         Err(format!("Failed to enable side tone with error: {:?}", err))?;
                     }
                 } else {
@@ -1103,7 +1179,7 @@ pub trait Device {
             DeviceEvent::SideToneVolume(volume) => {
                 if let Some(packet) = self.set_side_tone_volume_packet(volume) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
+                    if let Err(err) = self.write_hid_report(&packet) {
                         Err(format!(
                             "Failed to set side tone volume with error: {:?}",
                             err
@@ -1119,7 +1195,7 @@ pub trait Device {
             DeviceEvent::VoicePrompt(enable) => {
                 if let Some(packet) = self.set_voice_prompt_packet(enable) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
+                    if let Err(err) = self.write_hid_report(&packet) {
                         Err(format!(
                             "Failed to enable voice prompt with error: {:?}",
                             err
@@ -1132,7 +1208,7 @@ pub trait Device {
             DeviceEvent::SurroundSound(surround_sound) => {
                 if let Some(packet) = self.set_surround_sound_packet(surround_sound) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
+                    if let Err(err) = self.write_hid_report(&packet) {
                         Err(format!(
                             "Failed to set surround sound with error: {:?}",
                             err
@@ -1145,7 +1221,7 @@ pub trait Device {
             DeviceEvent::Silent(mute_playback) => {
                 if let Some(packet) = self.set_silent_mode_packet(mute_playback) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
+                    if let Err(err) = self.write_hid_report(&packet) {
                         Err(format!("Failed to mute playback with error: {:?}", err))?;
                     }
                 } else {
@@ -1155,7 +1231,7 @@ pub trait Device {
             DeviceEvent::NoiseGateActive(activate) => {
                 if let Some(packet) = self.set_noise_gate_packet(activate) {
                     self.prepare_write();
-                    if let Err(err) = self.get_device_state().write_hid_report(&packet) {
+                    if let Err(err) = self.write_hid_report(&packet) {
                         Err(format!(
                             "Failed to activate noise gate with error: {:?}",
                             err
@@ -1163,6 +1239,51 @@ pub trait Device {
                     }
                 } else {
                     Err("ERROR: Activating noise gate is not supported on this device")?;
+                }
+            }
+            #[cfg(feature = "eq-support")]
+            DeviceEvent::EqualizerPreset(ref name) => {
+                use crate::eq::presets;
+
+                let record_eq = |dev: &mut Self, synced: bool| {
+                    let props = &mut dev.get_device_state_mut().device_properties;
+                    props.active_eq_preset = Some(name.clone());
+                    props.eq_synced = Some(synced);
+                    if let Err(e) = presets::save_selected_profile(&presets::SelectedProfile {
+                        active_preset: Some(name.clone()),
+                        synced,
+                    }) {
+                        eprintln!("Failed to save EQ profile: {e}");
+                    }
+                };
+
+                let connected = self.get_device_state().device_properties.connected == Some(true);
+                if !connected {
+                    record_eq(self, false);
+                    return Ok(());
+                }
+
+                let preset = presets::load_preset(name)
+                    .ok_or_else(|| format!("EQ preset '{}' not found", name))?;
+                let pairs: Vec<(u8, f32)> = preset
+                    .bands
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &db)| (i as u8, db))
+                    .collect();
+
+                if let Some(packets) = self.set_equalizer_bands_packets(&pairs) {
+                    for packet in packets {
+                        self.prepare_write();
+                        if let Err(err) = self.write_hid_report(&packet) {
+                            record_eq(self, false);
+                            Err(format!("Failed to apply EQ preset '{}': {:?}", name, err))?;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(3));
+                    }
+                    record_eq(self, true);
+                } else {
+                    Err("ERROR: Equalizer control is not supported on this device")?;
                 }
             }
             _ => (),

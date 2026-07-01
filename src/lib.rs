@@ -7,6 +7,8 @@ use dialog::{Choice, DialogBox};
 
 // #![warn(missing_docs)]
 pub mod devices;
+#[cfg(feature = "eq-support")]
+pub mod eq;
 
 #[cfg(target_os = "linux")]
 pub mod bluetooth;
@@ -121,8 +123,57 @@ fn show_message(message: &str) {
 }
 
 #[cfg(target_os = "linux")]
+fn print_udev_rules_diff(path: &str, expected_rules: &str) {
+    use std::io::Write;
+    if !std::fs::metadata(path).is_ok() {
+        return;
+    }
+
+    let mut child = match Command::new("diff")
+        .arg("-u")
+        .arg(path)
+        .arg("-")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(expected_rules.as_bytes());
+    }
+
+    let output = match child.wait_with_output() {
+        Ok(o) => o,
+        Err(_) => return,
+    };
+
+    let diff_text = String::from_utf8_lossy(&output.stdout);
+    println!("\n--- Diff for {} ---", path);
+    for line in diff_text.lines() {
+        if line.starts_with("---") {
+            println!("\x1b[31m{}\x1b[0m", line); // Red
+        } else if line.starts_with("+++") {
+            println!("\x1b[32m{}\x1b[0m", line); // Green
+        } else if line.starts_with('-') {
+            println!("\x1b[31m{}\x1b[0m", line); // Red
+        } else if line.starts_with('+') {
+            println!("\x1b[32m{}\x1b[0m", line); // Green
+        } else if line.starts_with("@@") {
+            println!("\x1b[36m{}\x1b[0m", line); // Cyan
+        } else {
+            println!("{}", line);
+        }
+    }
+    println!("-------------------\n");
+}
+
+#[cfg(target_os = "linux")]
 fn handle_udev_rule_user_interaction(path: &str, ask_message: &str, decline_message: &str) {
     if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        print_udev_rules_diff(path, UDEV_RULES);
         print!("{ask_message} (y/N): ");
         io::Write::flush(&mut io::stdout()).unwrap();
         let mut input = String::new();
@@ -176,4 +227,126 @@ pub fn prompt_user_for_udev_rule() {
             );
         }
     }
+}
+
+#[cfg(feature = "eq-editor")]
+pub fn launch_eq_editor() {
+    let mut exe_path = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+    exe_path.set_file_name("hyper_headset_cli");
+    let cli_path = if exe_path.exists() {
+        exe_path
+    } else {
+        std::path::PathBuf::from("hyper_headset_cli")
+    };
+
+    let cli_str = cli_path.to_string_lossy();
+
+    #[cfg(target_os = "linux")]
+    {
+        let shell_cmd = format!(
+            "\"{}\" --eq; echo; echo 'Press Enter to close...'; read _",
+            cli_str.replace('"', "\\\"")
+        );
+        let command_args = ["/bin/sh", "-c", &shell_cmd];
+
+        let terminals = [
+            ("xdg-terminal-exec", vec![]),
+            ("x-terminal-emulator", vec!["-e"]),
+            ("gnome-terminal", vec!["--"]),
+            ("konsole", vec!["-e"]),
+            ("xfce4-terminal", vec!["-x"]),
+            ("mate-terminal", vec!["-e"]),
+            ("lxterminal", vec!["-e"]),
+            ("alacritty", vec!["-e"]),
+            ("kitty", vec![]),
+            ("xterm", vec!["-e"]),
+        ];
+
+        for (term, term_args) in terminals {
+            let mut cmd = std::process::Command::new(term);
+            cmd.args(&term_args);
+            cmd.args(&command_args);
+            if cmd.spawn().is_ok() {
+                return;
+            }
+        }
+
+        let error_msg = "Could not open the terminal emulator.\n\n\
+                         Would you like to copy the command to your clipboard?\n\n\
+                         hyper_headset_cli --eq";
+        let choice = dialog::Question::new(error_msg)
+            .title("HyperX Equalizer Editor")
+            .show();
+
+        if let Ok(Choice::Yes) = choice {
+            if !copy_to_clipboard("hyper_headset_cli --eq") {
+                let _ = dialog::Message::new("Failed to copy to clipboard. Please run manually:\n\nhyper_headset_cli --eq")
+                    .title("HyperX Equalizer Editor")
+                    .show();
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // `start` treats the first quoted argument as the window title, so an explicit empty
+        // title must precede the command. The CLI binary is resolved next to the tray binary;
+        // if that fails the bare name is used, which requires hyper_headset_cli to be on PATH.
+        // TODO(LennardKittner): improve PATH handling / installer guidance for Windows.
+        let mut cmd = std::process::Command::new("cmd.exe");
+        cmd.args(&["/c", "start", "", "cmd", "/k", &format!("\"{}\" --eq", cli_str)]);
+        let _ = cmd.spawn();
+    }
+}
+
+#[cfg(all(target_os = "linux", feature = "eq-editor"))]
+fn copy_to_clipboard(text: &str) -> bool {
+    // Try wl-copy first (Wayland)
+    if let Ok(mut child) = std::process::Command::new("wl-copy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        use std::io::Write;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if child.wait().is_ok() {
+            return true;
+        }
+    }
+
+    // Try xclip (X11)
+    if let Ok(mut child) = std::process::Command::new("xclip")
+        .args(&["-selection", "clipboard"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        use std::io::Write;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if child.wait().is_ok() {
+            return true;
+        }
+    }
+
+    // Try xsel (X11 alternative)
+    if let Ok(mut child) = std::process::Command::new("xsel")
+        .args(&["--clipboard", "--input"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        use std::io::Write;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if child.wait().is_ok() {
+            return true;
+        }
+    }
+
+    false
 }

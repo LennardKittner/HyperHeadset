@@ -1,4 +1,5 @@
 # HyperHeadset
+
 [![AUR Git Version](https://img.shields.io/aur/version/hyper-headset-git)](https://aur.archlinux.org/packages/hyper-headset-git)
 [![AUR Bin Version](https://img.shields.io/aur/version/hyper-headset-bin)](https://aur.archlinux.org/packages/hyper-headset-bin)
 [![GitHub Release](https://img.shields.io/github/v/release/LennardKittner/HyperHeadset)](https://github.com/LennardKittner/HyperHeadset/releases)
@@ -7,18 +8,20 @@
 
 A CLI and tray application for monitoring and managing HyperX headsets.
 
-| OS | Tooltip | Context Menu |
-|:---:|:---:|:---:|
-| **Linux** | <img src=./screenshots/tray_linux.png width="280"> | <img src=./screenshots/tray_linux_2.png width="280"> |
-| **macOS** | <img src=./screenshots/tray_macOS.png width="280"> | <img src=./screenshots/tray_macOS_2.png width="280"> |
+|     OS      |                       Tooltip                        |                      Context Menu                      |
+| :---------: | :--------------------------------------------------: | :----------------------------------------------------: |
+|  **Linux**  |  <img src=./screenshots/tray_linux.png width="280">  |  <img src=./screenshots/tray_linux_2.png width="280">  |
+|  **macOS**  |  <img src=./screenshots/tray_macOS.png width="280">  |  <img src=./screenshots/tray_macOS_2.png width="280">  |
 | **Windows** | <img src=./screenshots/tray_windows.png width="280"> | <img src=./screenshots/tray_windows_2.png width="280"> |
 
 This project is not affiliated with, endorsed by, or associated with HyperX or its parent company in any way. All trademarks and brand names belong to their respective owners.
 
 ## Compatibility
+
 Both the CLI and tray applications are compatible with Linux, MacOS, and Windows.
 
 **Supported Headsets**:
+
 - HyperX Cloud II Wireless HP vendor ID
 - HyperX Cloud II Wireless HyperX vendor ID
 - HyperX Cloud II Core Wireless
@@ -35,11 +38,15 @@ If your headset is not supported, feel free to open an issue; be sure to include
 ## Installation
 
 ### Arch Linux (AUR)
+
 No manual setup required (dependencies and udev rules are handled automatically):
+
 ```bash
 yay -S hyper-headset-git
 ```
+
 or
+
 ```bash
 yay -S hyper-headset-bin
 ```
@@ -64,7 +71,17 @@ To build both applications, use:
 See prerequisites below for installing dependencies.
 If the required udev rules are missing on Linux, the program will prompt you to install them automatically.
 
-## Prerequisites 
+### Build with features
+
+If your headset supports EQ (e.g. Cloud III S Wireless), add `--features eq-editor` for the full EQ experience (tray presets + TUI editor):
+
+```sh
+cargo build --release --features eq-editor
+```
+
+Use `--features eq-support` instead if you only want tray EQ presets without the TUI editor.
+
+## Prerequisites
 
 ### Dependencies
 
@@ -143,23 +160,39 @@ A CLI application for monitoring and managing HyperX headsets.
 Usage: hyper_headset_cli [OPTIONS]
 
 Options:
-      --automatic_shutdown <automatic_shutdown>
+      --automatic-shutdown <automatic-shutdown>
           Set the delay in minutes after which the headset will automatically shutdown.
           0 will disable automatic shutdown.
       --mute <mute>
           Mute or unmute the headset. [possible values: true, false]
-      --enable_side_tone <enable_side_tone>
+      --enable-side-tone <enable-side-tone>
           Enable or disable side tone. [possible values: true, false]
-      --side_tone_volume <side_tone_volume>
+      --side-tone-volume <side-tone-volume>
           Set the side tone volume.
-      --enable_voice_prompt <enable_voice_prompt>
+      --enable-voice-prompt <enable-voice-prompt>
           Enable voice prompt. This may not be supported on your device. [possible values: true, false]
-      --surround_sound <surround_sound>
+      --surround-sound <surround-sound>
           Enables surround sound. This may be on by default and cannot be changed on your device. [possible values: true, false]
-      --mute_playback <mute_playback>
-          Mute or unmute playback. [possible values: true, false]
-      --activate_noise_gate <activate_noise_gate>
+      --mute-playback <mute-playback>
+          Mute or unmute playback. This may not be supported on your device. [possible values: true, false]
+      --activate-noise-gate <activate-noise-gate>
           Activates noise gate. [possible values: true, false]
+      --eq
+          Open interactive EQ editor (TUI).
+          This may not be supported on your device.
+      --eq-profile <BAND=DB,...>
+          Set full EQ profile. Unspecified bands reset to 0 dB.
+          This may not be supported on your device.
+          BAND: index 0-9 or frequency (1khz, 250hz). Bare integers are indices, not Hz.
+            [0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz]
+          DB: -12.0 to 12.0.
+          Example: --eq-profile 5=-12.0,1khz=3.0,16khz=4.0
+      --eq-band <BAND=DB[,...]>
+          Adjust specific bands. Repeatable, comma-separated (last write wins per band).
+          This may not be supported on your device.
+          Others unchanged. Use alone or with --eq-profile (overrides on top of the profile).
+          See --eq-profile for band/dB reference.
+          Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0
   -v, --verbose
           Use verbose output
       --json
@@ -171,6 +204,7 @@ Options:
 
 Help only lists commands supported by this headset.
 ```
+
 `hyper_headset_cli` without any arguments will print all available headset information.
 
 ```
@@ -180,9 +214,9 @@ A tray application for monitoring HyperX headsets.
 Usage: hyper_headset [OPTIONS]
 
 Options:
-      --refresh_interval <refresh_interval>
+      --refresh-interval <refresh-interval>
           Set the refresh interval (in seconds) [default: 3]
-      --press_mute_key <press_mute_key>
+      --press-mute-key <press-mute-key>
           The app will simulate pressing the microphone mute key whoever the headsets is muted or unmuted. [default: true] [possible values: true, false]
   -v, --verbose
           Use verbose output
@@ -202,7 +236,7 @@ Since there is no MicMute key on Windows and MacOS f20 is used instead.
 This allows applications such as Discord to react when the hardware mute button on the headset is pressed.
 
 To set this up, start the tray app, open Discord, and create a new keybind via **User Settings** -> **Keybinds** -> **Add a Keybind**.
-For the action, select *Toggle Mute*, then click *Record Keybind* and press the headset's mute button while recording.
+For the action, select _Toggle Mute_, then click _Record Keybind_ and press the headset's mute button while recording.
 
 Discord should now automatically mute and unmute when the headset does.
 Because the action only toggles Discord's state, you may need to synchronize it once by manually muting or unmuting Discord.
@@ -212,7 +246,7 @@ Because the action only toggles Discord's state, you may need to synchronize it 
 - [ ] Update ksni
 - [ ] Add Docs
 - [ ] Add to crates.io
-- [ ] Let CLI periodically output the state 
+- [ ] Let CLI periodically output the state
 - [ ] Waybar applet
 - [x] Optional CLI output in JSON
 - [x] Menu bar app for MacOS.
@@ -239,4 +273,5 @@ Once you have set the filters, you can perform various actions and review the pa
 This project was inspired by [hyperx-cloud-flight](https://github.com/kondinskis/hyperx-cloud-flight).
 
 ## Attribution
+
 <a href="https://www.flaticon.com/free-icons/headphones" title="headphones icons">Headphones icons created by sonnycandra - Flaticon</a>
