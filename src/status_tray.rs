@@ -1,8 +1,6 @@
 use std::sync::mpsc::Sender;
 
 use hyper_headset::devices::{format_int_value, DeviceEvent, DeviceProperties, PropertyType};
-#[cfg(feature = "eq-support")]
-use ksni::menu::{RadioGroup, RadioItem};
 use ksni::{
     menu::{StandardItem, SubMenu},
     Handle, MenuItem, ToolTip, Tray, TrayService,
@@ -34,12 +32,23 @@ impl TrayHandler {
     pub fn update(&self, properties: &DeviceProperties) {
         let device_properties = properties.clone();
         self.handle.update(|tray| {
+            #[cfg(feature = "eq-support")]
+            if let Some((_, ref to)) = tray.pending_eq_transition {
+                // Clear pending transition once the target preset is confirmed active and synced.
+                if device_properties.active_eq_preset.as_deref() == Some(to.as_str())
+                    && device_properties.eq_synced == Some(true)
+                {
+                    tray.pending_eq_transition = None;
+                }
+            }
             tray.device_properties = Some(device_properties);
         })
     }
 
     pub fn clear_state(&self) {
         self.handle.update(|tray| {
+            #[cfg(feature = "eq-support")]
+            { tray.pending_eq_transition = None; }
             tray.device_properties = None;
         })
     }
@@ -51,6 +60,10 @@ pub struct StatusTray {
     device_properties: Option<DeviceProperties>,
     update_sender: Sender<DeviceEvent>,
     monochrome_icons: bool,
+    /// Tracks an in-flight EQ preset switch so the menu gives instant visual feedback
+    /// before the main loop confirms the HID writes finished. Cleared once synced.
+    #[cfg(feature = "eq-support")]
+    pending_eq_transition: Option<(String, String)>, // (from, to)
 }
 
 impl StatusTray {
@@ -61,6 +74,8 @@ impl StatusTray {
             device_properties: None,
             update_sender,
             monochrome_icons,
+            #[cfg(feature = "eq-support")]
+            pending_eq_transition: None,
         }
     }
 
@@ -292,49 +307,78 @@ impl Tray for StatusTray {
                         .and_then(|name| options.iter().position(|n| n == name));
 
                     let applying_name = if !synced { active_name } else { None };
-                    let radio_options: Vec<RadioItem> = options
+
+                    // Immediate visual feedback: pending_eq_transition is set on click before
+                    // the main loop confirms the HID writes, so the spinner and departure marker
+                    // appear instantly. At most one of each is shown (latest wins).
+                    let pending_target = self
+                        .pending_eq_transition
+                        .as_ref()
+                        .map(|(_, to)| to.as_str());
+                    let pending_depart = self
+                        .pending_eq_transition
+                        .as_ref()
+                        .map(|(from, _)| from.as_str());
+
+                    let current_active = active_name.map(str::to_owned);
+
+                    // Use StandardItem (not RadioGroup) so that clicking a preset closes the
+                    // menu — KDE Plasma doesn't re-render radio toggle-state while a submenu
+                    // is open, causing stale checked circles to accumulate across selections.
+                    let mut submenu_items: Vec<MenuItem<StatusTray>> = options
                         .iter()
-                        .map(|name| {
-                            let label = if applying_name == Some(name.as_str()) {
+                        .enumerate()
+                        .map(|(idx, name)| {
+                            let label = if pending_target == Some(name.as_str()) {
+                                // Spinner: user just selected this, HID writes in progress.
+                                format!("↻ {}", escape_label(name))
+                            } else if pending_depart == Some(name.as_str()) {
+                                // Departure marker: this was active, switching away from it.
+                                format!("· {}", escape_label(name))
+                            } else if applying_name == Some(name.as_str()) {
                                 escape_label(&format!("{} (applying...)", name))
+                            } else if Some(idx) == active_index {
+                                format!("✓ {}", escape_label(name))
                             } else {
-                                escape_label(name)
+                                format!("  {}", escape_label(name))
                             };
-                            RadioItem {
+                            let name_clone = name.clone();
+                            let current_active_clone = current_active.clone();
+                            StandardItem {
                                 label,
                                 enabled: true,
+                                activate: Box::new(move |this: &mut StatusTray| {
+                                    // Set immediately so the next menu() call shows feedback
+                                    // before the main loop has time to update device_properties.
+                                    this.pending_eq_transition = Some((
+                                        current_active_clone.clone().unwrap_or_default(),
+                                        name_clone.clone(),
+                                    ));
+                                    let _ = this.update_sender.send(
+                                        DeviceEvent::EqualizerPreset(name_clone.clone()),
+                                    );
+                                }),
                                 ..Default::default()
                             }
+                            .into()
                         })
                         .collect();
 
-                    let options_clone = options.clone();
-                    let radio_group = RadioGroup {
-                        selected: active_index.unwrap_or(usize::MAX),
-                        select: Box::new(move |this: &mut Self, index| {
-                            if let Some(name) = options_clone.get(index).cloned() {
-                                let _ = this.update_sender.send(DeviceEvent::EqualizerPreset(name));
+                    #[cfg(feature = "eq-editor")]
+                    {
+                        submenu_items.push(MenuItem::Separator);
+                        submenu_items.push(
+                            StandardItem {
+                                label: escape_label("Edit with: hyper_headset_cli --eq"),
+                                enabled: true,
+                                activate: Box::new(|_| {
+                                    hyper_headset::launch_eq_editor();
+                                }),
+                                ..Default::default()
                             }
-                        }),
-                        options: radio_options,
+                            .into(),
+                        );
                     }
-                    .into();
-
-                    let submenu_items = vec![
-                        radio_group,
-                        #[cfg(feature = "eq-editor")]
-                        MenuItem::Separator,
-                        #[cfg(feature = "eq-editor")]
-                        StandardItem {
-                            label: escape_label("Edit with: hyper_headset_cli --eq"),
-                            enabled: true,
-                            activate: Box::new(|_| {
-                                hyper_headset::launch_eq_editor();
-                            }),
-                            ..Default::default()
-                        }
-                        .into(),
-                    ];
 
                     menu_items.push(
                         SubMenu {
