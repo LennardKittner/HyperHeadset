@@ -292,19 +292,12 @@ pub fn launch_eq_editor() {
 
     #[cfg(target_os = "windows")]
     {
+        // `start` treats the first quoted argument as the window title, so an explicit empty
+        // title must precede the command. The CLI binary is resolved next to the tray binary;
+        // if that fails the bare name is used, which requires hyper_headset_cli to be on PATH.
+        // TODO(LennardKittner): improve PATH handling / installer guidance for Windows.
         let mut cmd = std::process::Command::new("cmd.exe");
-        cmd.args(&["/c", "start", "cmd", "/k", &format!("\"{}\" --eq", cli_str)]);
-        let _ = cmd.spawn();
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let mut cmd = std::process::Command::new("osascript");
-        let shell_cmd = format!(
-            "\"{}\" --eq; echo; echo 'Press Enter to close...'; read _",
-            cli_str.replace('"', "\\\"")
-        );
-        cmd.args(&["-e", &format!("tell app \"Terminal\" to do script \"/bin/sh -c \\\"{}\\\"\"", shell_cmd)]);
+        cmd.args(&["/c", "start", "", "cmd", "/k", &format!("\"{}\" --eq", cli_str)]);
         let _ = cmd.spawn();
     }
 }

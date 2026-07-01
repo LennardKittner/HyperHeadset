@@ -6,7 +6,7 @@ use std::{
 use hyper_headset::devices::{format_int_value, DeviceEvent, DeviceProperties, PropertyType};
 #[cfg(target_os = "windows")]
 use image::{Rgba, RgbaImage};
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use tray_icon::menu::CheckMenuItem;
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu},
@@ -501,6 +501,29 @@ impl TrayApp {
                     synced,
                 } => {
                     if options.is_empty() {
+                        // No presets yet. On Windows with eq-editor, still show a submenu so
+                        // the user can open the editor to create their first preset.
+                        #[cfg(all(target_os = "windows", feature = "eq-editor"))]
+                        {
+                            let submenu = Submenu::new(
+                                format!(
+                                    "{}: {}",
+                                    descriptor.pretty_name,
+                                    descriptor.data.as_deref().unwrap_or("Unknown"),
+                                ),
+                                true,
+                            );
+                            let edit_item =
+                                MenuItem::new("Edit with: hyper_headset_cli --eq", true, None);
+                            let edit_id = edit_item.id().clone();
+                            new_callbacks.insert(
+                                edit_id,
+                                Box::new(move || hyper_headset::launch_eq_editor()),
+                            );
+                            let _ = submenu.append(&edit_item);
+                            let _ = menu.append(&submenu);
+                        }
+                        #[cfg(not(all(target_os = "windows", feature = "eq-editor")))]
                         if let Some(ref current_value) = descriptor.data {
                             let menu_item = MenuItem::new(
                                 format!(
@@ -558,7 +581,9 @@ impl TrayApp {
                         let _ = submenu.append(&entry);
                     }
 
-                    #[cfg(feature = "eq-editor")]
+                    // macOS excluded: opening a second process that claims the HID device fails
+                    // with "exclusive access and device already open".
+                    #[cfg(all(target_os = "windows", feature = "eq-editor"))]
                     {
                         let _ = submenu.append(&PredefinedMenuItem::separator());
                         let edit_item = MenuItem::new("Edit with: hyper_headset_cli --eq", true, None);
