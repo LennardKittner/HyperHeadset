@@ -1,8 +1,6 @@
 use std::sync::mpsc::Sender;
 
-use hyper_headset::devices::{
-    format_int_value, DeviceEvent, DeviceProperties, PropertyType,
-};
+use hyper_headset::devices::{format_int_value, DeviceEvent, DeviceProperties, PropertyType};
 #[cfg(feature = "eq-support")]
 use ksni::menu::{RadioGroup, RadioItem};
 use ksni::{
@@ -49,6 +47,7 @@ impl TrayHandler {
 }
 
 pub struct StatusTray {
+    theme_name: Option<String>,
     device_properties: Option<DeviceProperties>,
     update_sender: Sender<DeviceEvent>,
     monochrome_icons: bool,
@@ -56,18 +55,12 @@ pub struct StatusTray {
 
 impl StatusTray {
     pub fn new(update_sender: Sender<DeviceEvent>, monochrome_icons: bool) -> Self {
+        let theme_name = linicon::get_system_theme();
         StatusTray {
+            theme_name,
             device_properties: None,
             update_sender,
             monochrome_icons,
-        }
-    }
-
-    fn fallback_headset_icon(&self) -> &'static str {
-        if self.monochrome_icons {
-            "audio-headset-symbolic"
-        } else {
-            "audio-headset"
         }
     }
 
@@ -87,7 +80,7 @@ impl Tray for StatusTray {
 
     fn icon_name(&self) -> String {
         TrayBatteryIconState::from_device_properties(self.device_properties.as_ref())
-            .linux_icon_name(self.monochrome_icons)
+            .linux_icon_name(self.monochrome_icons, self.theme_name.as_ref())
             .to_string()
     }
 
@@ -96,7 +89,8 @@ impl Tray for StatusTray {
             return ToolTip {
                 title: "Unknown".to_string(),
                 description: NO_COMPATIBLE_DEVICE.to_string(),
-                icon_name: self.fallback_headset_icon().into(),
+                icon_name: TrayBatteryIconState::NoDevice
+                    .linux_icon_name(self.monochrome_icons, self.theme_name.as_ref()),
                 icon_pixmap: Vec::new(),
             };
         };
@@ -118,7 +112,7 @@ impl Tray for StatusTray {
                 .unwrap_or("Unknown".to_string()),
             description,
             icon_name: TrayBatteryIconState::from_device_properties(Some(device_properties))
-                .linux_icon_name(self.monochrome_icons)
+                .linux_icon_name(self.monochrome_icons, self.theme_name.as_ref())
                 .to_string(),
             icon_pixmap: Vec::new(),
         }

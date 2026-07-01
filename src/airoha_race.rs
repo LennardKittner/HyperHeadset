@@ -90,11 +90,7 @@ impl RaceClient {
 
         // StartNotify on RX
         let rx_proxy = conn.with_proxy("org.bluez", &rx_path, DBUS_TIMEOUT);
-        rx_proxy.method_call::<(), _, _, _>(
-            "org.bluez.GattCharacteristic1",
-            "StartNotify",
-            (),
-        )?;
+        rx_proxy.method_call::<(), _, _, _>("org.bluez.GattCharacteristic1", "StartNotify", ())?;
 
         let client = Self {
             conn,
@@ -136,7 +132,9 @@ impl RaceClient {
         want_type: u8,
     ) -> Result<Vec<u8>, dbus::Error> {
         let packet = build_packet(opcode, payload);
-        let tx_proxy = self.conn.with_proxy("org.bluez", &self.tx_path, DBUS_TIMEOUT);
+        let tx_proxy = self
+            .conn
+            .with_proxy("org.bluez", &self.tx_path, DBUS_TIMEOUT);
         tx_proxy.method_call::<(), _, _, _>(
             "org.bluez.GattCharacteristic1",
             "WriteValue",
@@ -167,8 +165,7 @@ impl Drop for RaceClient {
         let rx = self
             .conn
             .with_proxy("org.bluez", &self.rx_path, Duration::from_millis(500));
-        let _ =
-            rx.method_call::<(), _, _, _>("org.bluez.GattCharacteristic1", "StopNotify", ());
+        let _ = rx.method_call::<(), _, _, _>("org.bluez.GattCharacteristic1", "StopNotify", ());
     }
 }
 

@@ -28,6 +28,8 @@ dialog = "0.3.0"
 ksni = "0.2.0"
 shell-escape = "0.1.5"
 dbus = "0.9"
+freedesktop-icons = "0.4.0"
+linicon = "2.3.0"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 tray-icon = "0.21.3"

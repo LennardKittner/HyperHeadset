@@ -1,5 +1,15 @@
 use hyper_headset::devices::{ChargingStatus, DeviceProperties};
 
+#[cfg(target_os = "linux")]
+use freedesktop_icons::lookup;
+
+#[cfg(target_os = "linux")]
+const HEADSET_MONOCHROME: &str = "audio-headset-symbolic";
+#[cfg(target_os = "linux")]
+const HEADSET: &str = "audio-headset";
+#[cfg(target_os = "linux")]
+const HEADSET_FALLBACK: &str = "headset";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TrayBatteryIconState {
     NoDevice,
@@ -45,50 +55,61 @@ impl TrayBatteryIconState {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn linux_icon_name(self, monochrome: bool) -> &'static str {
+    pub fn linux_icon_name(self, monochrome: bool, theme_name: Option<&String>) -> String {
+        let if_icon_exists = |name: &str, fallback: &dyn Fn() -> String| {
+            if let Some(theme_name) = theme_name {
+                if lookup(name)
+                    .with_theme(theme_name)
+                    .with_cache()
+                    .find()
+                    .is_some()
+                {
+                    name.to_string()
+                } else {
+                    fallback()
+                }
+            } else {
+                if lookup(name).with_cache().find().is_some() {
+                    name.to_string()
+                } else {
+                    fallback()
+                }
+            }
+        };
+        let default_icon = &|| if_icon_exists(HEADSET, &|| HEADSET_FALLBACK.to_string());
         match self {
             Self::NoDevice | Self::Disconnected | Self::ConnectedUnknown => {
                 if monochrome {
-                    "audio-headset-symbolic"
+                    if_icon_exists(HEADSET_MONOCHROME, default_icon)
                 } else {
-                    "audio-headset"
+                    default_icon()
                 }
             }
             Self::Connected { percent, charging } => {
-                let level_name = if percent <= 10 {
-                    "battery-caution"
-                } else if percent <= 30 {
-                    "battery-low"
-                } else if percent <= 60 {
-                    "battery-medium"
-                } else if percent <= 85 {
-                    "battery-good"
-                } else {
-                    "battery-full"
+                let precise_icon = format!(
+                    "battery-{:0>3}{}{}",
+                    (percent / 10) * 10,
+                    if charging { "-charging" } else { "" },
+                    if monochrome { "-symbolic" } else { "" },
+                );
+
+                let modifier = match percent {
+                    0..10 => "caution",
+                    10..30 => "low",
+                    30..70 => "medium",
+                    70..95 => "good",
+                    95.. => "full",
                 };
-                if charging {
-                    match (level_name, monochrome) {
-                        ("battery-caution", false) => "battery-caution-charging",
-                        ("battery-low", false) => "battery-low-charging",
-                        ("battery-medium", false) => "battery-medium-charging",
-                        ("battery-good", false) => "battery-good-charging",
-                        (_, false) => "battery-full-charging",
-                        ("battery-caution", true) => "battery-caution-charging-symbolic",
-                        ("battery-low", true) => "battery-low-charging-symbolic",
-                        ("battery-medium", true) => "battery-medium-charging-symbolic",
-                        ("battery-good", true) => "battery-good-charging-symbolic",
-                        (_, true) => "battery-full-charging-symbolic",
-                    }
-                } else {
-                    match (level_name, monochrome) {
-                        ("battery-caution", true) => "battery-caution-symbolic",
-                        ("battery-low", true) => "battery-low-symbolic",
-                        ("battery-medium", true) => "battery-medium-symbolic",
-                        ("battery-good", true) => "battery-good-symbolic",
-                        (name, false) => name,
-                        (_, true) => "battery-full-symbolic",
-                    }
-                }
+
+                let imprecise_icon = format!(
+                    "battery-{modifier}{}{}",
+                    if charging { "-charging" } else { "" },
+                    if monochrome { "-symbolic" } else { "" },
+                );
+
+                if_icon_exists(&precise_icon, &|| {
+                    if_icon_exists(&imprecise_icon, default_icon)
+                })
             }
         }
     }
