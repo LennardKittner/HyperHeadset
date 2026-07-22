@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main", "dev" ]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,6 +19,8 @@ jobs:
           submodules: recursive
       - name: Build
         run: cargo build --verbose --bin hyper_headset_cli
+      - name: Build all binaries with EQ features
+        run: cargo build --verbose --features eq-editor
       - name: test
         run:  cargo test --bin hyper_headset_cli
 
@@ -31,6 +34,8 @@ jobs:
         run: sudo apt update && sudo apt install -y libdbus-1-dev libhidapi-dev libusb-1.0-0-dev libudev-dev
       - name: Build
         run: cargo build --verbose
+      - name: Build with EQ features
+        run: cargo build --verbose --features eq-editor
       - name: test
         run:  cargo test
 
@@ -38,10 +43,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
-        with: 
+        with:
           submodules: recursive
       - name: Build
         run: cargo build --verbose
+      - name: Build with EQ features
+        run: cargo build --verbose --features eq-editor
       - name: test
         run:  cargo test
 
