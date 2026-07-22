@@ -33,7 +33,7 @@ impl TrayHandler {
         let device_properties = properties.clone();
         self.handle.update(|tray| {
             #[cfg(feature = "eq-support")]
-            if let Some((_, ref to)) = tray.pending_eq_transition {
+            if let Some(ref to) = tray.pending_eq_transition {
                 // Clear pending transition once the target preset is confirmed active and synced.
                 if device_properties.active_eq_preset.as_deref() == Some(to.as_str())
                     && device_properties.eq_synced == Some(true)
@@ -60,10 +60,11 @@ pub struct StatusTray {
     device_properties: Option<DeviceProperties>,
     update_sender: Sender<DeviceEvent>,
     monochrome_icons: bool,
-    /// Tracks an in-flight EQ preset switch so the menu gives instant visual feedback
-    /// before the main loop confirms the HID writes finished. Cleared once synced.
+    /// Target preset of an in-flight EQ switch, so the menu gives instant visual
+    /// feedback before the main loop confirms the HID writes finished. Cleared once
+    /// the target is confirmed active and synced.
     #[cfg(feature = "eq-support")]
-    pending_eq_transition: Option<(String, String)>, // (from, to)
+    pending_eq_transition: Option<String>,
 }
 
 impl StatusTray {
@@ -309,18 +310,9 @@ impl Tray for StatusTray {
                     let applying_name = if !synced { active_name } else { None };
 
                     // Immediate visual feedback: pending_eq_transition is set on click before
-                    // the main loop confirms the HID writes, so the spinner and departure marker
-                    // appear instantly. At most one of each is shown (latest wins).
-                    let pending_target = self
-                        .pending_eq_transition
-                        .as_ref()
-                        .map(|(_, to)| to.as_str());
-                    let pending_depart = self
-                        .pending_eq_transition
-                        .as_ref()
-                        .map(|(from, _)| from.as_str());
-
-                    let current_active = active_name.map(str::to_owned);
+                    // the main loop confirms the HID writes, so the spinner appears instantly.
+                    // The previously active preset keeps its ✓ until the switch is confirmed.
+                    let pending_target = self.pending_eq_transition.as_deref();
 
                     // Use StandardItem (not RadioGroup) so that clicking a preset closes the
                     // menu — KDE Plasma doesn't re-render radio toggle-state while a submenu
@@ -332,9 +324,6 @@ impl Tray for StatusTray {
                             let label = if pending_target == Some(name.as_str()) {
                                 // Spinner: user just selected this, HID writes in progress.
                                 format!("↻ {}", escape_label(name))
-                            } else if pending_depart == Some(name.as_str()) {
-                                // Departure marker: this was active, switching away from it.
-                                format!("· {}", escape_label(name))
                             } else if applying_name == Some(name.as_str()) {
                                 escape_label(&format!("{} (applying...)", name))
                             } else if Some(idx) == active_index {
@@ -343,17 +332,13 @@ impl Tray for StatusTray {
                                 format!("  {}", escape_label(name))
                             };
                             let name_clone = name.clone();
-                            let current_active_clone = current_active.clone();
                             StandardItem {
                                 label,
                                 enabled: true,
                                 activate: Box::new(move |this: &mut StatusTray| {
                                     // Set immediately so the next menu() call shows feedback
                                     // before the main loop has time to update device_properties.
-                                    this.pending_eq_transition = Some((
-                                        current_active_clone.clone().unwrap_or_default(),
-                                        name_clone.clone(),
-                                    ));
+                                    this.pending_eq_transition = Some(name_clone.clone());
                                     let _ = this.update_sender.send(
                                         DeviceEvent::EqualizerPreset(name_clone.clone()),
                                     );

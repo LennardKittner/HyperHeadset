@@ -9,7 +9,6 @@ mod status_tray_not_linux;
 #[cfg(not(target_os = "macos"))]
 mod tray_battery_icon_state;
 
-
 #[cfg(feature = "eq-support")]
 use hyper_headset::eq::session::EqSession;
 
@@ -30,15 +29,14 @@ fn main() {
     use clap::ArgAction;
     use std::sync::mpsc;
 
-    use hyper_headset::devices::{DeviceEvent, DeviceProperties};
+    use hyper_headset::devices::DeviceEvent;
     use hyper_headset::VERBOSE;
     use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy};
 
-    use crate::status_tray_not_linux::TrayApp;
+    use crate::status_tray_not_linux::{TrayApp, TrayUserEvent};
 
-    let event_loop: EventLoop<Option<DeviceProperties>> =
-        EventLoop::with_user_event().build().unwrap();
-    let proxy: EventLoopProxy<Option<DeviceProperties>> = event_loop.create_proxy();
+    let event_loop: EventLoop<TrayUserEvent> = EventLoop::with_user_event().build().unwrap();
+    let proxy: EventLoopProxy<TrayUserEvent> = event_loop.create_proxy();
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let (tx, rx) = mpsc::channel::<DeviceEvent>();
@@ -111,7 +109,7 @@ fn main() {
                 match connect_compatible_device() {
                     Ok(d) => break d,
                     Err(e) => {
-                        let _ = proxy.send_event(None);
+                        let _ = proxy.send_event(TrayUserEvent::Properties(None));
                         eprintln!("Connecting failed with error: {e}")
                     }
                 }
@@ -125,9 +123,7 @@ fn main() {
                 }
             }
             #[cfg(not(feature = "eq-support"))]
-            warn_eq_unavailable_once(
-                device.device_properties().can_set_equalizer,
-            );
+            warn_eq_unavailable_once(device.device_properties().can_set_equalizer);
 
             // Run tick loop while connected
             let mut run_counter = 0;
@@ -141,7 +137,9 @@ fn main() {
                     Ok(()) => (),
                     Err(error) => {
                         eprintln!("{error}");
-                        let _ = proxy.send_event(Some(device.device_properties()));
+                        let _ = proxy.send_event(TrayUserEvent::Properties(Some(
+                            device.device_properties(),
+                        )));
                         break; // exit tick loop to retry connection in the outer loop
                     }
                 };
@@ -173,13 +171,17 @@ fn main() {
                     }
                 }
 
-                let _ = proxy.send_event(Some(device.device_properties()));
+                let _ =
+                    proxy.send_event(TrayUserEvent::Properties(Some(device.device_properties())));
                 run_counter += 1;
             }
         }
     });
 
-    event_loop.run_app(&mut TrayApp::new(tx)).unwrap();
+    let tray_proxy = event_loop.create_proxy();
+    event_loop
+        .run_app(&mut TrayApp::new(tx, tray_proxy))
+        .unwrap();
 }
 
 #[cfg(target_os = "linux")]
@@ -290,9 +292,7 @@ fn main() {
             }
         }
         #[cfg(not(feature = "eq-support"))]
-        warn_eq_unavailable_once(
-            device.device_properties().can_set_equalizer,
-        );
+        warn_eq_unavailable_once(device.device_properties().can_set_equalizer);
 
         // Run tick loop while connected
         let mut run_counter = 0;
