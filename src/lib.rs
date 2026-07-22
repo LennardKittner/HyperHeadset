@@ -235,6 +235,9 @@ pub fn launch_eq_editor() {
         Ok(path) => path,
         Err(_) => return,
     };
+    #[cfg(target_os = "windows")]
+    exe_path.set_file_name("hyper_headset_cli.exe");
+    #[cfg(not(target_os = "windows"))]
     exe_path.set_file_name("hyper_headset_cli");
     let cli_path = if exe_path.exists() {
         exe_path
@@ -283,9 +286,11 @@ pub fn launch_eq_editor() {
 
         if let Ok(Choice::Yes) = choice {
             if !copy_to_clipboard("hyper_headset_cli --eq") {
-                let _ = dialog::Message::new("Failed to copy to clipboard. Please run manually:\n\nhyper_headset_cli --eq")
-                    .title("HyperX Equalizer Editor")
-                    .show();
+                let _ = dialog::Message::new(
+                    "Failed to copy to clipboard. Please run manually:\n\nhyper_headset_cli --eq",
+                )
+                .title("HyperX Equalizer Editor")
+                .show();
             }
         }
     }
@@ -297,7 +302,7 @@ pub fn launch_eq_editor() {
         // if that fails the bare name is used, which requires hyper_headset_cli to be on PATH.
         // TODO(LennardKittner): improve PATH handling / installer guidance for Windows.
         let mut cmd = std::process::Command::new("cmd.exe");
-        cmd.args(&["/c", "start", "", "cmd", "/k", &format!("\"{}\" --eq", cli_str)]);
+        cmd.args(&["/c", "start", "", "cmd", "/k", &format!("{} --eq", cli_str)]);
         let _ = cmd.spawn();
     }
 }
