@@ -155,10 +155,26 @@ fn main() {
                 // with the default refresh_interval the state is only actively queried every 3min
                 // querying the device too frequently can lead to instability
                 let first = rx.recv_timeout(refresh_interval);
-                for command in first.into_iter().chain(rx.try_iter()) {
+                let commands: Vec<DeviceEvent> =
+                    first.into_iter().chain(rx.try_iter()).collect();
+                // Spam-selecting EQ presets queues one event per click, but only the
+                // last selection matters — drop the superseded ones.
+                let last_eq = commands
+                    .iter()
+                    .rposition(|c| matches!(c, DeviceEvent::EqualizerPreset(_)));
+                for (i, command) in commands.into_iter().enumerate() {
+                    let is_eq = matches!(command, DeviceEvent::EqualizerPreset(_));
+                    if is_eq && Some(i) != last_eq {
+                        continue;
+                    }
                     let _ = device.try_apply(command);
-                    std::thread::sleep(hyper_headset::devices::RESPONSE_DELAY);
-                    let _ = device.active_refresh_state();
+                    // EQ state is app-managed and never read back from any device, but the
+                    // refresh also polls unrelated properties — only skip it for devices
+                    // confirmed to gain nothing from it (see skip_refresh_after_eq_write).
+                    if !is_eq || !device.skip_refresh_after_eq_write() {
+                        std::thread::sleep(hyper_headset::devices::RESPONSE_DELAY);
+                        let _ = device.active_refresh_state();
+                    }
                 }
 
                 // Per-tick EQ session work: pick up watcher changes, sync
@@ -192,7 +208,7 @@ fn main() {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use hyper_headset::devices::connect_compatible_device;
+    use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
     #[cfg(feature = "eq-support")]
     use hyper_headset::devices::Headset;
     use status_tray::{StatusTray, TrayHandler};
@@ -322,10 +338,25 @@ fn main() {
             // with the default refresh_interval the state is only actively queried every 3min
             // querying the device too frequently can lead to instability
             let first = rx.recv_timeout(refresh_interval);
-            for command in first.into_iter().chain(rx.try_iter()) {
+            let commands: Vec<DeviceEvent> = first.into_iter().chain(rx.try_iter()).collect();
+            // Spam-selecting EQ presets queues one event per click, but only the
+            // last selection matters — drop the superseded ones.
+            let last_eq = commands
+                .iter()
+                .rposition(|c| matches!(c, DeviceEvent::EqualizerPreset(_)));
+            for (i, command) in commands.into_iter().enumerate() {
+                let is_eq = matches!(command, DeviceEvent::EqualizerPreset(_));
+                if is_eq && Some(i) != last_eq {
+                    continue;
+                }
                 let _ = device.try_apply(command);
-                std::thread::sleep(hyper_headset::devices::RESPONSE_DELAY);
-                let _ = device.active_refresh_state();
+                // EQ state is app-managed and never read back from any device, but the
+                // refresh also polls unrelated properties — only skip it for devices
+                // confirmed to gain nothing from it (see skip_refresh_after_eq_write).
+                if !is_eq || !device.skip_refresh_after_eq_write() {
+                    std::thread::sleep(hyper_headset::devices::RESPONSE_DELAY);
+                    let _ = device.active_refresh_state();
+                }
             }
 
             // Per-tick EQ session work: pick up watcher changes, sync

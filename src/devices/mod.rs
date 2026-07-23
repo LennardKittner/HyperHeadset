@@ -133,6 +133,14 @@ impl Headset {
             }
         }
     }
+
+    pub fn skip_refresh_after_eq_write(&self) -> bool {
+        match self {
+            Headset::Hid(device) => device.skip_refresh_after_eq_write(),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(_) => false,
+        }
+    }
 }
 
 /// Connect to a compatible headset: a USB HID dongle if present, otherwise
@@ -256,6 +264,15 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
 pub struct DeviceState {
     pub hid_device: HidDevice,
     pub device_properties: DeviceProperties,
+    /// Set once any active-refresh query beyond connected-status has received a response
+    /// since connecting. Whether those queries get answered varies by environment (dongle,
+    /// host USB/power state, individual unit — not just device model), so this is measured
+    /// per-connection rather than assumed from the device type. See
+    /// `Device::skip_refresh_after_eq_write`.
+    pub non_connected_query_ever_answered: bool,
+    /// Set once a full `active_refresh_state` cycle has completed since connecting, so
+    /// `skip_refresh_after_eq_write` has real evidence before it ever skips anything.
+    pub active_refresh_attempted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -384,6 +401,8 @@ impl DeviceState {
                 DeviceState {
                     hid_device,
                     device_properties: DeviceProperties::new(product_id, vendor_id, device_name),
+                    non_connected_query_ever_answered: false,
+                    active_refresh_attempted: false,
                 }
             })
             .collect())
@@ -960,6 +979,19 @@ pub trait Device {
     fn set_equalizer_bands_packets(&self, _bands: &[(u8, f32)]) -> Option<Vec<Vec<u8>>> {
         None
     }
+    /// Whether it's safe to skip the post-write property refresh after an EQ preset write.
+    /// EQ state itself is always app-managed and never read back from any device, but the
+    /// refresh also polls unrelated properties (battery, mute, ...), and whether those
+    /// queries get real responses depends on the environment — dongle, host USB/power
+    /// state, individual unit — not just the device model; the same headset can behave
+    /// differently for different users. So this is derived from what this specific
+    /// connection has actually observed (via `active_refresh_state`), not assumed from
+    /// device type: skip only once a full refresh cycle has run and no query beyond
+    /// connected-status has ever answered.
+    fn skip_refresh_after_eq_write(&self) -> bool {
+        let state = self.get_device_state();
+        state.active_refresh_attempted && !state.non_connected_query_ever_answered
+    }
     fn get_noise_gate_packet(&self) -> Option<Vec<u8>> {
         None
     }
@@ -1077,7 +1109,7 @@ pub trait Device {
         self.execute_headset_specific_functionality()?;
 
         let mut responded = false;
-        for packet in packets.into_iter() {
+        for (i, packet) in packets.into_iter().enumerate() {
             self.prepare_write();
             debug_println!("Write packet: {packet:?}");
             self.write_hid_report(&packet)?;
@@ -1087,6 +1119,12 @@ pub trait Device {
                     self.get_device_state_mut().update_self_with_event(&event);
                 }
                 responded = true;
+                // Index 0 is always the connected-status query (see get_query_packets);
+                // anything answering beyond that is evidence this connection gets real
+                // responses to the rest, so refreshes stay worthwhile after an EQ write.
+                if i > 0 {
+                    self.get_device_state_mut().non_connected_query_ever_answered = true;
+                }
             }
             if !matches!(
                 self.get_device_state().device_properties.connected,
@@ -1095,6 +1133,7 @@ pub trait Device {
                 break;
             }
         }
+        self.get_device_state_mut().active_refresh_attempted = true;
 
         if responded {
             Ok(())
