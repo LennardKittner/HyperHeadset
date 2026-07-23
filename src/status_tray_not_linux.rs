@@ -380,7 +380,11 @@ impl TrayApp {
         let mut new_callbacks: HashMap<MenuId, Box<dyn Fn() + Send + Sync>> = HashMap::new();
 
         let Some(device_properties) = device_properties else {
-            let _ = tray.set_tooltip(Some(NO_COMPATIBLE_DEVICE));
+            let _ = tray.set_tooltip(Some(format!(
+                "HyperHeadset v{}\n{}",
+                env!("CARGO_PKG_VERSION"),
+                NO_COMPATIBLE_DEVICE
+            )));
             #[cfg(target_os = "macos")]
             tray.set_title(Some(&format!("🎧?")));
             let status_item = MenuItem::new(NO_COMPATIBLE_DEVICE, false, None);
@@ -390,6 +394,12 @@ impl TrayApp {
             #[cfg(target_os = "windows")]
             {
                 append_startup_toggle(&menu, &mut new_callbacks);
+            }
+
+            append_about_submenu(&menu, &mut new_callbacks);
+
+            #[cfg(target_os = "windows")]
+            {
                 menu.append(&quit_item).unwrap();
                 new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
             }
@@ -405,7 +415,11 @@ impl TrayApp {
         };
 
         if !device_properties.connected.unwrap_or(false) {
-            let _ = tray.set_tooltip(Some(HEADSET_NOT_CONNECTED));
+            let _ = tray.set_tooltip(Some(format!(
+                "HyperHeadset v{}\n{}",
+                env!("CARGO_PKG_VERSION"),
+                HEADSET_NOT_CONNECTED
+            )));
             #[cfg(target_os = "macos")]
             tray.set_title(Some(&format!("🎧?")));
             let status_item = MenuItem::new(HEADSET_NOT_CONNECTED, false, None);
@@ -415,6 +429,12 @@ impl TrayApp {
             #[cfg(target_os = "windows")]
             {
                 append_startup_toggle(&menu, &mut new_callbacks);
+            }
+
+            append_about_submenu(&menu, &mut new_callbacks);
+
+            #[cfg(target_os = "windows")]
+            {
                 menu.append(&quit_item).unwrap();
                 new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
             }
@@ -674,6 +694,12 @@ impl TrayApp {
         #[cfg(target_os = "windows")]
         {
             append_startup_toggle(&menu, &mut new_callbacks);
+        }
+
+        append_about_submenu(&menu, &mut new_callbacks);
+
+        #[cfg(target_os = "windows")]
+        {
             menu.append(&quit_item).unwrap();
             new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
         }
@@ -686,6 +712,38 @@ impl TrayApp {
         tray.set_menu(Some(Box::new(menu)));
         self.current_state = Some(Some(device_properties));
     }
+}
+
+fn append_about_submenu(
+    menu: &Menu,
+    callbacks: &mut HashMap<MenuId, Box<dyn Fn() + Send + Sync>>,
+) {
+    let about_submenu = Submenu::new("About", true);
+
+    let version_str = format!("HyperHeadset v{}", env!("CARGO_PKG_VERSION"));
+    let version_label = format!("{} (Copy)", version_str);
+    let version_item = MenuItem::new(&version_label, true, None);
+    let version_id = version_item.id().clone();
+    let version_copy = version_str.clone();
+    callbacks.insert(
+        version_id,
+        Box::new(move || {
+            let _ = hyper_headset::copy_to_clipboard(&version_copy);
+        }),
+    );
+    let _ = about_submenu.append(&version_item);
+
+    let github_item = MenuItem::new("GitHub (Open URL)", true, None);
+    let github_id = github_item.id().clone();
+    callbacks.insert(
+        github_id,
+        Box::new(|| {
+            hyper_headset::open_url("https://github.com/LennardKittner/HyperHeadset");
+        }),
+    );
+    let _ = about_submenu.append(&github_item);
+
+    let _ = menu.append(&about_submenu);
 }
 
 #[cfg(target_os = "windows")]

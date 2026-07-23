@@ -307,51 +307,104 @@ pub fn launch_eq_editor() {
     }
 }
 
-#[cfg(all(target_os = "linux", feature = "eq-editor"))]
-fn copy_to_clipboard(text: &str) -> bool {
-    // Try wl-copy first (Wayland)
-    if let Ok(mut child) = std::process::Command::new("wl-copy")
-        .stdin(std::process::Stdio::piped())
-        .spawn()
+pub fn open_url(url: &str) {
+    #[cfg(target_os = "linux")]
     {
-        use std::io::Write;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/c", "start", "", url])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+}
+
+pub fn copy_to_clipboard(text: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        // Try wl-copy first (Wayland)
+        if let Ok(mut child) = std::process::Command::new("wl-copy")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            if child.wait().is_ok() {
+                return true;
+            }
         }
-        if child.wait().is_ok() {
-            return true;
+
+        // Try xclip (X11)
+        if let Ok(mut child) = std::process::Command::new("xclip")
+            .args(&["-selection", "clipboard"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            if child.wait().is_ok() {
+                return true;
+            }
         }
+
+        // Try xsel (X11 alternative)
+        if let Ok(mut child) = std::process::Command::new("xsel")
+            .args(&["--clipboard", "--input"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            if child.wait().is_ok() {
+                return true;
+            }
+        }
+
+        false
     }
 
-    // Try xclip (X11)
-    if let Ok(mut child) = std::process::Command::new("xclip")
-        .args(&["-selection", "clipboard"])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
+    #[cfg(target_os = "windows")]
     {
         use std::io::Write;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
+        if let Ok(mut child) = std::process::Command::new("clip")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            if child.wait().is_ok() {
+                return true;
+            }
         }
-        if child.wait().is_ok() {
-            return true;
-        }
+        false
     }
 
-    // Try xsel (X11 alternative)
-    if let Ok(mut child) = std::process::Command::new("xsel")
-        .args(&["--clipboard", "--input"])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
+    #[cfg(target_os = "macos")]
     {
         use std::io::Write;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
+        if let Ok(mut child) = std::process::Command::new("pbcopy")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            if child.wait().is_ok() {
+                return true;
+            }
         }
-        if child.wait().is_ok() {
-            return true;
-        }
+        false
     }
-
-    false
 }

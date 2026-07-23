@@ -103,7 +103,7 @@ impl Tray for StatusTray {
     fn tool_tip(&self) -> ToolTip {
         let Some(device_properties) = self.device_properties.as_ref() else {
             return ToolTip {
-                title: "Unknown".to_string(),
+                title: format!("HyperHeadset v{}", env!("CARGO_PKG_VERSION")),
                 description: NO_COMPATIBLE_DEVICE.to_string(),
                 icon_name: TrayBatteryIconState::NoDevice
                     .linux_icon_name(self.monochrome_icons, self.theme_name.as_ref()),
@@ -142,6 +142,35 @@ impl Tray for StatusTray {
             activate: Box::new(|_| std::process::exit(0)),
             ..Default::default()
         };
+        let make_about = || {
+            let version_str = format!("HyperHeadset v{}", env!("CARGO_PKG_VERSION"));
+            let version_str_clone = version_str.clone();
+            let items: Vec<MenuItem<StatusTray>> = vec![
+                StandardItem {
+                    label: format!("{} (Copy)", version_str),
+                    enabled: true,
+                    activate: Box::new(move |_| {
+                        let _ = hyper_headset::copy_to_clipboard(&version_str_clone);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: "GitHub (Open URL)".into(),
+                    enabled: true,
+                    activate: Box::new(|_| {
+                        hyper_headset::open_url("https://github.com/LennardKittner/HyperHeadset");
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            ];
+            SubMenu {
+                label: "About".into(),
+                submenu: items,
+                ..Default::default()
+            }
+        };
         let mut menu_items: Vec<MenuItem<Self>> = Vec::new();
 
         let Some(device_properties) = self.device_properties.as_ref() else {
@@ -154,6 +183,7 @@ impl Tray for StatusTray {
                 .into(),
             );
             menu_items.push(MenuItem::Separator);
+            menu_items.push(make_about().into());
             menu_items.push(make_exit().into());
             return menu_items;
         };
@@ -168,6 +198,7 @@ impl Tray for StatusTray {
                 .into(),
             );
             menu_items.push(MenuItem::Separator);
+            menu_items.push(make_about().into());
             menu_items.push(make_exit().into());
             return menu_items;
         }
@@ -379,6 +410,7 @@ impl Tray for StatusTray {
         }
 
         menu_items.push(MenuItem::Separator);
+        menu_items.push(make_about().into());
         menu_items.push(make_exit().into());
         menu_items
     }
