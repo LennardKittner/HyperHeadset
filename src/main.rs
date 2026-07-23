@@ -48,8 +48,6 @@ fn main() {
         use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
         use hyper_headset::devices::connect_compatible_device;
-        #[cfg(feature = "eq-support")]
-        use hyper_headset::devices::Headset;
 
         let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
@@ -118,7 +116,7 @@ fn main() {
 
             #[cfg(feature = "eq-support")]
             if let Some(ref mut eq) = eq {
-                if let Headset::Hid(ref mut dev) = device {
+                if let Some(dev) = device.hid_mut() {
                     eq.bind_device(&mut **dev);
                 }
             }
@@ -180,7 +178,7 @@ fn main() {
                 // active preset on reconnect.
                 #[cfg(feature = "eq-support")]
                 if let Some(ref mut eq) = eq {
-                    if let Headset::Hid(ref mut dev) = device {
+                    if let Some(dev) = device.hid_mut() {
                         eq.load_if_config_changed(&mut **dev);
                         eq.sync_if_reconnected(&mut **dev);
                     }
@@ -207,8 +205,6 @@ fn main() {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    #[cfg(feature = "eq-support")]
-    use hyper_headset::devices::Headset;
     use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
     use status_tray::{StatusTray, TrayHandler};
 
@@ -302,7 +298,7 @@ fn main() {
 
         #[cfg(feature = "eq-support")]
         if let Some(ref mut eq) = eq {
-            if let Headset::Hid(ref mut dev) = device {
+            if let Some(dev) = device.hid_mut() {
                 eq.bind_device(&mut **dev);
             }
         }
@@ -362,7 +358,7 @@ fn main() {
             // active preset on reconnect.
             #[cfg(feature = "eq-support")]
             if let Some(ref mut eq) = eq {
-                if let Headset::Hid(ref mut dev) = device {
+                if let Some(dev) = device.hid_mut() {
                     eq.load_if_config_changed(&mut **dev);
                     eq.sync_if_reconnected(&mut **dev);
                 }

@@ -354,7 +354,7 @@ fn main() {
             use crate::eq_editor::{EditorResult, EqEditor};
             use hyper_headset::eq::presets;
 
-            if let Headset::Hid(ref mut dev) = device {
+            if let Some(dev) = device.hid_mut() {
                 // Capture current profile state before TUI starts (for restore on cancel)
                 let previous_profile = presets::load_selected_profile();
 
@@ -503,7 +503,7 @@ fn main() {
     }
 
     if let Some(ref pairs) = eq_pairs {
-        if let Headset::Hid(ref mut dev) = device {
+        if let Some(dev) = device.hid_mut() {
             if let Some(packets) = dev.set_equalizer_bands_packets(pairs) {
                 for packet in packets {
                     dev.prepare_write();

@@ -92,6 +92,18 @@ pub enum Headset {
 }
 
 impl Headset {
+    /// Returns the underlying HID device when this headset is connected over the
+    /// dongle, or `None` when it is a Bluetooth fallback. Frontends use this to
+    /// gate HID-only features (e.g. the equalizer) without matching on the enum,
+    /// which would be an irrefutable pattern on platforms without a Bluetooth arm.
+    pub fn hid_mut(&mut self) -> Option<&mut Box<dyn Device>> {
+        match self {
+            Headset::Hid(device) => Some(device),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(_) => None,
+        }
+    }
+
     pub fn device_properties(&self) -> DeviceProperties {
         match self {
             Headset::Hid(device) => device.get_device_state().device_properties.clone(),
