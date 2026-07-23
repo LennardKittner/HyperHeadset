@@ -271,9 +271,9 @@ Ensure you comply with relevant laws and regulations.
 <details>
 <summary>What it checks</summary>
 
-- `cargo check` natively and for `x86_64-pc-windows-gnu`, per feature combination
+- `cargo check` natively and for `x86_64-pc-windows-gnu`, per feature combination — warnings are denied (`-D warnings`) so they never slip through silently
 - full-feature `cargo build` on both (link errors don't show up in `check`) and native `cargo test`
-- all cargo invocations `--locked`, catching `Cargo.lock` drift
+- all cargo invocations use `--locked` and `-D warnings`, catching `Cargo.lock` drift and compiler warnings alike
 - `rustfmt` on the lines you changed — pre-existing drift elsewhere is ignored
 - no added `dbg!`/`todo!`/`unimplemented!` lines (`--allow-debug` to override)
 - reminder to hand-trace changed shell/cmd.exe/AppleScript strings — a clean compile says nothing about argv quoting

@@ -84,10 +84,12 @@ fail() {
 skip() { SUMMARY="${SUMMARY}  SKIP  $1"$'\n'; }
 
 # run_cargo <label> <log-name> <cargo args...>
+# RUSTFLAGS="-D warnings" promotes warnings to errors so cargo check/build
+# exit non-zero on warnings (e.g. unused_mut) that would otherwise be silent.
 run_cargo() {
     local label="$1" log="$LOG_DIR/preflight-$2.log"
     shift 2
-    if cargo "$@" --locked > "$log" 2>&1; then
+    if RUSTFLAGS="${RUSTFLAGS:-} -D warnings" cargo "$@" --locked > "$log" 2>&1; then
         ok "$label"
     else
         fail "$label (see $log)"
