@@ -317,6 +317,7 @@ impl Tray for StatusTray {
                     // Use StandardItem (not RadioGroup) so that clicking a preset closes the
                     // menu — KDE Plasma doesn't re-render radio toggle-state while a submenu
                     // is open, causing stale checked circles to accumulate across selections.
+                    #[allow(unused_mut)]
                     let mut submenu_items: Vec<MenuItem<StatusTray>> = options
                         .iter()
                         .enumerate()
