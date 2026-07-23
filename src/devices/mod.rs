@@ -1123,7 +1123,8 @@ pub trait Device {
                 // anything answering beyond that is evidence this connection gets real
                 // responses to the rest, so refreshes stay worthwhile after an EQ write.
                 if i > 0 {
-                    self.get_device_state_mut().non_connected_query_ever_answered = true;
+                    self.get_device_state_mut()
+                        .non_connected_query_ever_answered = true;
                 }
             }
             if !matches!(

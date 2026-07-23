@@ -155,8 +155,7 @@ fn main() {
                 // with the default refresh_interval the state is only actively queried every 3min
                 // querying the device too frequently can lead to instability
                 let first = rx.recv_timeout(refresh_interval);
-                let commands: Vec<DeviceEvent> =
-                    first.into_iter().chain(rx.try_iter()).collect();
+                let commands: Vec<DeviceEvent> = first.into_iter().chain(rx.try_iter()).collect();
                 // Spam-selecting EQ presets queues one event per click, but only the
                 // last selection matters — drop the superseded ones.
                 let last_eq = commands
@@ -208,9 +207,9 @@ fn main() {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
     #[cfg(feature = "eq-support")]
     use hyper_headset::devices::Headset;
+    use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
     use status_tray::{StatusTray, TrayHandler};
 
     use hyper_headset::prompt_user_for_udev_rule;
