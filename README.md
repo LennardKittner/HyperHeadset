@@ -260,6 +260,28 @@ You can contribute code or monitor packets using Wireshark or dnSpy from the Hyp
 Reverse engineering proprietary software may be restricted by its license agreement.
 Ensure you comply with relevant laws and regulations.
 
+### Verifying changes before submitting a PR
+
+```sh
+./preflight                 # check what's new since your last push
+./preflight --base <ref>    # check against an explicit base (e.g. upstream/dev)
+./preflight --remote        # additionally dispatch the real CI workflow for full 3-OS coverage
+```
+
+<details>
+<summary>What it checks</summary>
+
+- `cargo check` natively and for `x86_64-pc-windows-gnu`, per feature combination
+- full-feature `cargo build` on both (link errors don't show up in `check`) and native `cargo test`
+- all cargo invocations `--locked`, catching `Cargo.lock` drift
+- `rustfmt` on the lines you changed — pre-existing drift elsewhere is ignored
+- no added `dbg!`/`todo!`/`unimplemented!` lines (`--allow-debug` to override)
+- reminder to hand-trace changed shell/cmd.exe/AppleScript strings — a clean compile says nothing about argv quoting
+
+The Windows cross-check is skipped with install instructions if mingw-w64 isn't set up. `--remote` pushes a scratch branch to your fork and waits on the GitHub Actions run (requires `gh`).
+
+</details>
+
 ### How to use Wireshark to capture packets
 
 This [guide](https://github.com/liquidctl/liquidctl/blob/main/docs/developer/capturing-usb-traffic.md) is very helpful.
