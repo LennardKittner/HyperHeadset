@@ -7,7 +7,7 @@ use std::time::Duration;
 const HP: u16 = 0x03F0;
 const HYPERX: u16 = 0x0951;
 pub const VENDOR_IDS: [u16; 2] = [HP, HYPERX];
-pub const PRODUCT_IDS: [u16; 1] = [0x170B];
+pub const PRODUCT_IDS: [u16; 2] = [0x170B, 0x0a8e];
 
 const CONNECTED_PACKET: [u8; 64] = {
     let mut packet = [0; 64];
