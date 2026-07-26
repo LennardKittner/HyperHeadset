@@ -170,6 +170,36 @@ fn build_cbw() -> [u8; 31] {
     cbw
 }
 
+fn dump_interfaces<T: UsbContext>(device: &rusb::Device<T>) {
+    let config = match device.active_config_descriptor() {
+        Ok(c) => c,
+        Err(e) => {
+            println!("  (could not read config descriptor: {e})");
+            return;
+        }
+    };
+    for interface in config.interfaces() {
+        for desc in interface.descriptors() {
+            println!(
+                "  interface {} alt {}: class={:#04x} sub={:#04x} proto={:#04x}",
+                interface.number(),
+                desc.setting_number(),
+                desc.class_code(),
+                desc.sub_class_code(),
+                desc.protocol_code()
+            );
+            for ep in desc.endpoint_descriptors() {
+                println!(
+                    "    endpoint {:#04x} dir={:?} kind={:?}",
+                    ep.address(),
+                    ep.direction(),
+                    ep.transfer_type()
+                );
+            }
+        }
+    }
+}
+
 fn parse_battery(data: &[u8]) -> Option<u8> {
     if data.len() >= 4 {
         Some(data[3])
@@ -224,7 +254,11 @@ fn test_non_hid() {
                 handle.detach_kernel_driver(INTERFACE).unwrap();
                 println!("Kernel driver detached");
             }
-            handle.claim_interface(INTERFACE).unwrap();
+            dump_interfaces(&device);
+            if let Err(e) = handle.claim_interface(INTERFACE) {
+                println!("  claim_interface({INTERFACE}) failed: {e}");
+                continue;
+            }
 
             println!("Battery level: {:?}", read_battery(&handle));
             handle.release_interface(INTERFACE).unwrap();
