@@ -114,6 +114,7 @@ SUBSYSTEMS=="usb", ATTRS{idProduct}=="1749", ATTRS{idVendor}=="0951", MODE="0666
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="16c4", ATTRS{idVendor}=="0951", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="170b", ATTRS{idVendor}=="03f0", MODE="0666"
 SUBSYSTEMS=="usb", ATTRS{idProduct}=="170b", ATTRS{idVendor}=="0951", MODE="0666"
+SUBSYSTEMS=="usb", ATTRS{idProduct}=="0a8e", ATTRS{idVendor}=="03f0", MODE="0666"
 
 KERNEL=="hidraw*", ATTRS{idProduct}=="0d93", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="018b", ATTRS{idVendor}=="03f0", MODE="0666"
@@ -135,6 +136,7 @@ KERNEL=="hidraw*", ATTRS{idProduct}=="1749", ATTRS{idVendor}=="0951", MODE="0666
 KERNEL=="hidraw*", ATTRS{idProduct}=="16c4", ATTRS{idVendor}=="0951", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="170b", ATTRS{idVendor}=="03f0", MODE="0666"
 KERNEL=="hidraw*", ATTRS{idProduct}=="170b", ATTRS{idVendor}=="0951", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idProduct}=="0a8e", ATTRS{idVendor}=="03f0", MODE="0666"
 ```
 
 Once created, replug the wireless dongle.
