@@ -47,6 +47,7 @@ jobs:
 
   publish-aur:
       runs-on: ubuntu-latest
+      environment: secrets
       needs: [build-linux, build-macos, build-windows]
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       steps:
