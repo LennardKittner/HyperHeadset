@@ -261,11 +261,10 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
             test_device.init_capabilities();
 
             let probe_packet = test_device
-                .get_query_packets()
-                .into_iter()
-                .nth(2)
+                .get_battery_packet()
                 .expect("Why is there a device without packets ???");
 
+            println!("prep write");
             test_device.prepare_write();
             if let Err(_e) = test_device.write_hid_report(&probe_packet) {
                 debug_println!("Failed to open: {_e:?}");
