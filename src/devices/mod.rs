@@ -172,7 +172,7 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
     debug_println!("Found device selecting handler");
 
     // On Linux and MacOS we can just take the first
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(false)]
     {
         let state = states
             .into_iter()
@@ -199,7 +199,7 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
         Ok(device)
     }
     // On Windows we have to check which interface can be used
-    #[cfg(target_os = "windows")]
+    #[cfg(true)]
     {
         let mut device = None;
         for state in states {
@@ -223,12 +223,12 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
             test_device.init_capabilities();
 
             let probe_packet = test_device
-                .get_query_packets()
-                .into_iter()
-                .next()
+                .get_battery_packet()
                 .expect("Why is there a device without packets ???");
 
+            println!("prep write");
             test_device.prepare_write();
+            println!("writing");
             if let Err(_e) = test_device
                 .get_device_state()
                 .write_hid_report(&probe_packet)

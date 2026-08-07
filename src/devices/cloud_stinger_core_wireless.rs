@@ -70,6 +70,18 @@ const THRESHOLDS_2: [i16; 11] = [
 ];
 
 impl Device for CloudStingerCoreWireless {
+    fn prepare_write(&mut self) {
+        // Attempt to read input report before writing
+        // This may not work for all devices (e.g., Cloud Flight S),
+        // so we ignore the error
+        let mut input_report_buffer = [0u8; 64];
+        input_report_buffer[0] = 6;
+        let e = self
+            .state
+            .hid_device
+            .get_input_report(&mut input_report_buffer);
+        println!("{e:?}");
+    }
     fn get_battery_packet(&self) -> Option<Vec<u8>> {
         let tmp = BATTERY_PACKET.to_vec();
         Some(tmp)
