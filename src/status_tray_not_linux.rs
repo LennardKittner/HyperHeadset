@@ -12,7 +12,7 @@ use tray_icon::{
     menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu},
     TrayIcon, TrayIconBuilder,
 };
-use winit::{application::ApplicationHandler, event::StartCause};
+use winit::{application::ApplicationHandler, event::StartCause, event_loop::EventLoopProxy};
 #[cfg(target_os = "windows")]
 use winreg::{
     enums::{RegType, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE},
@@ -182,18 +182,40 @@ fn render_windows_battery_icon_rgba(key: WindowsIconKey) -> Vec<u8> {
 
 type CallbackMap = Arc<Mutex<HashMap<MenuId, Box<dyn Fn() + Send + Sync>>>>;
 
+/// Events delivered to the tray through the winit event loop.
+pub enum TrayUserEvent {
+    /// New device state from the main loop; `None` means no compatible device.
+    Properties(Option<DeviceProperties>),
+    /// Re-render the menu from cached state so a just-set pending EQ transition
+    /// becomes visible without waiting for the main loop's next update.
+    #[cfg(feature = "eq-support")]
+    RefreshEqMenu,
+}
+
 pub struct TrayApp {
     pub tray_icon: Option<TrayIcon>,
     pub sender: Sender<DeviceEvent>,
+    #[cfg_attr(not(feature = "eq-support"), allow(dead_code))]
+    event_proxy: Arc<Mutex<EventLoopProxy<TrayUserEvent>>>,
     callbacks: CallbackMap,
     current_state: Option<Option<DeviceProperties>>,
+    /// Target preset of an in-flight EQ switch, so the menu gives instant visual
+    /// feedback before the main loop confirms the HID writes finished. Cleared once
+    /// the target is confirmed active and synced.
+    /// Shared with the menu callbacks, which run outside the event loop.
+    #[cfg(feature = "eq-support")]
+    pending_eq_transition: Arc<Mutex<Option<String>>>,
+    /// The pending target the menu was last rendered with, so `update` rebuilds
+    /// the menu when only the pending indicators changed.
+    #[cfg(feature = "eq-support")]
+    rendered_eq_transition: Option<String>,
     #[cfg(target_os = "windows")]
     icon_cache: HashMap<WindowsIconKey, Vec<u8>>,
     #[cfg(target_os = "windows")]
     current_icon_key: Option<WindowsIconKey>,
 }
 
-impl ApplicationHandler<Option<DeviceProperties>> for TrayApp {
+impl ApplicationHandler<TrayUserEvent> for TrayApp {
     fn new_events(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, cause: StartCause) {
         if cause == StartCause::Init {
             #[cfg(target_os = "windows")]
@@ -230,12 +252,15 @@ impl ApplicationHandler<Option<DeviceProperties>> for TrayApp {
         }
     }
 
-    fn user_event(
-        &mut self,
-        _el: &winit::event_loop::ActiveEventLoop,
-        device_properties: Option<DeviceProperties>,
-    ) {
-        self.update(device_properties);
+    fn user_event(&mut self, _el: &winit::event_loop::ActiveEventLoop, event: TrayUserEvent) {
+        match event {
+            TrayUserEvent::Properties(device_properties) => self.update(device_properties),
+            #[cfg(feature = "eq-support")]
+            TrayUserEvent::RefreshEqMenu => {
+                let device_properties = self.current_state.clone().unwrap_or(None);
+                self.update(device_properties);
+            }
+        }
     }
 
     fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
@@ -250,7 +275,7 @@ impl ApplicationHandler<Option<DeviceProperties>> for TrayApp {
 }
 
 impl TrayApp {
-    pub fn new(sender: Sender<DeviceEvent>) -> Self {
+    pub fn new(sender: Sender<DeviceEvent>, event_proxy: EventLoopProxy<TrayUserEvent>) -> Self {
         let callbacks: CallbackMap = Arc::new(Mutex::new(HashMap::new()));
 
         let callbacks_clone = Arc::clone(&callbacks);
@@ -267,8 +292,13 @@ impl TrayApp {
         Self {
             tray_icon: None,
             sender,
+            event_proxy: Arc::new(Mutex::new(event_proxy)),
             callbacks,
             current_state: None,
+            #[cfg(feature = "eq-support")]
+            pending_eq_transition: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "eq-support")]
+            rendered_eq_transition: None,
             #[cfg(target_os = "windows")]
             icon_cache: HashMap::new(),
             #[cfg(target_os = "windows")]
@@ -305,10 +335,35 @@ impl TrayApp {
     }
 
     fn update(&mut self, device_properties: Option<DeviceProperties>) {
-        if let Some(current_state) = self.current_state.as_ref() {
-            if current_state == &device_properties {
-                return;
+        // Clear the pending transition once the target preset is confirmed active and
+        // synced, or when no compatible device is present (mirrors the Linux tray).
+        #[cfg(feature = "eq-support")]
+        let pending_eq_transition = {
+            let mut pending = self.pending_eq_transition.lock().unwrap();
+            match device_properties.as_ref() {
+                Some(props) => {
+                    if let Some(ref to) = *pending {
+                        if props.active_eq_preset.as_deref() == Some(to.as_str())
+                            && props.eq_synced == Some(true)
+                        {
+                            *pending = None;
+                        }
+                    }
+                }
+                None => *pending = None,
             }
+            pending.clone()
+        };
+
+        let unchanged = self.current_state.as_ref() == Some(&device_properties);
+        #[cfg(feature = "eq-support")]
+        let unchanged = unchanged && self.rendered_eq_transition == pending_eq_transition;
+        if unchanged {
+            return;
+        }
+        #[cfg(feature = "eq-support")]
+        {
+            self.rendered_eq_transition = pending_eq_transition.clone();
         }
 
         #[cfg(target_os = "windows")]
@@ -325,7 +380,11 @@ impl TrayApp {
         let mut new_callbacks: HashMap<MenuId, Box<dyn Fn() + Send + Sync>> = HashMap::new();
 
         let Some(device_properties) = device_properties else {
-            let _ = tray.set_tooltip(Some(NO_COMPATIBLE_DEVICE));
+            let _ = tray.set_tooltip(Some(format!(
+                "HyperHeadset v{}\n{}",
+                env!("CARGO_PKG_VERSION"),
+                NO_COMPATIBLE_DEVICE
+            )));
             #[cfg(target_os = "macos")]
             tray.set_title(Some(&format!("🎧?")));
             let status_item = MenuItem::new(NO_COMPATIBLE_DEVICE, false, None);
@@ -335,6 +394,12 @@ impl TrayApp {
             #[cfg(target_os = "windows")]
             {
                 append_startup_toggle(&menu, &mut new_callbacks);
+            }
+
+            append_about_submenu(&menu, &mut new_callbacks);
+
+            #[cfg(target_os = "windows")]
+            {
                 menu.append(&quit_item).unwrap();
                 new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
             }
@@ -350,7 +415,11 @@ impl TrayApp {
         };
 
         if !device_properties.connected.unwrap_or(false) {
-            let _ = tray.set_tooltip(Some(HEADSET_NOT_CONNECTED));
+            let _ = tray.set_tooltip(Some(format!(
+                "HyperHeadset v{}\n{}",
+                env!("CARGO_PKG_VERSION"),
+                HEADSET_NOT_CONNECTED
+            )));
             #[cfg(target_os = "macos")]
             tray.set_title(Some(&format!("🎧?")));
             let status_item = MenuItem::new(HEADSET_NOT_CONNECTED, false, None);
@@ -360,6 +429,12 @@ impl TrayApp {
             #[cfg(target_os = "windows")]
             {
                 append_startup_toggle(&menu, &mut new_callbacks);
+            }
+
+            append_about_submenu(&menu, &mut new_callbacks);
+
+            #[cfg(target_os = "windows")]
+            {
                 menu.append(&quit_item).unwrap();
                 new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
             }
@@ -493,6 +568,124 @@ impl TrayApp {
                     );
                     let _ = menu.append(&menu_item);
                 }
+                #[cfg(feature = "eq-support")]
+                hyper_headset::devices::PropertyDescriptorWrapper::SelectEQ {
+                    descriptor,
+                    options,
+                    active_preset,
+                    synced,
+                } => {
+                    if options.is_empty() {
+                        // No presets yet. On Windows with eq-editor, still show a submenu so
+                        // the user can open the editor to create their first preset.
+                        #[cfg(all(target_os = "windows", feature = "eq-editor"))]
+                        {
+                            let submenu = Submenu::new(
+                                format!(
+                                    "{}: {}",
+                                    descriptor.pretty_name,
+                                    descriptor.data.as_deref().unwrap_or("Unknown"),
+                                ),
+                                true,
+                            );
+                            let edit_item =
+                                MenuItem::new("Edit with: hyper_headset_cli --eq", true, None);
+                            let edit_id = edit_item.id().clone();
+                            new_callbacks.insert(
+                                edit_id,
+                                Box::new(move || hyper_headset::launch_eq_editor()),
+                            );
+                            let _ = submenu.append(&edit_item);
+                            let _ = menu.append(&submenu);
+                        }
+                        #[cfg(not(all(target_os = "windows", feature = "eq-editor")))]
+                        if let Some(ref current_value) = descriptor.data {
+                            let menu_item = MenuItem::new(
+                                format!(
+                                    "{}: {}{}",
+                                    descriptor.pretty_name, current_value, descriptor.suffix
+                                ),
+                                false,
+                                None,
+                            );
+                            let _ = menu.append(&menu_item);
+                        }
+                        continue;
+                    }
+
+                    let current_value = descriptor.data.as_deref().unwrap_or("Unknown");
+                    let submenu = Submenu::new(
+                        format!("{}: {}", descriptor.pretty_name, current_value),
+                        true,
+                    );
+
+                    let active_name = active_preset.as_deref();
+
+                    let applying_name = if !synced { active_name } else { None };
+
+                    // Immediate visual feedback: pending_eq_transition is set on click
+                    // before the main loop confirms the HID writes, so the spinner shows
+                    // as soon as the menu is rebuilt. The previously active preset keeps
+                    // its ✓ until the switch is confirmed.
+                    let pending_target = pending_eq_transition.as_deref();
+
+                    // Use plain MenuItem (not CheckMenuItem): the active state is conveyed
+                    // via the label prefix, matching the Linux tray's StandardItem menu.
+                    for option_name in &options {
+                        let label = if pending_target == Some(option_name.as_str()) {
+                            // Spinner: user just selected this, HID writes in progress.
+                            format!("↻ {}", option_name)
+                        } else if applying_name == Some(option_name.as_str()) {
+                            format!("{} (applying...)", option_name)
+                        } else if active_name == Some(option_name.as_str()) {
+                            format!("✓ {}", option_name)
+                        } else {
+                            format!("  {}", option_name)
+                        };
+                        let entry = MenuItem::new(&label, true, None);
+                        let tx = self.sender.clone();
+                        let create_event = descriptor.create_event;
+                        let name = option_name.clone();
+                        let pending = Arc::clone(&self.pending_eq_transition);
+                        let proxy = Arc::clone(&self.event_proxy);
+                        let entry_id = entry.id().clone();
+                        new_callbacks.insert(
+                            entry_id,
+                            Box::new(move || {
+                                // Set immediately so the rebuilt menu shows feedback before
+                                // the main loop has time to confirm the switch.
+                                *pending.lock().unwrap() = Some(name.clone());
+                                if let Some(event) = (create_event)(name.clone()) {
+                                    let _ = tx.send(event);
+                                }
+                                let _ = proxy
+                                    .lock()
+                                    .unwrap()
+                                    .send_event(TrayUserEvent::RefreshEqMenu);
+                            }),
+                        );
+                        let _ = submenu.append(&entry);
+                    }
+
+                    // macOS excluded: opening a second process that claims the HID device fails
+                    // with "exclusive access and device already open".
+                    #[cfg(all(target_os = "windows", feature = "eq-editor"))]
+                    {
+                        let _ = submenu.append(&PredefinedMenuItem::separator());
+                        let edit_item =
+                            MenuItem::new("Edit with: hyper_headset_cli --eq", true, None);
+                        let edit_id = edit_item.id().clone();
+                        new_callbacks.insert(
+                            edit_id,
+                            Box::new(move || {
+                                hyper_headset::launch_eq_editor();
+                            }),
+                        );
+                        let _ = submenu.append(&edit_item);
+                    }
+
+                    let _ = menu.append(&submenu);
+                }
             }
         }
 
@@ -501,6 +694,12 @@ impl TrayApp {
         #[cfg(target_os = "windows")]
         {
             append_startup_toggle(&menu, &mut new_callbacks);
+        }
+
+        append_about_submenu(&menu, &mut new_callbacks);
+
+        #[cfg(target_os = "windows")]
+        {
             menu.append(&quit_item).unwrap();
             new_callbacks.insert(quit_item.id().clone(), Box::new(|| std::process::exit(0)));
         }
@@ -513,6 +712,38 @@ impl TrayApp {
         tray.set_menu(Some(Box::new(menu)));
         self.current_state = Some(Some(device_properties));
     }
+}
+
+fn append_about_submenu(
+    menu: &Menu,
+    callbacks: &mut HashMap<MenuId, Box<dyn Fn() + Send + Sync>>,
+) {
+    let about_submenu = Submenu::new("About", true);
+
+    let version_str = format!("HyperHeadset v{}", env!("CARGO_PKG_VERSION"));
+    let version_label = format!("{} (Copy)", version_str);
+    let version_item = MenuItem::new(&version_label, true, None);
+    let version_id = version_item.id().clone();
+    let version_copy = version_str.clone();
+    callbacks.insert(
+        version_id,
+        Box::new(move || {
+            let _ = hyper_headset::copy_to_clipboard(&version_copy);
+        }),
+    );
+    let _ = about_submenu.append(&version_item);
+
+    let github_item = MenuItem::new("GitHub (Open URL)", true, None);
+    let github_id = github_item.id().clone();
+    callbacks.insert(
+        github_id,
+        Box::new(|| {
+            hyper_headset::open_url("https://github.com/LennardKittner/HyperHeadset");
+        }),
+    );
+    let _ = about_submenu.append(&github_item);
+
+    let _ = menu.append(&about_submenu);
 }
 
 #[cfg(target_os = "windows")]

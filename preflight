@@ -1,0 +1,258 @@
+#!/usr/bin/env bash
+# Local cross-platform verification before submitting a PR: compile, link,
+# test, and format checks that don't need multi-OS hardware.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+usage() {
+    cat << 'EOF'
+Usage: ./preflight [options]
+
+  --base <ref>    Diff base (default: this branch's upstream, else merge-base
+                  with upstream/dev, origin/dev or origin/main, else HEAD~1)
+  --remote        Also push a scratch branch and dispatch the GitHub Actions
+                  workflow for full 3-OS coverage (requires gh)
+  --keep-branch   Keep the --remote scratch branch after the run
+  --allow-debug   Don't fail on added dbg!/todo!/unimplemented! lines
+EOF
+}
+
+BASE_REF=""
+DO_REMOTE=0
+KEEP_BRANCH=0
+ALLOW_DEBUG=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --base)
+        BASE_REF="$2"
+        shift 2
+        ;;
+    --remote)
+        DO_REMOTE=1
+        shift
+        ;;
+    --keep-branch)
+        KEEP_BRANCH=1
+        shift
+        ;;
+    --allow-debug)
+        ALLOW_DEBUG=1
+        shift
+        ;;
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    *)
+        echo "Unknown argument: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+    esac
+done
+
+if [[ -z $BASE_REF ]]; then
+    # Prefer "what hasn't been pushed yet" (this branch's own remote-tracking
+    # ref) — that's the actual preflight question. Only fall back to a shared
+    # base branch for a never-pushed branch, since that pulls in the whole
+    # branch history (including pre-existing drift it didn't introduce)
+    # rather than just what's new since the last push.
+    BASE_REF=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2> /dev/null ||
+        git merge-base HEAD upstream/dev 2> /dev/null ||
+        git merge-base HEAD origin/dev 2> /dev/null ||
+        git merge-base HEAD origin/main 2> /dev/null ||
+        git rev-parse HEAD~1)
+fi
+
+FEATURE_SETS=("" "eq-support" "eq-editor")
+FULL_FEATURES="eq-editor"
+WINDOWS_TARGET="x86_64-pc-windows-gnu"
+EDITION=$(sed -n 's/^edition *= *"\([0-9][0-9]*\)".*/\1/p' Cargo.toml | head -n 1)
+EDITION=${EDITION:-2021}
+LOG_DIR="${TMPDIR:-/tmp}"
+
+PASS=1
+SUMMARY=""
+
+note() { printf '\n\033[1;34m==> %s\033[0m\n' "$1"; }
+ok() { SUMMARY="${SUMMARY}  OK    $1"$'\n'; }
+fail() {
+    SUMMARY="${SUMMARY}  FAIL  $1"$'\n'
+    PASS=0
+}
+skip() { SUMMARY="${SUMMARY}  SKIP  $1"$'\n'; }
+
+# run_cargo <label> <log-name> <cargo args...>
+# RUSTFLAGS="-D warnings" promotes warnings to errors so cargo check/build
+# exit non-zero on warnings (e.g. unused_mut) that would otherwise be silent.
+run_cargo() {
+    local label="$1" log="$LOG_DIR/preflight-$2.log"
+    shift 2
+    if RUSTFLAGS="${RUSTFLAGS:-} -D warnings" cargo "$@" --locked > "$log" 2>&1; then
+        ok "$label"
+    else
+        fail "$label (see $log)"
+    fi
+}
+
+note "Base ref: $BASE_REF"
+
+note "Native cargo check"
+for feat in "${FEATURE_SETS[@]}"; do
+    if [[ -z $feat ]]; then
+        run_cargo "native check" "check-native-default" check
+    else
+        run_cargo "native check --features $feat" "check-native-$feat" \
+            check --features "$feat"
+    fi
+done
+
+note "Native cargo build + test"
+run_cargo "native build --features $FULL_FEATURES" "build-native" \
+    build --features "$FULL_FEATURES"
+run_cargo "native test" "test-native-default" test
+run_cargo "native test --features $FULL_FEATURES" "test-native-full" \
+    test --features "$FULL_FEATURES"
+
+note "Windows ($WINDOWS_TARGET) cargo check + build"
+if [[ "$(rustc -vV | sed -n 's/^host: //p')" == *windows* ]]; then
+    skip "windows cross-check (already building natively on Windows)"
+elif rustup target list --installed 2> /dev/null | grep -q "^${WINDOWS_TARGET}$" &&
+    command -v x86_64-w64-mingw32-gcc > /dev/null 2>&1; then
+    for feat in "${FEATURE_SETS[@]}"; do
+        if [[ -z $feat ]]; then
+            run_cargo "windows-gnu check" "check-windows-default" \
+                check --target "$WINDOWS_TARGET"
+        else
+            run_cargo "windows-gnu check --features $feat" "check-windows-$feat" \
+                check --target "$WINDOWS_TARGET" --features "$feat"
+        fi
+    done
+    run_cargo "windows-gnu build --features $FULL_FEATURES" "build-windows" \
+        build --target "$WINDOWS_TARGET" --features "$FULL_FEATURES"
+else
+    skip "windows-gnu cross-check (run: rustup target add $WINDOWS_TARGET, plus a mingw-w64 toolchain — Debian/Ubuntu: gcc-mingw-w64, Fedora: mingw64-gcc, Arch: mingw-w64-gcc, macOS: brew install mingw-w64)"
+fi
+
+note "rustfmt --check on lines changed since $BASE_REF"
+CHANGED_RS=$(git diff --name-only "$BASE_REF"...HEAD -- '*.rs')
+if [[ -z $CHANGED_RS ]]; then
+    skip "rustfmt (no changed .rs files vs $BASE_REF)"
+else
+    DIRTY=""
+    CHECKED=0
+    while IFS= read -r f; do
+        [[ -f $f ]] || continue
+        CHECKED=$((CHECKED + 1))
+        # rustfmt on stable walks `mod` children of whatever file you pass (no
+        # stable equivalent to nightly's --skip-children exists), so checking
+        # main.rs also re-reports drift in the modules it declares. Exit code
+        # alone can't tell "this file is dirty" from "a child it declares via
+        # `mod` is dirty" — match the reported path (which may be absolute, in
+        # either separator style) against the file we actually asked about.
+        diff_out=$(rustfmt --check --edition "$EDITION" "$f" 2>&1 || true)
+        # shellcheck disable=SC1003  # escaped backslash for tr, not a quote typo
+        flagged_lines=$(printf '%s\n' "$diff_out" | tr '\\' '/' | awk -v f="$f" '
+      /^Diff in .*:[0-9]+:$/ {
+        match($0, /:[0-9]+:$/)
+        lineno = substr($0, RSTART + 1, RLENGTH - 2)
+        path = substr($0, 9, RSTART - 9)
+        if (path == f \
+            || (length(path) > length(f) \
+                && substr(path, length(path) - length(f) + 1) == f \
+                && substr(path, length(path) - length(f), 1) == "/"))
+          print lineno
+      }')
+        [[ -z $flagged_lines ]] && continue
+
+        # A repo with no enforced formatting accumulates drift everywhere —
+        # flagging a whole file on any diff anywhere in it would fail
+        # permanently and drown out real regressions. Only count it dirty if a
+        # flagged line falls inside a range this branch actually changed.
+        ranges=$(git diff --unified=0 "$BASE_REF"...HEAD -- "$f" |
+            sed -n -E 's/^@@ -[0-9]+(,[0-9]+)? \+([0-9]+)(,([0-9]+))? @@.*/\2 \4/p' |
+            awk '{c = ($2 == "" ? 1 : $2); if (c > 0) print $1, c}')
+        for line in $flagged_lines; do
+            while read -r start count; do
+                [[ -z $start ]] && continue
+                if ((line >= start && line < start + count)); then
+                    DIRTY="${DIRTY:+$DIRTY, }$f"
+                    break 2
+                fi
+            done <<< "$ranges"
+        done
+    done <<< "$CHANGED_RS"
+    if [[ -z $DIRTY ]]; then
+        ok "rustfmt ($CHECKED file(s) checked)"
+    else
+        fail "rustfmt: $DIRTY"
+    fi
+fi
+
+note "Leftover debug macros"
+DEBUG_HITS=$(git diff "$BASE_REF"...HEAD -- '*.rs' |
+    grep -E '^\+.*\b(dbg|todo|unimplemented)!' || true)
+if [[ -z $DEBUG_HITS ]]; then
+    ok "no added dbg!/todo!/unimplemented! lines"
+elif [[ $ALLOW_DEBUG -eq 1 ]]; then
+    echo "$DEBUG_HITS"
+    skip "added debug macros (waved through via --allow-debug)"
+else
+    echo "Added lines contain debug macros:"
+    echo "$DEBUG_HITS"
+    echo "Rerun with --allow-debug if these are intentional."
+    fail "added debug macros (see above)"
+    if [[ -t 0 ]]; then
+        printf 'Press any key to acknowledge (Ctrl-C to abort)...'
+        read -r -n 1 -s
+        echo
+    fi
+fi
+
+note "Manual review reminder"
+INTERP_HITS=$(git diff "$BASE_REF"...HEAD -- '*.rs' |
+    grep -E '^\+.*(Command::new|cmd\.args|osascript|AppleScript)' || true)
+if [[ -n $INTERP_HITS ]]; then
+    echo "Changed lines touch an external interpreter (shell/cmd.exe/AppleScript)."
+    echo "A clean compile says nothing about argv quoting — write out the exact"
+    echo "string/argv the interpreter receives and check it by hand before pushing:"
+    echo "$INTERP_HITS"
+    skip "interpreter-string trace (manual — see above)"
+else
+    ok "no changed interpreter-invoking lines detected"
+fi
+
+if [[ $DO_REMOTE -eq 1 ]]; then
+    note "Remote CI dispatch (full 3-OS coverage)"
+    if ! command -v gh > /dev/null 2>&1; then
+        fail "remote CI (gh CLI not installed — https://cli.github.com)"
+    else
+        BRANCH="preflight/$(git rev-parse --short HEAD)"
+        git push origin "HEAD:refs/heads/$BRANCH" > /dev/null
+        gh workflow run rust.yml --ref "$BRANCH"
+        sleep 5
+        RUN_ID=$(gh run list --workflow rust.yml --branch "$BRANCH" --limit 1 --json databaseId -q '.[0].databaseId')
+        if gh run watch "$RUN_ID" --exit-status; then
+            ok "remote CI (run $RUN_ID)"
+        else
+            fail "remote CI (run $RUN_ID)"
+        fi
+        if [[ $KEEP_BRANCH -eq 0 ]]; then
+            git push origin --delete "$BRANCH" > /dev/null 2>&1 || true
+        else
+            echo "Kept scratch branch: $BRANCH"
+        fi
+    fi
+fi
+
+note "Summary"
+printf '%s' "$SUMMARY"
+
+if [[ $PASS -eq 1 ]]; then
+    echo -e "\nAll checks passed."
+    exit 0
+else
+    echo -e "\nOne or more checks failed."
+    exit 1
+fi
