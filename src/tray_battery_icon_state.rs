@@ -54,44 +54,49 @@ impl TrayBatteryIconState {
         }
     }
 
+    /// Returns the first name that resolves to an actual icon file in the active theme.
+    #[cfg(target_os = "linux")]
+    fn first_existing_icon(names: &[String], theme_name: Option<&String>) -> Option<String> {
+        names
+            .iter()
+            .find(|name| {
+                match theme_name {
+                    Some(theme_name) => lookup(name).with_theme(theme_name).with_cache().find(),
+                    None => lookup(name).with_cache().find(),
+                }
+                .is_some()
+            })
+            .cloned()
+    }
+
     #[cfg(target_os = "linux")]
     pub fn linux_icon_name(self, monochrome: bool, theme_name: Option<&String>) -> String {
-        let if_icon_exists = |name: &str, fallback: &dyn Fn() -> String| {
-            if let Some(theme_name) = theme_name {
-                if lookup(name)
-                    .with_theme(theme_name)
-                    .with_cache()
-                    .find()
-                    .is_some()
-                {
-                    name.to_string()
-                } else {
-                    fallback()
-                }
+        // Themes are inconsistent about which variants they ship, so always try both the
+        // symbolic and the full-color name, ordered by the user's preference.
+        let with_variants = |base: &str| {
+            let symbolic = format!("{base}-symbolic");
+            if monochrome {
+                [symbolic, base.to_string()]
             } else {
-                if lookup(name).with_cache().find().is_some() {
-                    name.to_string()
-                } else {
-                    fallback()
-                }
+                [base.to_string(), symbolic]
             }
         };
-        let default_icon = &|| if_icon_exists(HEADSET, &|| HEADSET_FALLBACK.to_string());
+
+        let headset_icon = || {
+            let candidates: Vec<String> = if monochrome {
+                vec![HEADSET_MONOCHROME.to_string(), HEADSET.to_string()]
+            } else {
+                vec![HEADSET.to_string(), HEADSET_MONOCHROME.to_string()]
+            };
+            Self::first_existing_icon(&candidates, theme_name)
+                .unwrap_or_else(|| HEADSET_FALLBACK.to_string())
+        };
+
         match self {
-            Self::NoDevice | Self::Disconnected | Self::ConnectedUnknown => {
-                if monochrome {
-                    if_icon_exists(HEADSET_MONOCHROME, default_icon)
-                } else {
-                    default_icon()
-                }
-            }
+            Self::NoDevice | Self::Disconnected | Self::ConnectedUnknown => headset_icon(),
             Self::Connected { percent, charging } => {
-                let precise_icon = format!(
-                    "battery-{:0>3}{}{}",
-                    (percent / 10) * 10,
-                    if charging { "-charging" } else { "" },
-                    if monochrome { "-symbolic" } else { "" },
-                );
+                let charge = if charging { "-charging" } else { "" };
+                let level = (percent / 10) * 10;
 
                 let modifier = match percent {
                     0..10 => "caution",
@@ -101,15 +106,17 @@ impl TrayBatteryIconState {
                     95.. => "full",
                 };
 
-                let imprecise_icon = format!(
-                    "battery-{modifier}{}{}",
-                    if charging { "-charging" } else { "" },
-                    if monochrome { "-symbolic" } else { "" },
-                );
+                // Most precise first
+                let candidates: Vec<String> = [
+                    format!("battery-level-{level}{charge}"),
+                    format!("battery-{level:0>3}{charge}"),
+                    format!("battery-{modifier}{charge}"),
+                ]
+                .iter()
+                .flat_map(|base| with_variants(base))
+                .collect();
 
-                if_icon_exists(&precise_icon, &|| {
-                    if_icon_exists(&imprecise_icon, default_icon)
-                })
+                Self::first_existing_icon(&candidates, theme_name).unwrap_or_else(headset_icon)
             }
         }
     }
