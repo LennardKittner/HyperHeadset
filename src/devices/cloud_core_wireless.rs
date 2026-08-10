@@ -110,18 +110,25 @@ impl Device for CloudCoreWireless {
         if response[0] == 0xFF && response[1] == 0x12 {
             let lower = response[11] as u32;
             let upper = response[12] as u32;
+            println!("low byte at 11 {lower:x} high byte at 12 {upper:x}");
+            println!(
+                "combined: {0:x} = {0} ",
+                (((upper as u16) << 8) | (lower as u16))
+            );
             let mut events = Vec::new();
             let index = match THRESHOLDS.binary_search(&(((upper as u16) << 8) | (lower as u16))) {
                 Ok(i) => i,
                 Err(0) => 0,
                 Err(i) => i - 1,
             };
+            println!("Threshold index {index}");
             events.push(DeviceEvent::BatterLevel(PERCENTAGES[index]));
             events.push(DeviceEvent::Charging(if response[9] == 0x05 {
                 ChargingStatus::Charging
             } else {
                 ChargingStatus::NotCharging
             }));
+            println!("generating events: {:?}", events);
             Some(events)
         } else {
             None
