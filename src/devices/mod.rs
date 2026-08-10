@@ -1,4 +1,5 @@
 pub mod cloud_alpha_wireless;
+pub mod cloud_core_wireless;
 pub mod cloud_flight_wireless;
 pub mod cloud_ii_core_wireless;
 pub mod cloud_ii_wireless;
@@ -9,10 +10,10 @@ pub mod cloud_iii_wireless;
 use crate::{
     debug_println,
     devices::{
-        cloud_alpha_wireless::CloudAlphaWireless, cloud_flight_wireless::CloudFlightWireless,
-        cloud_ii_core_wireless::CloudIICoreWireless, cloud_ii_wireless::CloudIIWireless,
-        cloud_ii_wireless_dts::CloudIIWirelessDTS, cloud_iii_s_wireless::CloudIIISWireless,
-        cloud_iii_wireless::CloudIIIWireless,
+        cloud_alpha_wireless::CloudAlphaWireless, cloud_core_wireless::CloudCoreWireless,
+        cloud_flight_wireless::CloudFlightWireless, cloud_ii_core_wireless::CloudIICoreWireless,
+        cloud_ii_wireless::CloudIIWireless, cloud_ii_wireless_dts::CloudIIWirelessDTS,
+        cloud_iii_s_wireless::CloudIIISWireless, cloud_iii_wireless::CloudIIIWireless,
     },
 };
 use hidapi::{HidApi, HidDevice, HidError};
@@ -76,6 +77,11 @@ const DEVICE_REGISTER: &[DeviceEntry] = &[
         vendor_ids: &cloud_flight_wireless::VENDOR_IDS,
         product_ids: &cloud_flight_wireless::PRODUCT_IDS,
         factory: |s| Box::new(CloudFlightWireless::new_from_state(s)),
+    },
+    DeviceEntry {
+        vendor_ids: &cloud_core_wireless::VENDOR_IDS,
+        product_ids: &cloud_core_wireless::PRODUCT_IDS,
+        factory: |s| Box::new(CloudCoreWireless::new_from_state(s)),
     },
 ];
 
@@ -165,7 +171,7 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
     debug_println!("Found device selecting handler");
 
     // On Linux and MacOS we can just take the first
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(false)]
     {
         let state = states
             .into_iter()
@@ -192,7 +198,7 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
         Ok(device)
     }
     // On Windows we have to check which interface can be used
-    #[cfg(target_os = "windows")]
+    #[cfg(true)]
     {
         let mut device = None;
         for state in states {
@@ -299,6 +305,9 @@ impl DeviceState {
                 if product_ids.contains(&info.product_id())
                     && vendor_ids.contains(&info.vendor_id())
                 {
+                    println!("usage: {}", info.usage());
+                    println!("usage page: {}", info.usage_page());
+
                     debug_println!(
                         "Selecting: {:x}:{:x} {:?}",
                         info.vendor_id(),
@@ -385,24 +394,24 @@ impl DeviceState {
         match self.hid_device.write(packet) {
             Ok(_) => Ok(()),
             Err(write_err) => {
-                #[cfg(target_os = "windows")]
                 {
-                    if let HidError::HidApiError { message } = &write_err {
-                        // Windows HID stack returns ERROR_INVALID_FUNCTION (0x1) when the device
-                        // doesn't support output reports / interrupt OUT.
-                        if message.contains("Incorrect function")
-                            || message.contains("(0x00000001)")
-                        {
-                            // If the feature report also fails, prefer returning the original
-                            // write() error since that's what callers attempted.
-                            if let Err(_feature_err) = self.hid_device.send_feature_report(packet) {
-                                return Err(write_err);
-                            }
-                            return Ok(());
-                        }
+                    println!("Normal write causes error {write_err:?}");
+                    // if let HidError::HidApiError { .. } = &write_err {
+                    // Windows HID stack returns ERROR_INVALID_FUNCTION (0x1) when the device
+                    // doesn't support output reports / interrupt OUT.
+                    // if message.contains("Incorrect function")
+                    //     || message.contains("(0x00000001)")
+                    // {
+                    // If the feature report also fails, prefer returning the original
+                    // write() error since that's what callers attempted.
+                    if let Err(_feature_err) = self.hid_device.send_feature_report(packet) {
+                        println!("send feature report error: {}", _feature_err);
+                        return Err(write_err);
                     }
+                    Ok(())
+                    // }
+                    // }
                 }
-                Err(write_err)
             }
         }
     }
