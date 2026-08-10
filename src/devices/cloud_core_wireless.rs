@@ -108,8 +108,8 @@ impl Device for CloudCoreWireless {
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
         println!("Read packet: {:?}", response);
         if response[0] == 0xFF && response[1] == 0x12 {
-            let upper = response[11] as u32;
-            let lower = response[12] as u32;
+            let lower = response[11] as u32;
+            let upper = response[12] as u32;
             let mut events = Vec::new();
             let index = match THRESHOLDS.binary_search(&(((upper as u16) << 8) | (lower as u16))) {
                 Ok(i) => i,
