@@ -274,8 +274,8 @@ Ensure you comply with relevant laws and regulations.
 - `cargo check` natively and for `x86_64-pc-windows-gnu`, per feature combination — warnings are denied (`-D warnings`) so they never slip through silently
 - full-feature `cargo build` on both (link errors don't show up in `check`) and native `cargo test`
 - all cargo invocations use `--locked` and `-D warnings`, catching `Cargo.lock` drift and compiler warnings alike
-- `rustfmt` on the lines you changed — pre-existing drift elsewhere is ignored
-- no added `dbg!`/`todo!`/`unimplemented!` lines (`--allow-debug` to override)
+- `rustfmt` formatting, but only for lines your branch changed — the repo has pre-existing formatting drift elsewhere, so checking the whole file would always fail
+- fails if your diff adds `dbg!`/`todo!`/`unimplemented!`; pass `--allow-debug` to skip this check
 - reminder to hand-trace changed shell/cmd.exe/AppleScript strings — a clean compile says nothing about argv quoting
 
 The Windows cross-check is skipped with install instructions if mingw-w64 isn't set up. `--remote` pushes a scratch branch to your fork and waits on the GitHub Actions run (requires `gh`).
