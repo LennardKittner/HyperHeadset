@@ -186,10 +186,6 @@ type CallbackMap = Arc<Mutex<HashMap<MenuId, Box<dyn Fn() + Send + Sync>>>>;
 pub enum TrayUserEvent {
     /// New device state from the main loop; `None` means no compatible device.
     Properties(Option<DeviceProperties>),
-    /// Re-render the menu from cached state so a just-set pending EQ transition
-    /// becomes visible without waiting for the main loop's next update.
-    #[cfg(feature = "eq-support")]
-    RefreshEqMenu,
 }
 
 pub struct TrayApp {
@@ -255,11 +251,6 @@ impl ApplicationHandler<TrayUserEvent> for TrayApp {
     fn user_event(&mut self, _el: &winit::event_loop::ActiveEventLoop, event: TrayUserEvent) {
         match event {
             TrayUserEvent::Properties(device_properties) => self.update(device_properties),
-            #[cfg(feature = "eq-support")]
-            TrayUserEvent::RefreshEqMenu => {
-                let device_properties = self.current_state.clone().unwrap_or(None);
-                self.update(device_properties);
-            }
         }
     }
 
@@ -631,6 +622,10 @@ impl TrayApp {
 
                     // Use plain MenuItem (not CheckMenuItem): the active state is conveyed
                     // via the label prefix, matching the Linux tray's StandardItem menu.
+                    // Cloned once so each click callback can resend it through the existing
+                    // `TrayUserEvent::Properties` channel (rather than a bespoke event) to
+                    // force an immediate menu rebuild that reflects the pending transition.
+                    let device_properties_for_refresh = device_properties.clone();
                     for option_name in &options {
                         let label = if pending_target == Some(option_name.as_str()) {
                             // Spinner: user just selected this, HID writes in progress.
@@ -649,6 +644,7 @@ impl TrayApp {
                         let pending = Arc::clone(&self.pending_eq_transition);
                         let proxy = Arc::clone(&self.event_proxy);
                         let entry_id = entry.id().clone();
+                        let refresh_properties = device_properties_for_refresh.clone();
                         new_callbacks.insert(
                             entry_id,
                             Box::new(move || {
@@ -658,10 +654,12 @@ impl TrayApp {
                                 if let Some(event) = (create_event)(name.clone()) {
                                     let _ = tx.send(event);
                                 }
-                                let _ = proxy
-                                    .lock()
-                                    .unwrap()
-                                    .send_event(TrayUserEvent::RefreshEqMenu);
+                                // Device state hasn't changed, only the pending indicator has;
+                                // resending it forces `update()` to rebuild the menu now
+                                // instead of waiting for the main loop's next real update.
+                                let _ = proxy.lock().unwrap().send_event(
+                                    TrayUserEvent::Properties(Some(refresh_properties.clone())),
+                                );
                             }),
                         );
                         let _ = submenu.append(&entry);
@@ -714,10 +712,7 @@ impl TrayApp {
     }
 }
 
-fn append_about_submenu(
-    menu: &Menu,
-    callbacks: &mut HashMap<MenuId, Box<dyn Fn() + Send + Sync>>,
-) {
+fn append_about_submenu(menu: &Menu, callbacks: &mut HashMap<MenuId, Box<dyn Fn() + Send + Sync>>) {
     let about_submenu = Submenu::new("About", true);
 
     let version_str = format!("HyperHeadset v{}", env!("CARGO_PKG_VERSION"));
