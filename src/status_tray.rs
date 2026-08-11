@@ -348,54 +348,55 @@ impl Tray for StatusTray {
                     // Use StandardItem (not RadioGroup) so that clicking a preset closes the
                     // menu — KDE Plasma doesn't re-render radio toggle-state while a submenu
                     // is open, causing stale checked circles to accumulate across selections.
-                    #[allow(unused_mut)]
-                    let mut submenu_items: Vec<MenuItem<StatusTray>> = options
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, name)| {
-                            let label = if pending_target == Some(name.as_str()) {
-                                // Spinner: user just selected this, HID writes in progress.
-                                format!("↻ {}", escape_label(name))
-                            } else if applying_name == Some(name.as_str()) {
-                                escape_label(&format!("{} (applying...)", name))
-                            } else if Some(idx) == active_index {
-                                format!("✓ {}", escape_label(name))
-                            } else {
-                                format!("  {}", escape_label(name))
-                            };
-                            let name_clone = name.clone();
-                            StandardItem {
-                                label,
-                                enabled: true,
-                                activate: Box::new(move |this: &mut StatusTray| {
-                                    // Set immediately so the next menu() call shows feedback
-                                    // before the main loop has time to update device_properties.
-                                    this.pending_eq_transition = Some(name_clone.clone());
-                                    let _ = this.update_sender.send(
-                                        DeviceEvent::EqualizerPreset(name_clone.clone()),
-                                    );
-                                }),
-                                ..Default::default()
-                            }
-                            .into()
-                        })
-                        .collect();
+                    let preset_items = options.iter().enumerate().map(|(idx, name)| {
+                        let label = if pending_target == Some(name.as_str()) {
+                            // Spinner: user just selected this, HID writes in progress.
+                            format!("↻ {}", escape_label(name))
+                        } else if applying_name == Some(name.as_str()) {
+                            escape_label(&format!("{} (applying...)", name))
+                        } else if Some(idx) == active_index {
+                            format!("✓ {}", escape_label(name))
+                        } else {
+                            format!("  {}", escape_label(name))
+                        };
+                        let name_clone = name.clone();
+                        StandardItem {
+                            label,
+                            enabled: true,
+                            activate: Box::new(move |this: &mut StatusTray| {
+                                // Set immediately so the next menu() call shows feedback
+                                // before the main loop has time to update device_properties.
+                                this.pending_eq_transition = Some(name_clone.clone());
+                                let _ = this
+                                    .update_sender
+                                    .send(DeviceEvent::EqualizerPreset(name_clone.clone()));
+                            }),
+                            ..Default::default()
+                        }
+                        .into()
+                    });
 
+                    // Trailing "Edit with..." entry only exists when eq-editor is compiled in;
+                    // kept as a Vec (rather than pushing into submenu_items) so the binding
+                    // never needs to be mut when the feature is off.
                     #[cfg(feature = "eq-editor")]
-                    {
-                        submenu_items.push(MenuItem::Separator);
-                        submenu_items.push(
-                            StandardItem {
-                                label: escape_label("Edit with: hyper_headset_cli --eq"),
-                                enabled: true,
-                                activate: Box::new(|_| {
-                                    hyper_headset::launch_eq_editor();
-                                }),
-                                ..Default::default()
-                            }
-                            .into(),
-                        );
-                    }
+                    let editor_items: Vec<MenuItem<StatusTray>> = vec![
+                        MenuItem::Separator,
+                        StandardItem {
+                            label: escape_label("Edit with: hyper_headset_cli --eq"),
+                            enabled: true,
+                            activate: Box::new(|_| {
+                                hyper_headset::launch_eq_editor();
+                            }),
+                            ..Default::default()
+                        }
+                        .into(),
+                    ];
+                    #[cfg(not(feature = "eq-editor"))]
+                    let editor_items: Vec<MenuItem<StatusTray>> = vec![];
+
+                    let submenu_items: Vec<MenuItem<StatusTray>> =
+                        preset_items.chain(editor_items).collect();
 
                     menu_items.push(
                         SubMenu {
