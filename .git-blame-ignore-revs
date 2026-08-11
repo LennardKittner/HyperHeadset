@@ -1,0 +1,12 @@
+# Commits listed here are skipped by `git blame` so that repo-wide formatting
+# changes don't obscure the authorship of the surrounding code.
+#
+# GitHub's blame view honours this file automatically.
+# For local git, opt in once per clone:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Append future repo-wide formatting commits below.
+
+# Fix formatting (rustfmt pass over the tree after PR #25)
+f629512ea383a0fbe703ecf4a941209a8efb02bd
