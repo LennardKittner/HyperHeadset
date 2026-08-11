@@ -8,12 +8,43 @@ usage() {
     cat << 'EOF'
 Usage: ./preflight [options]
 
-  --base <ref>    Diff base (default: this branch's upstream, else merge-base
-                  with upstream/dev, origin/dev or origin/main, else HEAD~1)
-  --remote        Also push a scratch branch and dispatch the GitHub Actions
-                  workflow for full 3-OS coverage (requires gh)
-  --keep-branch   Keep the --remote scratch branch after the run
-  --allow-debug   Don't fail on added dbg!/todo!/unimplemented! lines
+Catches, before a PR goes out, what building on one OS by hand does not:
+
+  - cargo check for every feature combination, plus a full-feature build and
+    cargo test, natively and cross-compiled for x86_64-pc-windows-gnu. Link
+    errors don't surface in a plain check, warnings are promoted to errors
+    (-D warnings), and --locked catches Cargo.lock drift.
+  - the windows-gnu half is skipped, with install instructions, when the
+    target or a mingw-w64 toolchain is missing.
+  - rustfmt --check, scoped to the lines this branch changed (see --base), so
+    the repo's pre-existing format drift stays out of the way. A failure
+    prints the offending lines with rustfmt's diff for them and offers to
+    apply and stage just those fixes.
+  - a gate on added dbg!/todo!/unimplemented! lines (see --allow-debug).
+  - a reminder to hand-trace changed shell/cmd.exe/AppleScript strings — a
+    clean compile says nothing about argv quoting.
+  - with --remote, the real 3-OS CI run that no local check can substitute.
+
+Exits non-zero if any check fails.
+
+  --base <ref>      Diff base used to scope the rustfmt check and the
+                    debug-macro/interpreter-string greps to what this branch
+                    actually changed. Default: this branch's upstream, else
+                    merge-base with upstream/dev, origin/dev, or origin/main
+                    (first that exists), else HEAD~1.
+  --skip-rustfmt    Don't run the rustfmt check at all.
+  --apply-rustfmt   Apply and stage the rustfmt fixes without asking (and
+                    without needing a terminal). Same guards as the prompt:
+                    the staging area must be empty and the flagged files
+                    unmodified. The check still fails — HEAD is unchanged.
+  --remote          Real 3-OS validation on GitHub Actions — locally, other
+                    OSes are at best cross-compiled, never run. Pushes HEAD
+                    to a temporary origin branch (preflight/<short-sha>) for
+                    CI to build, watches the run, then deletes it. Requires
+                    gh.
+  --keep-branch     Don't delete the temporary --remote branch afterwards.
+  --allow-debug     Don't fail on added dbg!/todo!/unimplemented! lines.
+  -h, --help        Show this help.
 EOF
 }
 
@@ -21,12 +52,22 @@ BASE_REF=""
 DO_REMOTE=0
 KEEP_BRANCH=0
 ALLOW_DEBUG=0
+SKIP_RUSTFMT=0
+APPLY_RUSTFMT=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
     --base)
         BASE_REF="$2"
         shift 2
+        ;;
+    --skip-rustfmt)
+        SKIP_RUSTFMT=1
+        shift
+        ;;
+    --apply-rustfmt)
+        APPLY_RUSTFMT=1
+        shift
         ;;
     --remote)
         DO_REMOTE=1
@@ -51,6 +92,11 @@ while [[ $# -gt 0 ]]; do
         ;;
     esac
 done
+
+if [[ $SKIP_RUSTFMT -eq 1 && $APPLY_RUSTFMT -eq 1 ]]; then
+    echo "--skip-rustfmt and --apply-rustfmt are mutually exclusive." >&2
+    exit 1
+fi
 
 if [[ -z $BASE_REF ]]; then
     # Prefer "what hasn't been pushed yet" (this branch's own remote-tracking
@@ -135,13 +181,23 @@ else
     skip "windows-gnu cross-check (run: rustup target add $WINDOWS_TARGET, plus a mingw-w64 toolchain — Debian/Ubuntu: gcc-mingw-w64, Fedora: mingw64-gcc, Arch: mingw-w64-gcc, macOS: brew install mingw-w64)"
 fi
 
-note "rustfmt --check on lines changed since $BASE_REF"
-CHANGED_RS=$(git diff --name-only "$BASE_REF"...HEAD -- '*.rs')
-if [[ -z $CHANGED_RS ]]; then
+CHANGED_RS=""
+if [[ $SKIP_RUSTFMT -eq 0 ]]; then
+    note "rustfmt --check on lines changed since $BASE_REF"
+    CHANGED_RS=$(git diff --name-only "$BASE_REF"...HEAD -- '*.rs')
+fi
+if [[ $SKIP_RUSTFMT -eq 1 ]]; then
+    skip "rustfmt (--skip-rustfmt)"
+elif [[ -z $CHANGED_RS ]]; then
     skip "rustfmt (no changed .rs files vs $BASE_REF)"
 else
     DIRTY=""
+    DIRTY_FILES=()
     CHECKED=0
+    APPLIED=0
+    # Patch of just the in-hunk fixes, offered interactively at the end.
+    FMT_PATCH="$LOG_DIR/preflight-rustfmt.patch"
+    : > "$FMT_PATCH"
     while IFS= read -r f; do
         [[ -f $f ]] || continue
         CHECKED=$((CHECKED + 1))
@@ -151,7 +207,9 @@ else
         # alone can't tell "this file is dirty" from "a child it declares via
         # `mod` is dirty" — match the reported path (which may be absolute, in
         # either separator style) against the file we actually asked about.
-        diff_out=$(rustfmt --check --edition "$EDITION" "$f" 2>&1 || true)
+        # --color=never: this output is parsed (and re-emitted as a patch), so
+        # it must not carry ANSI escapes; the display below colours it itself.
+        diff_out=$(rustfmt --check --color=never --edition "$EDITION" "$f" 2>&1 || true)
         # shellcheck disable=SC1003  # escaped backslash for tr, not a quote typo
         flagged_lines=$(printf '%s\n' "$diff_out" | tr '\\' '/' | awk -v f="$f" '
       /^Diff in .*:[0-9]+:$/ {
@@ -170,23 +228,124 @@ else
         # flagging a whole file on any diff anywhere in it would fail
         # permanently and drown out real regressions. Only count it dirty if a
         # flagged line falls inside a range this branch actually changed.
+        #
+        # rustfmt anchors a block at its leading context, up to 3 lines above
+        # the first line it would actually reformat, so the reported line can
+        # sit just outside the hunk while the real violation is inside it —
+        # match the whole window (reported..reported+3) or those slip through
+        # silently. Cost: drift starting within 3 lines of a hunk can now be
+        # flagged; the apply prompt below makes that cheap to clear.
         ranges=$(git diff --unified=0 "$BASE_REF"...HEAD -- "$f" |
             sed -n -E 's/^@@ -[0-9]+(,[0-9]+)? \+([0-9]+)(,([0-9]+))? @@.*/\2 \4/p' |
             awk '{c = ($2 == "" ? 1 : $2); if (c > 0) print $1, c}')
+        hits=""
         for line in $flagged_lines; do
             while read -r start count; do
                 [[ -z $start ]] && continue
-                if ((line >= start && line < start + count)); then
-                    DIRTY="${DIRTY:+$DIRTY, }$f"
-                    break 2
+                if ((line + 3 >= start && line < start + count)); then
+                    hits="${hits:+$hits }$line"
+                    break
                 fi
             done <<< "$ranges"
         done
+        [[ -z $hits ]] && continue
+
+        # Show what's actually wrong, right here: re-print only the `Diff in
+        # <file>:<line>:` blocks whose line falls inside a changed hunk, so the
+        # developer doesn't have to re-run rustfmt and sift pre-existing drift.
+        pretty_lines="${hits// /, }"
+        want_lines=",${hits// /,},"
+        printf '\n\033[1;31m%s\033[0m: reformat needed on changed line(s) %s\n' \
+            "$f" "$pretty_lines"
+        # Same pass also re-emits those blocks as a unified diff (line counts
+        # left to `git apply --recount`) so the fixes can be applied verbatim.
+        printf -- '--- a/%s\n+++ b/%s\n' "$f" "$f" >> "$FMT_PATCH"
+        printf '%s\n' "$diff_out" |
+            awk -v f="$f" -v want="$want_lines" -v patch="$FMT_PATCH" '
+      # rustfmt pads a block with trailing blank context that can run past EOF;
+      # buffer each block and drop those before writing the hunk out.
+      function flush(  i, last) {
+        last = nbuf
+        while (last > 0 && buf[last] ~ /^ *$/)
+          last--
+        if (last > 0) {
+          print hunk >> patch
+          for (i = 1; i <= last; i++)
+            print buf[i] >> patch
+        }
+        nbuf = 0
+      }
+      /^Diff in .*:[0-9]+:$/ {
+        flush()
+        match($0, /:[0-9]+:$/)
+        lineno = substr($0, RSTART + 1, RLENGTH - 2)
+        path = substr($0, 9, RSTART - 9)
+        gsub(/\\/, "/", path)
+        show = ((path == f \
+                 || (length(path) > length(f) \
+                     && substr(path, length(path) - length(f) + 1) == f \
+                     && substr(path, length(path) - length(f), 1) == "/")) \
+                && index(want, "," lineno ",") > 0)
+        if (show) {
+          hunk = sprintf("@@ -%s,1 +%s,1 @@", lineno, lineno)
+          print "    " $0
+        }
+        next
+      }
+      show {
+        buf[++nbuf] = $0
+        c = substr($0, 1, 1)
+        if (c == "-") printf "    \033[31m%s\033[0m\n", $0
+        else if (c == "+") printf "    \033[32m%s\033[0m\n", $0
+        else print "    " $0
+      }
+      END { flush() }'
+        DIRTY="${DIRTY:+$DIRTY; }$f (lines $pretty_lines)"
+        DIRTY_FILES+=("$f")
     done <<< "$CHANGED_RS"
     if [[ -z $DIRTY ]]; then
         ok "rustfmt ($CHECKED file(s) checked)"
     else
-        fail "rustfmt: $DIRTY"
+        printf '\n\033[1mfix:\033[0m adjust the lines above (cargo fmt would reformat whole files incl. pre-existing drift — see README)\n'
+        # Offer to apply exactly those blocks, then stage them, so the index
+        # holds nothing but this fix and any unrelated work stays unstaged.
+        # That needs an empty staging area, and the flagged files themselves
+        # unmodified — the patch is generated against their on-disk content,
+        # so local edits there could make it fail halfway. Dirt elsewhere in
+        # the tree is none of this check's business.
+        if [[ $APPLY_RUSTFMT -eq 0 && ! -t 0 ]]; then
+            :
+        elif ! git diff --cached --quiet; then
+            printf 'Auto-apply unavailable: staging area is not empty — commit or unstage first.\n'
+        elif ! git diff --quiet -- "${DIRTY_FILES[@]}"; then
+            printf 'Auto-apply unavailable: local edits in %s — commit or stash those first.\n' \
+                "$(git diff --name-only -- "${DIRTY_FILES[@]}" | tr '\n' ' ' | sed 's/ *$//')"
+        else
+            reply="y" # --apply-rustfmt: proceed as if the prompt was answered
+            if [[ $APPLY_RUSTFMT -eq 0 ]]; then
+                printf 'Apply just these fixes and stage them? [y/N] '
+                read -r reply
+            fi
+            case "$reply" in
+            [Yy]*)
+                if git apply --recount "$FMT_PATCH" && git add -- "${DIRTY_FILES[@]}"; then
+                    APPLIED=1
+                    printf '\033[1;32mApplied and staged.\033[0m Review with: git diff --cached — then commit and re-run ./preflight\n'
+                else
+                    printf '\033[1;31mApply failed\033[0m — patch kept at %s; fix the lines by hand.\n' \
+                        "$FMT_PATCH"
+                fi
+                ;;
+            *)
+                printf 'Left unchanged (patch: %s).\n' "$FMT_PATCH"
+                ;;
+            esac
+        fi
+        if [[ $APPLIED -eq 1 ]]; then
+            fail "rustfmt: $DIRTY — fixes applied and staged, commit and re-run"
+        else
+            fail "rustfmt: $DIRTY"
+        fi
     fi
 fi
 
