@@ -1118,6 +1118,13 @@ pub trait Device {
     /// Refreshes the state by querying all available information
     fn active_refresh_state(&mut self) -> Result<(), DeviceError> {
         let packets = self.get_query_packets();
+        // get_query_packets() puts the connected-status query first, but it's an
+        // Option: some devices (e.g. cloud_ii_wireless_dts) return None for it because
+        // it has a side effect there (resets state, unmuting the headset), and
+        // get_query_packets() flattens Nones away. So packets[0] is only the
+        // connected-status query when the device actually emits one; otherwise every
+        // response below is evidence of a real answer.
+        let connected_status_packet_present = self.get_wireless_connected_status_packet().is_some();
         self.execute_headset_specific_functionality()?;
 
         let mut responded = false;
@@ -1131,10 +1138,10 @@ pub trait Device {
                     self.get_device_state_mut().update_self_with_event(&event);
                 }
                 responded = true;
-                // Index 0 is always the connected-status query (see get_query_packets);
-                // anything answering beyond that is evidence this connection gets real
-                // responses to the rest, so refreshes stay worthwhile after an EQ write.
-                if i > 0 {
+                // Anything answering beyond the connected-status query (if any) is
+                // evidence this connection gets real responses to the rest, so refreshes
+                // stay worthwhile after an EQ write.
+                if i > 0 || !connected_status_packet_present {
                     self.get_device_state_mut()
                         .non_connected_query_ever_answered = true;
                 }
