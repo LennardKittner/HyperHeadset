@@ -62,9 +62,6 @@ If automatic installation fails, you can install them manually (see Prerequisite
 
 ## Build from Source
 
-This project uses git submodules, so before building, you have to initialize them via:
-`git submodule update --init --recursive`
-
 To build both applications, use:
 `cargo build --release`
 

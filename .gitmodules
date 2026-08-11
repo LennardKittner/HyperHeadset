@@ -1,3 +1,0 @@
-[submodule "vendor/hidapi"]
-	path = vendor/hidapi
-	url = https://github.com/ruabmbua/hidapi-rs.git

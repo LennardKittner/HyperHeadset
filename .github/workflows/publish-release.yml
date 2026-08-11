@@ -79,6 +79,7 @@ jobs:
 
   publish-aur:
     runs-on: ubuntu-latest
+    environment: secrets
     needs: [build-linux, build-macos, build-windows]
     permissions:
       contents: write
