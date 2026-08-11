@@ -8,6 +8,12 @@ use ksni::{
 
 use crate::tray_battery_icon_state::TrayBatteryIconState;
 
+/// Escape underscores for ksni labels (single `_` is an accelerator prefix).
+#[cfg(feature = "eq-support")]
+fn escape_label(s: &str) -> String {
+    s.replace('_', "__")
+}
+
 pub struct TrayHandler {
     handle: Handle<StatusTray>,
 }
@@ -24,16 +30,29 @@ impl TrayHandler {
     }
 
     pub fn update(&self, properties: &DeviceProperties) {
+        let device_properties = properties.clone();
         self.handle.update(|tray| {
-            tray.device_properties = Some(properties.clone());
+            #[cfg(feature = "eq-support")]
+            if let Some(ref to) = tray.pending_eq_transition {
+                // Clear pending transition once the target preset is confirmed active and synced.
+                if device_properties.active_eq_preset.as_deref() == Some(to.as_str())
+                    && device_properties.eq_synced == Some(true)
+                {
+                    tray.pending_eq_transition = None;
+                }
+            }
+            tray.device_properties = Some(device_properties);
         })
     }
 
     pub fn clear_state(&self) {
         self.handle.update(|tray| {
+            #[cfg(feature = "eq-support")]
+            { tray.pending_eq_transition = None; }
             tray.device_properties = None;
         })
     }
+
 }
 
 pub struct StatusTray {
@@ -41,6 +60,11 @@ pub struct StatusTray {
     device_properties: Option<DeviceProperties>,
     update_sender: Sender<DeviceEvent>,
     monochrome_icons: bool,
+    /// Target preset of an in-flight EQ switch, so the menu gives instant visual
+    /// feedback before the main loop confirms the HID writes finished. Cleared once
+    /// the target is confirmed active and synced.
+    #[cfg(feature = "eq-support")]
+    pending_eq_transition: Option<String>,
 }
 
 impl StatusTray {
@@ -51,6 +75,8 @@ impl StatusTray {
             device_properties: None,
             update_sender,
             monochrome_icons,
+            #[cfg(feature = "eq-support")]
+            pending_eq_transition: None,
         }
     }
 
@@ -77,7 +103,7 @@ impl Tray for StatusTray {
     fn tool_tip(&self) -> ToolTip {
         let Some(device_properties) = self.device_properties.as_ref() else {
             return ToolTip {
-                title: "Unknown".to_string(),
+                title: format!("HyperHeadset v{}", env!("CARGO_PKG_VERSION")),
                 description: NO_COMPATIBLE_DEVICE.to_string(),
                 icon_name: TrayBatteryIconState::NoDevice
                     .linux_icon_name(self.monochrome_icons, self.theme_name.as_ref()),
@@ -116,6 +142,35 @@ impl Tray for StatusTray {
             activate: Box::new(|_| std::process::exit(0)),
             ..Default::default()
         };
+        let make_about = || {
+            let version_str = format!("HyperHeadset v{}", env!("CARGO_PKG_VERSION"));
+            let version_str_clone = version_str.clone();
+            let items: Vec<MenuItem<StatusTray>> = vec![
+                StandardItem {
+                    label: format!("{} (Copy)", version_str),
+                    enabled: true,
+                    activate: Box::new(move |_| {
+                        let _ = hyper_headset::copy_to_clipboard(&version_str_clone);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: "GitHub (Open URL)".into(),
+                    enabled: true,
+                    activate: Box::new(|_| {
+                        hyper_headset::open_url("https://github.com/LennardKittner/HyperHeadset");
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            ];
+            SubMenu {
+                label: "About".into(),
+                submenu: items,
+                ..Default::default()
+            }
+        };
         let mut menu_items: Vec<MenuItem<Self>> = Vec::new();
 
         let Some(device_properties) = self.device_properties.as_ref() else {
@@ -128,6 +183,7 @@ impl Tray for StatusTray {
                 .into(),
             );
             menu_items.push(MenuItem::Separator);
+            menu_items.push(make_about().into());
             menu_items.push(make_exit().into());
             return menu_items;
         };
@@ -142,6 +198,7 @@ impl Tray for StatusTray {
                 .into(),
             );
             menu_items.push(MenuItem::Separator);
+            menu_items.push(make_about().into());
             menu_items.push(make_exit().into());
             return menu_items;
         }
@@ -250,10 +307,111 @@ impl Tray for StatusTray {
                         .into(),
                     );
                 }
+                #[cfg(feature = "eq-support")]
+                hyper_headset::devices::PropertyDescriptorWrapper::SelectEQ {
+                    descriptor,
+                    options,
+                    active_preset,
+                    synced,
+                } => {
+                    if options.is_empty() {
+                        // No options available — show as read-only label if data exists
+                        if let Some(ref current_value) = descriptor.data {
+                            menu_items.push(
+                                StandardItem {
+                                    label: escape_label(&format!(
+                                        "{}: {}{}",
+                                        descriptor.pretty_name, current_value, descriptor.suffix
+                                    )),
+                                    enabled: false,
+                                    ..Default::default()
+                                }
+                                .into(),
+                            );
+                        }
+                        continue;
+                    }
+
+                    menu_items.push(MenuItem::Separator);
+
+                    let active_name = active_preset.as_deref();
+                    let active_index = active_name
+                        .and_then(|name| options.iter().position(|n| n == name));
+
+                    let applying_name = if !synced { active_name } else { None };
+
+                    // Immediate visual feedback: pending_eq_transition is set on click before
+                    // the main loop confirms the HID writes, so the spinner appears instantly.
+                    // The previously active preset keeps its ✓ until the switch is confirmed.
+                    let pending_target = self.pending_eq_transition.as_deref();
+
+                    // Use StandardItem (not RadioGroup) so that clicking a preset closes the
+                    // menu — KDE Plasma doesn't re-render radio toggle-state while a submenu
+                    // is open, causing stale checked circles to accumulate across selections.
+                    let preset_items = options.iter().enumerate().map(|(idx, name)| {
+                        let label = if pending_target == Some(name.as_str()) {
+                            // Spinner: user just selected this, HID writes in progress.
+                            format!("↻ {}", escape_label(name))
+                        } else if applying_name == Some(name.as_str()) {
+                            escape_label(&format!("{} (applying...)", name))
+                        } else if Some(idx) == active_index {
+                            format!("✓ {}", escape_label(name))
+                        } else {
+                            format!("  {}", escape_label(name))
+                        };
+                        let name_clone = name.clone();
+                        StandardItem {
+                            label,
+                            enabled: true,
+                            activate: Box::new(move |this: &mut StatusTray| {
+                                // Set immediately so the next menu() call shows feedback
+                                // before the main loop has time to update device_properties.
+                                this.pending_eq_transition = Some(name_clone.clone());
+                                let _ = this
+                                    .update_sender
+                                    .send(DeviceEvent::EqualizerPreset(name_clone.clone()));
+                            }),
+                            ..Default::default()
+                        }
+                        .into()
+                    });
+
+                    // Trailing "Edit with..." entry only exists when eq-editor is compiled in;
+                    // kept as a Vec (rather than pushing into submenu_items) so the binding
+                    // never needs to be mut when the feature is off.
+                    #[cfg(feature = "eq-editor")]
+                    let editor_items: Vec<MenuItem<StatusTray>> = vec![
+                        MenuItem::Separator,
+                        StandardItem {
+                            label: escape_label("Edit with: hyper_headset_cli --eq"),
+                            enabled: true,
+                            activate: Box::new(|_| {
+                                hyper_headset::launch_eq_editor();
+                            }),
+                            ..Default::default()
+                        }
+                        .into(),
+                    ];
+                    #[cfg(not(feature = "eq-editor"))]
+                    let editor_items: Vec<MenuItem<StatusTray>> = vec![];
+
+                    let submenu_items: Vec<MenuItem<StatusTray>> =
+                        preset_items.chain(editor_items).collect();
+
+                    menu_items.push(
+                        SubMenu {
+                            label: escape_label(&format!("{}: {}", descriptor.pretty_name, descriptor.data.as_deref().unwrap_or("Unknown"))),
+                            submenu: submenu_items,
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
             }
         }
 
         menu_items.push(MenuItem::Separator);
+        menu_items.push(make_about().into());
         menu_items.push(make_exit().into());
         menu_items
     }

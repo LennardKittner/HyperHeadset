@@ -1,0 +1,244 @@
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::sync::mpsc;
+
+use super::NUM_BANDS;
+
+// === Types ===
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EqPreset {
+    pub name: String,
+    pub bands: [f32; NUM_BANDS],
+}
+
+/// Stored in selected_profile.json — tracks desired preset and sync state.
+/// `synced` is true when the preset was successfully sent to the headset.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SelectedProfile {
+    pub active_preset: Option<String>,
+    #[serde(default)]
+    pub synced: bool,
+}
+
+// === Path helpers ===
+
+pub fn config_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("hyper_headset")
+}
+
+fn presets_dir() -> PathBuf {
+    config_dir().join("eq_presets")
+}
+
+fn selected_profile_path() -> PathBuf {
+    config_dir().join("selected_profile.json")
+}
+
+/// Sanitize a preset name for use as a filename.
+/// Strips path separators and other dangerous characters.
+fn sanitize_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !matches!(c, '/' | '\\' | '\0' | ':'))
+        .collect::<String>()
+        .trim_start_matches('.')
+        .to_string()
+}
+
+// === Built-in presets ===
+
+const BUILTIN_PRESETS: &[(&str, [f32; NUM_BANDS])] = &[
+    ("Flat", [0.0; 10]),
+    ("Bass Boost", [6.0, 5.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+    ("Treble Boost", [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 4.0, 5.0, 6.0]),
+    ("V-Shape", [5.0, 4.0, 2.0, 0.0, -2.0, -2.0, 0.0, 2.0, 4.0, 5.0]),
+    ("Vocal", [-2.0, -1.0, 0.0, 2.0, 4.0, 4.0, 3.0, 1.0, 0.0, -1.0]),
+];
+
+pub fn builtin_presets() -> Vec<EqPreset> {
+    BUILTIN_PRESETS
+        .iter()
+        .map(|(name, bands)| EqPreset {
+            name: (*name).into(),
+            bands: *bands,
+        })
+        .collect()
+}
+
+pub fn is_builtin(name: &str) -> bool {
+    BUILTIN_PRESETS.iter().any(|(n, _)| *n == name)
+}
+
+// === Preset I/O ===
+
+/// Load a single preset by name. Checks user presets dir first, then builtins.
+pub fn load_preset(name: &str) -> Option<EqPreset> {
+    let path = presets_dir().join(format!("{}.json", sanitize_name(name)));
+    if path.exists() {
+        if let Ok(data) = std::fs::read_to_string(&path) {
+            match serde_json::from_str::<EqPreset>(&data) {
+                Ok(preset) => return Some(preset),
+                Err(e) => eprintln!("Failed to parse preset at {}: {e}", path.display()),
+            }
+        }
+    }
+    builtin_presets().into_iter().find(|p| p.name == name)
+}
+
+/// Save a single preset to its own file.
+pub fn save_preset(preset: &EqPreset) -> std::io::Result<()> {
+    let safe_name = sanitize_name(&preset.name);
+    if safe_name.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Invalid preset name",
+        ));
+    }
+    let dir = presets_dir();
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{}.json", safe_name));
+    let data = serde_json::to_string_pretty(preset)?;
+    std::fs::write(&path, data)
+}
+
+/// Delete a user preset file.
+pub fn delete_preset(name: &str) -> std::io::Result<()> {
+    let path = presets_dir().join(format!("{}.json", sanitize_name(name)));
+    if path.exists() {
+        std::fs::remove_file(&path)
+    } else {
+        Ok(())
+    }
+}
+
+/// Load all user presets from individual files in the presets directory.
+pub fn load_user_presets() -> Vec<EqPreset> {
+    let dir = presets_dir();
+    if !dir.exists() {
+        return Vec::new();
+    }
+    let mut presets = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "json") {
+                if let Ok(data) = std::fs::read_to_string(&path) {
+                    match serde_json::from_str::<EqPreset>(&data) {
+                        Ok(preset) => presets.push(preset),
+                        Err(e) => {
+                            eprintln!("Failed to parse preset at {}: {e}", path.display())
+                        }
+                    }
+                }
+            }
+        }
+    }
+    presets.sort_by(|a, b| a.name.cmp(&b.name));
+    presets
+}
+
+/// Returns all presets: builtins + user presets.
+/// User presets with matching names override builtins.
+pub fn all_presets() -> Vec<EqPreset> {
+    let mut presets = builtin_presets();
+    let user = load_user_presets();
+    for up in user {
+        if let Some(existing) = presets.iter_mut().find(|p| p.name == up.name) {
+            *existing = up;
+        } else {
+            presets.push(up);
+        }
+    }
+    presets
+}
+
+// === Selected-profile I/O ===
+
+pub fn load_selected_profile() -> SelectedProfile {
+    let path = selected_profile_path();
+    if !path.exists() {
+        return SelectedProfile::default();
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(data) => match serde_json::from_str(&data) {
+            Ok(profile) => profile,
+            Err(e) => {
+                eprintln!("Failed to parse selected profile at {}: {e}", path.display());
+                SelectedProfile::default()
+            }
+        },
+        Err(_) => SelectedProfile::default(),
+    }
+}
+
+pub fn save_selected_profile(profile: &SelectedProfile) -> std::io::Result<()> {
+    let path = selected_profile_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let data = serde_json::to_string_pretty(profile)?;
+    std::fs::write(&path, data)
+}
+
+// === Config-dir watcher ===
+
+/// Watches the config directory for EQ-relevant changes (preset files under
+/// `eq_presets/` and the `selected_profile.json` file). Hides `notify`'s
+/// "must be kept alive" requirement inside the type — caller just keeps the
+/// `ConfigWatcher` alive and polls via `take_pending`.
+pub struct ConfigWatcher {
+    _watcher: notify::RecommendedWatcher,
+    rx: mpsc::Receiver<()>,
+}
+
+impl ConfigWatcher {
+    /// Install a recursive watcher on the config dir. Events are filtered to
+    /// those touching `eq_presets/*` or `selected_profile.json`; everything
+    /// else is dropped before reaching the receiver.
+    pub fn new() -> notify::Result<Self> {
+        use notify::{Event, EventKind, RecursiveMode, Watcher};
+
+        let (tx, rx) = mpsc::channel();
+        let config = config_dir();
+        let presets = presets_dir();
+        let profile = selected_profile_path();
+
+        // Ensure the directories exist so we can watch them
+        std::fs::create_dir_all(&presets).ok();
+
+        let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
+            let Ok(event) = res else { return };
+            if !matches!(
+                event.kind,
+                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+            ) {
+                return;
+            }
+            let relevant = event
+                .paths
+                .iter()
+                .any(|p| p.starts_with(&presets) || p == &profile);
+            if relevant {
+                let _ = tx.send(());
+            }
+        })?;
+
+        watcher.watch(&config, RecursiveMode::Recursive)?;
+
+        Ok(Self {
+            _watcher: watcher,
+            rx,
+        })
+    }
+
+    /// Drain pending change signals; return true if anything was queued.
+    pub fn take_pending(&self) -> bool {
+        let mut any = false;
+        while self.rx.try_recv().is_ok() {
+            any = true;
+        }
+        any
+    }
+}
