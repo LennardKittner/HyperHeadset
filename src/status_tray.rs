@@ -48,11 +48,12 @@ impl TrayHandler {
     pub fn clear_state(&self) {
         self.handle.update(|tray| {
             #[cfg(feature = "eq-support")]
-            { tray.pending_eq_transition = None; }
+            {
+                tray.pending_eq_transition = None;
+            }
             tray.device_properties = None;
         })
     }
-
 }
 
 pub struct StatusTray {
@@ -335,8 +336,8 @@ impl Tray for StatusTray {
                     menu_items.push(MenuItem::Separator);
 
                     let active_name = active_preset.as_deref();
-                    let active_index = active_name
-                        .and_then(|name| options.iter().position(|n| n == name));
+                    let active_index =
+                        active_name.and_then(|name| options.iter().position(|n| n == name));
 
                     let applying_name = if !synced { active_name } else { None };
 
@@ -400,7 +401,11 @@ impl Tray for StatusTray {
 
                     menu_items.push(
                         SubMenu {
-                            label: escape_label(&format!("{}: {}", descriptor.pretty_name, descriptor.data.as_deref().unwrap_or("Unknown"))),
+                            label: escape_label(&format!(
+                                "{}: {}",
+                                descriptor.pretty_name,
+                                descriptor.data.as_deref().unwrap_or("Unknown")
+                            )),
                             submenu: submenu_items,
                             ..Default::default()
                         }

@@ -70,7 +70,6 @@ fn make_auto_shutdown_packet(minutes: u64) -> Vec<u8> {
     packet
 }
 
-
 fn parse_automatic_shutdown_payload(high: u8, low: u8) -> Duration {
     let num = (high as u64) * 256 + low as u64;
     Duration::from_secs(num)

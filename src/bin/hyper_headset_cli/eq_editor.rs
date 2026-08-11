@@ -46,7 +46,10 @@ enum ConfirmQuitOption {
 /// Result from the EQ editor.
 pub enum EditorResult {
     /// User saved: (preset_name, bands). Save preset file + set selected profile.
-    Saved { name: String, bands: [f32; NUM_BANDS] },
+    Saved {
+        name: String,
+        bands: [f32; NUM_BANDS],
+    },
     /// User cancelled/undid: (preset_name, bands). Restore selected profile + headset state.
     Cancelled { name: String },
 }
@@ -202,9 +205,7 @@ impl EqEditor {
 
             if let Event::Key(key) = event::read()? {
                 // Ctrl+C: save current state as TUI and exit
-                if key.code == KeyCode::Char('c')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
+                if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     return Ok(EditorResult::Saved {
                         name: "TUI".to_string(),
                         bands: self.bands,
@@ -313,9 +314,15 @@ impl EqEditor {
 
                 let (text, color) = if db == 0 {
                     if is_selected {
-                        ("\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}", Color::Yellow)
+                        (
+                            "\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}",
+                            Color::Yellow,
+                        )
                     } else {
-                        ("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}", Color::Yellow)
+                        (
+                            "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+                            Color::Yellow,
+                        )
                     }
                 } else if db > 0 && val >= db_f {
                     ("   \u{2588}   ", Color::Green)
@@ -368,7 +375,11 @@ impl EqEditor {
             freq, desc, self.bands[self.cursor]
         );
         let preset_info = match &self.active_preset {
-            Some(name) => format!("  Preset: {}{}", name, if self.modified { " *" } else { "" }),
+            Some(name) => format!(
+                "  Preset: {}{}",
+                name,
+                if self.modified { " *" } else { "" }
+            ),
             None => {
                 if self.modified {
                     "  Custom *".to_string()
@@ -403,10 +414,7 @@ impl EqEditor {
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(": \u{00b1}1dB  "),
-                Span::styled(
-                    "PgUp/Dn",
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
+                Span::styled("PgUp/Dn", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(": \u{00b1}3dB  "),
                 Span::styled("0", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(": Reset band  "),
@@ -433,11 +441,7 @@ impl EqEditor {
         Paragraph::new(lines)
     }
 
-    fn handle_startup_conflict_key(
-        &mut self,
-        key: KeyEvent,
-        device: &mut Option<&mut dyn Device>,
-    ) {
+    fn handle_startup_conflict_key(&mut self, key: KeyEvent, device: &mut Option<&mut dyn Device>) {
         match key.code {
             KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
                 self.startup_conflict_selection =
@@ -485,25 +489,21 @@ impl EqEditor {
         let inner = block.inner(popup);
         frame.render_widget(block, popup);
 
-        let preset_name = self
-            .conflict_preset_name
-            .as_deref()
-            .unwrap_or("Unknown");
+        let preset_name = self.conflict_preset_name.as_deref().unwrap_or("Unknown");
 
-        let btn =
-            |label: &str, option: StartupConflictOption, sel_color: Color| -> Span<'static> {
-                if self.startup_conflict_selection == option {
-                    Span::styled(
-                        format!(" {} ", label),
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(sel_color)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    Span::styled(format!(" {} ", label), Style::default().fg(Color::DarkGray))
-                }
-            };
+        let btn = |label: &str, option: StartupConflictOption, sel_color: Color| -> Span<'static> {
+            if self.startup_conflict_selection == option {
+                Span::styled(
+                    format!(" {} ", label),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(sel_color)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled(format!(" {} ", label), Style::default().fg(Color::DarkGray))
+            }
+        };
 
         let lines = vec![
             Line::default(),
@@ -609,7 +609,10 @@ impl EqEditor {
                 }
             }
             KeyCode::Enter => {
-                let name = self.active_preset.clone().unwrap_or_else(|| "TUI".to_string());
+                let name = self
+                    .active_preset
+                    .clone()
+                    .unwrap_or_else(|| "TUI".to_string());
                 return Some(EditorResult::Saved {
                     name,
                     bands: self.bands,
@@ -630,11 +633,7 @@ impl EqEditor {
         None
     }
 
-    fn handle_preset_select_key(
-        &mut self,
-        key: KeyEvent,
-        device: &mut Option<&mut dyn Device>,
-    ) {
+    fn handle_preset_select_key(&mut self, key: KeyEvent, device: &mut Option<&mut dyn Device>) {
         let len = self.presets.len();
         if len == 0 {
             self.mode = EditorMode::Normal;
@@ -961,7 +960,8 @@ impl EqEditor {
             .title(" Delete Preset ")
             .borders(Borders::ALL);
 
-        let items: Vec<ListItem> = self.delete_presets_cache
+        let items: Vec<ListItem> = self
+            .delete_presets_cache
             .iter()
             .map(|p| {
                 let suffix = if is_builtin(&p.name) {

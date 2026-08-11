@@ -19,4 +19,3 @@ pub const EQ_FREQUENCIES: [(u32, &str, &str); 10] = [
 pub const NUM_BANDS: usize = 10;
 pub const DB_MIN: f32 = -12.0;
 pub const DB_MAX: f32 = 12.0;
-

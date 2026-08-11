@@ -9,7 +9,6 @@ use hyper_headset::{
     VERBOSE,
 };
 
-
 const SHOW_ALL_OPTIONS: bool = false;
 
 // Frequency-to-index mapping for CLI band references.
@@ -39,10 +38,7 @@ fn parse_band_ref(s: &str) -> Result<u8, String> {
     // Try bare integer first
     if let Ok(index) = s.parse::<u8>() {
         if index > 9 {
-            return Err(format!(
-                "Band index '{}' out of range. Must be 0-9.",
-                index
-            ));
+            return Err(format!("Band index '{}' out of range. Must be 0-9.", index));
         }
         return Ok(index);
     }
@@ -62,12 +58,9 @@ fn parse_band_ref(s: &str) -> Result<u8, String> {
         })?;
 
     let (num_str, suffix) = lower.split_at(num_end);
-    let base_freq: f64 = num_str.parse().map_err(|_| {
-        format!(
-            "Invalid number '{}' in band reference '{}'.",
-            num_str, s
-        )
-    })?;
+    let base_freq: f64 = num_str
+        .parse()
+        .map_err(|_| format!("Invalid number '{}' in band reference '{}'.", num_str, s))?;
 
     // Parse suffix to determine multiplier
     let freq_hz: u32 = match suffix {
@@ -285,7 +278,9 @@ fn create_command(device: &Result<Headset, DeviceError>) -> Command {
             Arg::new("eq")
                 .long("eq")
                 .action(ArgAction::SetTrue)
-                .help("Open interactive EQ editor (TUI).\nThis may not be supported on your device.")
+                .help(
+                    "Open interactive EQ editor (TUI).\nThis may not be supported on your device.",
+                )
                 .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_equalizer)),
         );
     }
@@ -334,7 +329,6 @@ fn main() {
             std::process::exit(1)
         }
     };
-
 
     let _can_set_eq = device.device_properties().can_set_equalizer;
 
@@ -466,7 +460,9 @@ fn main() {
                 continue;
             }
             match parse_eq_pair(part) {
-                Ok((band, db)) => { eq_map.insert(band, db); }
+                Ok((band, db)) => {
+                    eq_map.insert(band, db);
+                }
                 Err(err) => {
                     eprintln!("ERROR: --eq-profile: {}", err);
                     std::process::exit(1);

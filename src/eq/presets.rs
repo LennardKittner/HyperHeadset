@@ -51,10 +51,22 @@ fn sanitize_name(name: &str) -> String {
 
 const BUILTIN_PRESETS: &[(&str, [f32; NUM_BANDS])] = &[
     ("Flat", [0.0; 10]),
-    ("Bass Boost", [6.0, 5.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
-    ("Treble Boost", [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 4.0, 5.0, 6.0]),
-    ("V-Shape", [5.0, 4.0, 2.0, 0.0, -2.0, -2.0, 0.0, 2.0, 4.0, 5.0]),
-    ("Vocal", [-2.0, -1.0, 0.0, 2.0, 4.0, 4.0, 3.0, 1.0, 0.0, -1.0]),
+    (
+        "Bass Boost",
+        [6.0, 5.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ),
+    (
+        "Treble Boost",
+        [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 4.0, 5.0, 6.0],
+    ),
+    (
+        "V-Shape",
+        [5.0, 4.0, 2.0, 0.0, -2.0, -2.0, 0.0, 2.0, 4.0, 5.0],
+    ),
+    (
+        "Vocal",
+        [-2.0, -1.0, 0.0, 2.0, 4.0, 4.0, 3.0, 1.0, 0.0, -1.0],
+    ),
 ];
 
 pub fn builtin_presets() -> Vec<EqPreset> {
@@ -165,7 +177,10 @@ pub fn load_selected_profile() -> SelectedProfile {
         Ok(data) => match serde_json::from_str(&data) {
             Ok(profile) => profile,
             Err(e) => {
-                eprintln!("Failed to parse selected profile at {}: {e}", path.display());
+                eprintln!(
+                    "Failed to parse selected profile at {}: {e}",
+                    path.display()
+                );
                 SelectedProfile::default()
             }
         },

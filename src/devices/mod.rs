@@ -749,11 +749,9 @@ impl DeviceProperties {
                         property_descriptor.suffix,
                     ),
                     #[cfg(feature = "eq-support")]
-                    PropertyDescriptorWrapper::SelectEQ { descriptor, .. } => (
-                        descriptor.pretty_name,
-                        &descriptor.data,
-                        descriptor.suffix,
-                    ),
+                    PropertyDescriptorWrapper::SelectEQ { descriptor, .. } => {
+                        (descriptor.pretty_name, &descriptor.data, descriptor.suffix)
+                    }
                 };
                 data.as_ref()
                     .map(|data| format!("{:<padding$} {}{}", name.to_string() + ":", data, suffix))

@@ -39,7 +39,10 @@ impl EqSession {
     /// flag so the next `sync_if_reconnected` call pushes the active
     /// preset to the headset.
     pub fn bind_device(&mut self, device: &mut dyn Device) {
-        self.active = device.get_device_state().device_properties.can_set_equalizer;
+        self.active = device
+            .get_device_state()
+            .device_properties
+            .can_set_equalizer;
         if !self.active {
             return;
         }
