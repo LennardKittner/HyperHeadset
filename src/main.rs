@@ -29,14 +29,16 @@ fn main() {
     use clap::ArgAction;
     use std::sync::mpsc;
 
-    use hyper_headset::devices::DeviceEvent;
+    use hyper_headset::devices::{DeviceEvent, DeviceProperties};
     use hyper_headset::VERBOSE;
     use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy};
 
-    use crate::status_tray_not_linux::{TrayApp, TrayUserEvent};
+    use crate::status_tray_not_linux::TrayApp;
 
-    let event_loop: EventLoop<TrayUserEvent> = EventLoop::with_user_event().build().unwrap();
-    let proxy: EventLoopProxy<TrayUserEvent> = event_loop.create_proxy();
+    // The user event is the device state; `None` means no compatible device.
+    let event_loop: EventLoop<Option<DeviceProperties>> =
+        EventLoop::with_user_event().build().unwrap();
+    let proxy: EventLoopProxy<Option<DeviceProperties>> = event_loop.create_proxy();
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let (tx, rx) = mpsc::channel::<DeviceEvent>();
@@ -107,7 +109,7 @@ fn main() {
                 match connect_compatible_device() {
                     Ok(d) => break d,
                     Err(e) => {
-                        let _ = proxy.send_event(TrayUserEvent::Properties(None));
+                        let _ = proxy.send_event(None);
                         eprintln!("Connecting failed with error: {e}")
                     }
                 }
@@ -135,9 +137,7 @@ fn main() {
                     Ok(()) => (),
                     Err(error) => {
                         eprintln!("{error}");
-                        let _ = proxy.send_event(TrayUserEvent::Properties(Some(
-                            device.device_properties(),
-                        )));
+                        let _ = proxy.send_event(Some(device.device_properties()));
                         break; // exit tick loop to retry connection in the outer loop
                     }
                 };
@@ -186,8 +186,7 @@ fn main() {
                     }
                 }
 
-                let _ =
-                    proxy.send_event(TrayUserEvent::Properties(Some(device.device_properties())));
+                let _ = proxy.send_event(Some(device.device_properties()));
                 run_counter += 1;
             }
         }

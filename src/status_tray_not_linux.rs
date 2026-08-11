@@ -182,17 +182,12 @@ fn render_windows_battery_icon_rgba(key: WindowsIconKey) -> Vec<u8> {
 
 type CallbackMap = Arc<Mutex<HashMap<MenuId, Box<dyn Fn() + Send + Sync>>>>;
 
-/// Events delivered to the tray through the winit event loop.
-pub enum TrayUserEvent {
-    /// New device state from the main loop; `None` means no compatible device.
-    Properties(Option<DeviceProperties>),
-}
-
 pub struct TrayApp {
     pub tray_icon: Option<TrayIcon>,
     pub sender: Sender<DeviceEvent>,
     #[cfg_attr(not(feature = "eq-support"), allow(dead_code))]
-    event_proxy: Arc<Mutex<EventLoopProxy<TrayUserEvent>>>,
+    /// Sends new device state to the tray; `None` means no compatible device.
+    event_proxy: Arc<Mutex<EventLoopProxy<Option<DeviceProperties>>>>,
     callbacks: CallbackMap,
     current_state: Option<Option<DeviceProperties>>,
     /// Target preset of an in-flight EQ switch, so the menu gives instant visual
@@ -211,7 +206,7 @@ pub struct TrayApp {
     current_icon_key: Option<WindowsIconKey>,
 }
 
-impl ApplicationHandler<TrayUserEvent> for TrayApp {
+impl ApplicationHandler<Option<DeviceProperties>> for TrayApp {
     fn new_events(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, cause: StartCause) {
         if cause == StartCause::Init {
             #[cfg(target_os = "windows")]
@@ -248,10 +243,12 @@ impl ApplicationHandler<TrayUserEvent> for TrayApp {
         }
     }
 
-    fn user_event(&mut self, _el: &winit::event_loop::ActiveEventLoop, event: TrayUserEvent) {
-        match event {
-            TrayUserEvent::Properties(device_properties) => self.update(device_properties),
-        }
+    fn user_event(
+        &mut self,
+        _el: &winit::event_loop::ActiveEventLoop,
+        device_properties: Option<DeviceProperties>,
+    ) {
+        self.update(device_properties);
     }
 
     fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
@@ -266,7 +263,10 @@ impl ApplicationHandler<TrayUserEvent> for TrayApp {
 }
 
 impl TrayApp {
-    pub fn new(sender: Sender<DeviceEvent>, event_proxy: EventLoopProxy<TrayUserEvent>) -> Self {
+    pub fn new(
+        sender: Sender<DeviceEvent>,
+        event_proxy: EventLoopProxy<Option<DeviceProperties>>,
+    ) -> Self {
         let callbacks: CallbackMap = Arc::new(Mutex::new(HashMap::new()));
 
         let callbacks_clone = Arc::clone(&callbacks);
@@ -623,8 +623,8 @@ impl TrayApp {
                     // Use plain MenuItem (not CheckMenuItem): the active state is conveyed
                     // via the label prefix, matching the Linux tray's StandardItem menu.
                     // Cloned once so each click callback can resend it through the existing
-                    // `TrayUserEvent::Properties` channel (rather than a bespoke event) to
-                    // force an immediate menu rebuild that reflects the pending transition.
+                    // device-state event (rather than a bespoke event) to force an immediate
+                    // menu rebuild that reflects the pending transition.
                     let device_properties_for_refresh = device_properties.clone();
                     for option_name in &options {
                         let label = if pending_target == Some(option_name.as_str()) {
@@ -657,9 +657,10 @@ impl TrayApp {
                                 // Device state hasn't changed, only the pending indicator has;
                                 // resending it forces `update()` to rebuild the menu now
                                 // instead of waiting for the main loop's next real update.
-                                let _ = proxy.lock().unwrap().send_event(
-                                    TrayUserEvent::Properties(Some(refresh_properties.clone())),
-                                );
+                                let _ = proxy
+                                    .lock()
+                                    .unwrap()
+                                    .send_event(Some(refresh_properties.clone()));
                             }),
                         );
                         let _ = submenu.append(&entry);
