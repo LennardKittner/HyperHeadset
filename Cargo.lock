@@ -1763,7 +1763,7 @@ dependencies = [
 
 [[package]]
 name = "hyper_headset"
-version = "1.9.1"
+version = "1.10.0"
 dependencies = [
  "cfg-if 1.0.4",
  "clap 4.5.58",
