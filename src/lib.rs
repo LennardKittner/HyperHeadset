@@ -34,6 +34,7 @@ macro_rules! debug_println {
 pub const UDEV_RULE_PATH_SYSTEM: &str = "/etc/udev/rules.d/99-HyperHeadset.rules";
 pub const UDEV_RULE_PATH_USER: &str = "/usr/lib/udev/rules.d/99-HyperHeadset.rules";
 pub const UDEV_RULES: &str = include_str!("./../99-HyperHeadset.rules");
+pub const NO_AUTO_UDEV_ENV: &str = "HYPERHEADSET_NO_AUTO_UDEV";
 
 #[derive(Debug)]
 pub enum RuleState {
@@ -199,6 +200,10 @@ fn handle_udev_rule_user_interaction(path: &str, ask_message: &str, decline_mess
 
 #[cfg(target_os = "linux")]
 pub fn prompt_user_for_udev_rule() {
+    if matches!(std::env::var(NO_AUTO_UDEV_ENV).as_deref(), Ok("1" | "true")) {
+        println!("Automatic udev rules check disabled by the {NO_AUTO_UDEV_ENV} environment variable.");
+        return;
+    }
     let user_rule_state = check_rule(UDEV_RULE_PATH_USER, UDEV_RULES);
     let system_rule_state = check_rule(UDEV_RULE_PATH_SYSTEM, UDEV_RULES);
 

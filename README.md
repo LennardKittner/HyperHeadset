@@ -60,6 +60,8 @@ You will be prompted to allow the installation.
 
 If automatic installation fails, you can install them manually (see Prerequisites -> Udev below)
 
+Set `HYPERHEADSET_NO_AUTO_UDEV` to `1` or `true` before launching to disable the automatic check.
+
 ## Build from Source
 
 To build both applications, use:
