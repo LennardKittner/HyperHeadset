@@ -72,15 +72,19 @@ pub fn act_as_askpass_handler() -> ! {
 }
 
 #[cfg(target_os = "linux")]
-pub fn update_rule(path: &str, rules: &str) {
+pub fn update_rule(path: &str, fall_back_path: &str, rules: &str) {
     let status = if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
         Command::new("sudo")
             .arg("sh")
             .arg("-c")
             .arg(format!(
-                "echo {} > {} && udevadm control --reload-rules && udevadm trigger",
+                "(printf '%s\\n' {} > {} || printf '%s\\n' {} > {}) && \
+                    udevadm control --reload-rules && \
+                    udevadm trigger",
                 shell_escape::escape(rules.into()),
-                shell_escape::escape(path.into())
+                shell_escape::escape(path.into()),
+                shell_escape::escape(rules.into()),
+                shell_escape::escape(fall_back_path.into()),
             ))
             .status()
     } else {
@@ -90,9 +94,13 @@ pub fn update_rule(path: &str, rules: &str) {
             .arg("sh")
             .arg("-c")
             .arg(format!(
-                "echo {} > {} && udevadm control --reload-rules && udevadm trigger",
+                "(printf '%s\\n' {} > {} || printf '%s\\n' {} > {}) && \
+                    udevadm control --reload-rules && \
+                    udevadm trigger",
                 shell_escape::escape(rules.into()),
-                shell_escape::escape(path.into())
+                shell_escape::escape(path.into()),
+                shell_escape::escape(rules.into()),
+                shell_escape::escape(fall_back_path.into()),
             ))
             .status()
     };
@@ -126,7 +134,7 @@ fn show_message(message: &str) {
 #[cfg(target_os = "linux")]
 fn print_udev_rules_diff(path: &str, expected_rules: &str) {
     use std::io::Write;
-    if !std::fs::metadata(path).is_ok() {
+    if std::fs::metadata(path).is_err() {
         return;
     }
 
@@ -172,7 +180,12 @@ fn print_udev_rules_diff(path: &str, expected_rules: &str) {
 }
 
 #[cfg(target_os = "linux")]
-fn handle_udev_rule_user_interaction(path: &str, ask_message: &str, decline_message: &str) {
+fn handle_udev_rule_user_interaction(
+    path: &str,
+    fall_back_path: &str,
+    ask_message: &str,
+    decline_message: &str,
+) {
     if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
         print_udev_rules_diff(path, UDEV_RULES);
         print!("{ask_message} (y/N): ");
@@ -180,7 +193,7 @@ fn handle_udev_rule_user_interaction(path: &str, ask_message: &str, decline_mess
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
         if matches!(input.trim(), "y" | "Y") {
-            update_rule(path, UDEV_RULES);
+            update_rule(path, fall_back_path, UDEV_RULES);
         } else {
             println!("{decline_message}");
         }
@@ -190,7 +203,7 @@ fn handle_udev_rule_user_interaction(path: &str, ask_message: &str, decline_mess
         .unwrap_or(Choice::No)
         == Choice::Yes
     {
-        update_rule(path, UDEV_RULES);
+        update_rule(path, fall_back_path, UDEV_RULES);
     } else {
         let _ = dialog::Message::new(decline_message.to_string())
             .title("HyperHeadset")
@@ -201,7 +214,9 @@ fn handle_udev_rule_user_interaction(path: &str, ask_message: &str, decline_mess
 #[cfg(target_os = "linux")]
 pub fn prompt_user_for_udev_rule() {
     if matches!(std::env::var(NO_AUTO_UDEV_ENV).as_deref(), Ok("1" | "true")) {
-        println!("Automatic udev rules check disabled by the {NO_AUTO_UDEV_ENV} environment variable.");
+        println!(
+            "Automatic udev rules check disabled by the {NO_AUTO_UDEV_ENV} environment variable."
+        );
         return;
     }
     let user_rule_state = check_rule(UDEV_RULE_PATH_USER, UDEV_RULES);
@@ -211,22 +226,21 @@ pub fn prompt_user_for_udev_rule() {
     match (user_rule_state, system_rule_state) {
         (RuleState::RuleMatch(true), _) => (),
         (_, RuleState::RuleMatch(true)) => (),
-
         (RuleState::RuleMatch(false), _) | (RuleState::RuleExists(true), _) => {
-            handle_udev_rule_user_interaction(UDEV_RULE_PATH_USER,
+            handle_udev_rule_user_interaction(UDEV_RULE_PATH_USER, UDEV_RULE_PATH_SYSTEM,
                 &format!("Udev rules at {UDEV_RULE_PATH_USER} do not have the expected value. Do you want to recreate them?"), 
                 "Your headset may not be recognized without the correct udev rules.");
         }
         (RuleState::RuleExists(false), RuleState::RuleMatch(false))
         | (RuleState::RuleExists(false), RuleState::RuleExists(true)) => {
-            handle_udev_rule_user_interaction(UDEV_RULE_PATH_SYSTEM,
+            handle_udev_rule_user_interaction(UDEV_RULE_PATH_SYSTEM, UDEV_RULE_PATH_USER,
                 &format!("Udev rules at {UDEV_RULE_PATH_SYSTEM} do not have the expected value. Do you want to recreate them?"), 
                 "Your headset may not be recognized without the correct udev rules.");
         }
-
         (RuleState::RuleExists(false), RuleState::RuleExists(false)) => {
             handle_udev_rule_user_interaction(
                 UDEV_RULE_PATH_USER,
+                UDEV_RULE_PATH_SYSTEM,
                 &format!("No udev rules found. Do you want to create {UDEV_RULE_PATH_USER}?"),
                 "Without udev rules your headset can only be accessed when running as root.",
             );
@@ -348,7 +362,7 @@ pub fn copy_to_clipboard(text: &str) -> bool {
 
         // Try xclip (X11)
         if let Ok(mut child) = std::process::Command::new("xclip")
-            .args(&["-selection", "clipboard"])
+            .args(["-selection", "clipboard"])
             .stdin(std::process::Stdio::piped())
             .spawn()
         {
@@ -363,7 +377,7 @@ pub fn copy_to_clipboard(text: &str) -> bool {
 
         // Try xsel (X11 alternative)
         if let Ok(mut child) = std::process::Command::new("xsel")
-            .args(&["--clipboard", "--input"])
+            .args(["--clipboard", "--input"])
             .stdin(std::process::Stdio::piped())
             .spawn()
         {
