@@ -53,7 +53,7 @@ yay -S hyper-headset-bin
 
 ### Prebuilt Binary (Linux/MacOS/Windows)
 
-Download from [GitHub releases](https://github.com/LennardKittner/HyperHeadset/releases).
+Download from [GitHub releases](https://github.com/LennardKittner/HyperHeadset/releases). Or install it via [crates.io](https://crates.io/crates/hyper_headset) `cargo install hyper_headset`.
 
 ⚠️**Linux Only**: The required udev rules will be installed automatically when the program is launched if they are missing.
 You will be prompted to allow the installation.
@@ -243,9 +243,9 @@ Because the action only toggles Discord's state, you may need to synchronize it 
 ## Contributing / TODOs
 
 - [ ] Add Docs
-- [ ] Add to crates.io
 - [ ] Let CLI periodically output the state
 - [ ] Waybar applet
+- [x] Add to crates.io
 - [x] Update ksni
 - [x] Optional CLI output in JSON
 - [x] Menu bar app for MacOS.
