@@ -4,6 +4,11 @@ version = "1.10.0"
 edition = "2021"
 authors = ["Lennard Kittner"]
 description = "A CLI and tray application for monitoring and managing HyperX headsets."
+readme = "README.md"
+repository = "https://github.com/LennardKittner/HyperHeadset"
+license = "MIT"
+keywords = ["battery-monitor", "headset", "headset-control", "hyperx", "tray-application"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4.5.32", features = ["derive"] }
