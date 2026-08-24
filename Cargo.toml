@@ -9,6 +9,7 @@ repository = "https://github.com/LennardKittner/HyperHeadset"
 license = "MIT"
 keywords = ["battery-monitor", "headset", "headset-control", "hyperx", "tray-application"]
 categories = ["command-line-utilities"]
+exclude = ["/src/bin/packet_tester.rs"]
 
 [dependencies]
 clap = { version = "4.5.32", features = ["derive"] }
