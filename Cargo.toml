@@ -25,7 +25,8 @@ eq-editor = ["eq-support", "ratatui", "crossterm"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 dialog = "0.3.0"
-ksni = "0.2.0"
+tokio = "1.53.1"
+ksni = "0.3.6"
 shell-escape = "0.1.5"
 dbus = "0.9"
 freedesktop-icons = "0.4.0"

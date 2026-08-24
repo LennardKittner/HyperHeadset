@@ -242,11 +242,11 @@ Because the action only toggles Discord's state, you may need to synchronize it 
 
 ## Contributing / TODOs
 
-- [ ] Update ksni
 - [ ] Add Docs
 - [ ] Add to crates.io
 - [ ] Let CLI periodically output the state
 - [ ] Waybar applet
+- [x] Update ksni
 - [x] Optional CLI output in JSON
 - [x] Menu bar app for MacOS.
 - [x] Windows support

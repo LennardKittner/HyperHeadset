@@ -199,7 +199,8 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
-fn main() {
+#[tokio::main]
+async fn main() {
     use clap::ArgAction;
     use clap::{Arg, Command};
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
@@ -279,7 +280,13 @@ fn main() {
     let refresh_interval = Duration::from_secs(refresh_interval);
 
     let (tx, rx) = mpsc::channel();
-    let tray_handler = TrayHandler::new(StatusTray::new(tx, monochrome_icons));
+    let tray_handler = match TrayHandler::new(StatusTray::new(tx, monochrome_icons)).await {
+        Ok(tray) => tray,
+        Err(e) => {
+            eprintln!("Failed to create the tray with error: {e:?}");
+            return;
+        }
+    };
 
     #[cfg(feature = "eq-support")]
     let mut eq = EqSession::new();
@@ -290,7 +297,7 @@ fn main() {
             match connect_compatible_device() {
                 Ok(d) => break d,
                 Err(e) => {
-                    tray_handler.clear_state();
+                    tray_handler.clear_state().await;
                     eprintln!("Connecting failed with error: {e}");
                 }
             }
@@ -318,7 +325,7 @@ fn main() {
                 Ok(()) => (),
                 Err(error) => {
                     eprintln!("{error}");
-                    tray_handler.update(&device.device_properties());
+                    tray_handler.update(&device.device_properties()).await;
                     break; // exit tick loop to retry connection in the outer loop
                 }
             };
@@ -367,7 +374,7 @@ fn main() {
                 }
             }
 
-            tray_handler.update(&device.device_properties());
+            tray_handler.update(&device.device_properties()).await;
 
             run_counter += 1;
         }

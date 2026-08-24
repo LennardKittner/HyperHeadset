@@ -3,7 +3,7 @@ use std::sync::mpsc::Sender;
 use hyper_headset::devices::{format_int_value, DeviceEvent, DeviceProperties, PropertyType};
 use ksni::{
     menu::{StandardItem, SubMenu},
-    Handle, MenuItem, ToolTip, Tray, TrayService,
+    Handle, MenuItem, ToolTip, Tray, TrayMethods,
 };
 
 use crate::tray_battery_icon_state::TrayBatteryIconState;
@@ -22,37 +22,39 @@ const NO_COMPATIBLE_DEVICE: &str = "No compatible device found.\nIs the dongle p
 const HEADSET_NOT_CONNECTED: &str = "Headset is not connected";
 
 impl TrayHandler {
-    pub fn new(tray: StatusTray) -> Self {
-        let tray_service = TrayService::new(tray);
-        let handle = tray_service.handle();
-        tray_service.spawn();
-        TrayHandler { handle }
+    pub async fn new(tray: StatusTray) -> Result<Self, ksni::Error> {
+        let handle = tray.spawn().await?;
+        Ok(TrayHandler { handle })
     }
 
-    pub fn update(&self, properties: &DeviceProperties) {
+    pub async fn update(&self, properties: &DeviceProperties) {
         let device_properties = properties.clone();
-        self.handle.update(|tray| {
-            #[cfg(feature = "eq-support")]
-            if let Some(ref to) = tray.pending_eq_transition {
-                // Clear pending transition once the target preset is confirmed active and synced.
-                if device_properties.active_eq_preset.as_deref() == Some(to.as_str())
-                    && device_properties.eq_synced == Some(true)
+        self.handle
+            .update(|tray| {
+                #[cfg(feature = "eq-support")]
+                if let Some(ref to) = tray.pending_eq_transition {
+                    // Clear pending transition once the target preset is confirmed active and synced.
+                    if device_properties.active_eq_preset.as_deref() == Some(to.as_str())
+                        && device_properties.eq_synced == Some(true)
+                    {
+                        tray.pending_eq_transition = None;
+                    }
+                }
+                tray.device_properties = Some(device_properties);
+            })
+            .await;
+    }
+
+    pub async fn clear_state(&self) {
+        self.handle
+            .update(|tray| {
+                #[cfg(feature = "eq-support")]
                 {
                     tray.pending_eq_transition = None;
                 }
-            }
-            tray.device_properties = Some(device_properties);
-        })
-    }
-
-    pub fn clear_state(&self) {
-        self.handle.update(|tray| {
-            #[cfg(feature = "eq-support")]
-            {
-                tray.pending_eq_transition = None;
-            }
-            tray.device_properties = None;
-        })
+                tray.device_properties = None;
+            })
+            .await;
     }
 }
 
