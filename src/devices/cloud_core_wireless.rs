@@ -1,9 +1,9 @@
-use crate::{
-    debug_println,
-    devices::{ChargingStatus, Device, DeviceEvent, DeviceState},
-};
-use std::time::Duration;
+use circular_buffer::FixedCircularBuffer;
 
+use crate::devices::{ChargingStatus, Device, DeviceEvent, DeviceState};
+use std::{time::Duration, vec};
+
+const VOLTAGE_AVERAGE_WINDOW: usize = 20;
 const HP: u16 = 0x03F0;
 const HYPERX: u16 = 0x0951;
 pub const VENDOR_IDS: [u16; 2] = [HP, HYPERX];
@@ -28,20 +28,26 @@ const BATTERY_PACKET: [u8; 64] = {
 
 pub struct CloudCoreWireless {
     state: DeviceState,
+    // contains the last voltage measurements
+    // use 32bit to prevent overflow when summing
+    voltage_history: FixedCircularBuffer<u32, VOLTAGE_AVERAGE_WINDOW>,
 }
 
 impl CloudCoreWireless {
     pub fn new_from_state(state: DeviceState) -> Self {
         let mut state = state;
         state.device_properties.connected = Some(true);
-        CloudCoreWireless { state }
+        CloudCoreWireless {
+            state,
+            voltage_history: FixedCircularBuffer::new(),
+        }
     }
 }
 
-//TODO: use real THRESHOLDS
+// 50v offset from 0 to 5 after that 10v per 5%
 const THRESHOLDS: [u16; 20] = [
-    3328, 3584, 3674, 3704, 3732, 3744, 3754, 3764, 3774, 3784, 3794, 3804, 3824, 3840, 3860, 3890,
-    3910, 3940, 3960, 3970,
+    3380, 3430, 3440, 3450, 3460, 3470, 3480, 3490, 3500, 3510, 3520, 3530, 3540, 3550, 3560, 3570,
+    3580, 3590, 3600, 3610,
 ];
 
 const PERCENTAGES: [u8; 20] = [
@@ -105,7 +111,7 @@ impl Device for CloudCoreWireless {
         }
     }
 
-    fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
+    fn get_event_from_device_response(&mut self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
         println!("Read packet: {:?}", response);
         if response[0] == 0xFF && response[1] == 0x12 {
             let lower = response[11] as u32;
@@ -116,7 +122,12 @@ impl Device for CloudCoreWireless {
                 (((upper as u16) << 8) | (lower as u16))
             );
             let mut events = Vec::new();
-            let index = match THRESHOLDS.binary_search(&(((upper as u16) << 8) | (lower as u16))) {
+            let voltage = ((upper as u16) << 8) | (lower as u16);
+            self.voltage_history.push_back(voltage as u32);
+            // calculate moving average
+            let voltage = (self.voltage_history.iter().sum::<u32>()
+                / self.voltage_history.len() as u32) as u16;
+            let index = match THRESHOLDS.binary_search(&voltage) {
                 Ok(i) => i,
                 Err(0) => 0,
                 Err(i) => i - 1,

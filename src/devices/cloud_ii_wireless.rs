@@ -163,7 +163,7 @@ impl Device for CloudIIWireless {
         None
     }
 
-    fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
+    fn get_event_from_device_response(&mut self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
         debug_println!("Read packet: {:?}", response);
         if response.len() < 7 {
             return None;

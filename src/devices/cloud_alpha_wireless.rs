@@ -182,7 +182,7 @@ impl Device for CloudAlphaWireless {
         None
     }
 
-    fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
+    fn get_event_from_device_response(&mut self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
         debug_println!("Read packet: {:?}", response);
         if response[0] != BASE_PACKET[0] || response[1] != BASE_PACKET[1] {
             return None;

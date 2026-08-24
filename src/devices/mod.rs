@@ -899,7 +899,7 @@ pub trait Device {
     fn set_noise_gate_packet(&self, _enable: bool) -> Option<Vec<u8>> {
         None
     }
-    fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
+    fn get_event_from_device_response(&mut self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
     fn get_device_state(&self) -> &DeviceState;
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
     fn prepare_write(&mut self) {}

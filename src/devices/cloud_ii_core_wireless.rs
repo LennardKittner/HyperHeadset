@@ -187,7 +187,7 @@ impl Device for CloudIICoreWireless {
         Some(tmp)
     }
 
-    fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
+    fn get_event_from_device_response(&mut self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
         debug_println!("Read packet: {:?}", response);
         if response[0] != 102 {
             return None;

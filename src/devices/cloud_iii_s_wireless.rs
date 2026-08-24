@@ -261,7 +261,7 @@ impl Device for CloudIIISWireless {
         Some(make_equalizer_band_packet(band_index, db_value))
     }
 
-    fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
+    fn get_event_from_device_response(&mut self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
         debug_println!("Read packet: {response:?}");
 
         match response[0] {
