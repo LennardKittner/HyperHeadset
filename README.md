@@ -32,6 +32,7 @@ Both the CLI and tray applications are compatible with Linux, MacOS, and Windows
 - HyperX Cloud Flight Wireless
 - HyperX Cloud Alpha Wireless
 - [WIP] HyperX Cloud Mix 2 ([Test Branch](https://github.com/LennardKittner/HyperHeadset/tree/cloud_mix_2) [Give feedback](https://github.com/LennardKittner/HyperHeadset/issues/35))
+- [WIP] HyperX Cloud Core Wireless ([Test Branch](https://github.com/LennardKittner/HyperHeadset/tree/cloud-core) [Help add support](https://github.com/LennardKittner/HyperHeadset/issues/59))
 
 If your headset is not supported, feel free to open an issue; be sure to include the name, product ID, and vendor ID.
 
