@@ -229,9 +229,11 @@ impl Tray for StatusTray {
                     );
                 }
                 hyper_headset::devices::PropertyDescriptorWrapper::Int(property, options) => {
-                    let Some(current_value) = property.data else {
+                    if property.data.is_none()
+                        && property.property_type != PropertyType::ReadWrite
+                    {
                         continue;
-                    };
+                    }
                     let create_event = property.create_event;
                     let sub_menu = options
                         .iter()
@@ -239,8 +241,7 @@ impl Tray for StatusTray {
                             let update_sender = self.update_sender.clone();
                             StandardItem {
                                 label: format_int_value(*val, property.suffix),
-                                enabled: property.property_type == PropertyType::ReadWrite
-                                    && property.data.is_some(),
+                                enabled: property.property_type == PropertyType::ReadWrite,
                                 activate: Box::new(move |_| {
                                     if let Some(command) = (create_event)(*val) {
                                         let _ = update_sender.send(command);
@@ -251,15 +252,19 @@ impl Tray for StatusTray {
                             .into()
                         })
                         .collect();
+                    let label = if let Some(current_value) = property.data {
+                        format!(
+                            "{}: {}",
+                            property.pretty_name,
+                            format_int_value(current_value, property.suffix)
+                        )
+                    } else {
+                        format!("{}: Unknown", property.pretty_name)
+                    };
                     menu_items.push(
                         SubMenu {
-                            label: format!(
-                                "{}: {}",
-                                property.pretty_name,
-                                format_int_value(current_value, property.suffix)
-                            ),
-                            enabled: property.property_type == PropertyType::ReadWrite
-                                && property.data.is_some(),
+                            label,
+                            enabled: property.property_type == PropertyType::ReadWrite,
                             submenu: sub_menu,
                             ..Default::default()
                         }
@@ -267,28 +272,62 @@ impl Tray for StatusTray {
                     );
                 }
                 hyper_headset::devices::PropertyDescriptorWrapper::Bool(property) => {
-                    let Some(current_value) = property.data else {
-                        continue;
-                    };
                     let create_event = property.create_event;
-                    let update_sender = self.update_sender.clone();
-                    menu_items.push(
-                        StandardItem {
-                            label: format!(
-                                "{}: {}{}",
-                                property.pretty_name, current_value, property.suffix
-                            ),
-                            enabled: property.property_type == PropertyType::ReadWrite
-                                && property.data.is_some(),
-                            activate: Box::new(move |_| {
-                                if let Some(command) = (create_event)(!current_value) {
-                                    let _ = update_sender.send(command);
-                                }
-                            }),
-                            ..Default::default()
-                        }
-                        .into(),
-                    );
+                    if let Some(current_value) = property.data {
+                        let update_sender = self.update_sender.clone();
+                        menu_items.push(
+                            StandardItem {
+                                label: format!(
+                                    "{}: {}{}",
+                                    property.pretty_name, current_value, property.suffix
+                                ),
+                                enabled: property.property_type == PropertyType::ReadWrite,
+                                activate: Box::new(move |_| {
+                                    if let Some(command) = (create_event)(!current_value) {
+                                        let _ = update_sender.send(command);
+                                    }
+                                }),
+                                ..Default::default()
+                            }
+                            .into(),
+                        );
+                    } else if property.property_type == PropertyType::ReadWrite {
+                        let update_sender_true = self.update_sender.clone();
+                        let update_sender_false = self.update_sender.clone();
+                        let sub_menu = vec![
+                            StandardItem {
+                                label: "Enable".to_string(),
+                                enabled: true,
+                                activate: Box::new(move |_| {
+                                    if let Some(command) = (create_event)(true) {
+                                        let _ = update_sender_true.send(command);
+                                    }
+                                }),
+                                ..Default::default()
+                            }
+                            .into(),
+                            StandardItem {
+                                label: "Disable".to_string(),
+                                enabled: true,
+                                activate: Box::new(move |_| {
+                                    if let Some(command) = (create_event)(false) {
+                                        let _ = update_sender_false.send(command);
+                                    }
+                                }),
+                                ..Default::default()
+                            }
+                            .into(),
+                        ];
+                        menu_items.push(
+                            SubMenu {
+                                label: format!("{}: Unknown", property.pretty_name),
+                                enabled: true,
+                                submenu: sub_menu,
+                                ..Default::default()
+                            }
+                            .into(),
+                        );
+                    }
                 }
                 hyper_headset::devices::PropertyDescriptorWrapper::String(property) => {
                     let Some(current_value) = property.data else {

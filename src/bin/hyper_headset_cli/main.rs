@@ -246,8 +246,23 @@ fn create_command(device: &Result<Headset, DeviceError>) -> Command {
                      Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0",
                 )
                 .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_equalizer)),
-        )
-        .arg(
+        );
+
+    #[cfg(feature = "eq-support")]
+    {
+        cmd = cmd.arg(
+            Arg::new("eq-preset")
+                .long("eq-preset")
+                .required(false)
+                .value_name("PRESET")
+                .help(
+                    "Apply an EQ preset by name (e.g. 'Flat', 'Bass Boost', 'Treble Boost', 'V-Shape', 'Vocal').",
+                )
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_equalizer)),
+        );
+    }
+
+    cmd = cmd.arg(
             Arg::new("verbose")
                 .long("verbose")
                 .short('v')
@@ -329,6 +344,11 @@ fn main() {
             std::process::exit(1)
         }
     };
+
+    if let Err(e) = device.active_refresh_state() {
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
 
     let _can_set_eq = device.device_properties().can_set_equalizer;
 
@@ -437,6 +457,10 @@ fn main() {
     if let Some(activate) = matches.get_one::<bool>("activate-noise-gate") {
         commands.push(DeviceEvent::NoiseGateActive(*activate));
     }
+    #[cfg(feature = "eq-support")]
+    if let Some(preset_name) = matches.get_one::<String>("eq-preset") {
+        commands.push(DeviceEvent::EqualizerPreset(preset_name.clone()));
+    }
 
     for command in commands {
         if let Err(e) = device.try_apply(command) {
@@ -508,6 +532,15 @@ fn main() {
                         std::process::exit(1);
                     }
                     std::thread::sleep(Duration::from_millis(3));
+                }
+                #[cfg(feature = "eq-support")]
+                {
+                    use hyper_headset::eq::presets;
+                    let profile = presets::SelectedProfile {
+                        active_preset: Some("Custom".to_string()),
+                        synced: true,
+                    };
+                    let _ = presets::save_selected_profile(&profile);
                 }
             } else {
                 eprintln!("ERROR: Equalizer control is not supported on this device");

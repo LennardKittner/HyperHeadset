@@ -7,6 +7,7 @@ use dialog::{Choice, DialogBox};
 
 // #![warn(missing_docs)]
 pub mod devices;
+pub mod device_settings;
 #[cfg(feature = "eq-support")]
 pub mod eq;
 
