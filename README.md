@@ -26,7 +26,7 @@ Both the CLI and tray applications are compatible with Linux, MacOS, and Windows
 - HyperX Cloud II Wireless HyperX vendor ID
 - HyperX Cloud II Core Wireless
 - HyperX Cloud III Wireless
-- HyperX Cloud III S Wireless (known issue: may not respond correctly to some queries, see: [#36](https://github.com/LennardKittner/HyperHeadset/issues/36))
+- HyperX Cloud III S Wireless (settings are persisted locally and synchronized on connection; Linux Bluetooth fallback supported for live battery monitoring; see: [#36](https://github.com/LennardKittner/HyperHeadset/issues/36))
 - HyperX Cloud Stinger 2 Wireless
 - HyperX Cloud Flight S
 - HyperX Cloud Flight Wireless
@@ -73,13 +73,20 @@ If the required udev rules are missing on Linux, the program will prompt you to 
 
 ### Build with features
 
-If your headset supports EQ (e.g. Cloud III S Wireless), add `--features eq-editor` for the full EQ experience (tray presets + TUI editor):
+The full EQ experience (`eq-editor`, including tray presets and the interactive TUI editor) is enabled by default:
 
 ```sh
-cargo build --release --features eq-editor
+cargo build --release
 ```
 
-Use `--features eq-support` instead if you only want tray EQ presets without the TUI editor.
+- To build with tray EQ presets only (without the interactive TUI editor):
+  ```sh
+  cargo build --release --no-default-features --features eq-support
+  ```
+- To build minimal binaries without EQ support:
+  ```sh
+  cargo build --release --no-default-features
+  ```
 
 ## Prerequisites
 
@@ -195,6 +202,8 @@ Options:
           Others unchanged. Use alone or with --eq-profile (overrides on top of the profile).
           See --eq-profile for band/dB reference.
           Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0
+      --eq-preset <PRESET>
+          Apply an EQ preset by name (e.g. 'Flat', 'Bass Boost', 'Treble Boost', 'V-Shape', 'Vocal').
   -v, --verbose
           Use verbose output
       --json
@@ -242,6 +251,24 @@ For the action, select _Toggle Mute_, then click _Record Keybind_ and press the 
 
 Discord should now automatically mute and unmute when the headset does.
 Because the action only toggles Discord's state, you may need to synchronize it once by manually muting or unmuting Discord.
+
+### Equalizer & Presets
+
+For headsets that support hardware EQ (such as the Cloud III S Wireless):
+
+- **Interactive TUI Editor**: Run `hyper_headset_cli --eq` to open an interactive terminal interface for adjusting individual frequency bands with visual level meters.
+- **Presets**: Select built-in presets (`Flat`, `Bass Boost`, `Treble Boost`, `V-Shape`, `Vocal`) directly from the system tray menu or apply them via the CLI with `--eq-preset <PRESET>`.
+- **Custom Tuning**: Set full curves via `--eq-profile` or adjust specific frequencies using `--eq-band`. Custom presets stored in `~/.config/hyper_headset/eq_presets/` are automatically loaded into the tray menu.
+
+### Device Settings Persistence
+
+HyperHeadset automatically saves headset settings (sidetone, voice prompt, auto-shutdown timer, and last known battery level) to disk (`~/.config/hyper_headset/headset_settings.json`).
+
+For headsets whose USB dongle does not report current state over HID queries (such as the Cloud III S Wireless), saved settings are automatically synchronized to the headset upon connection. In addition, write-only properties can be controlled directly from the status tray menu or CLI.
+
+### Bluetooth Support (Linux)
+
+On Linux, HyperHeadset can monitor supported headsets over Bluetooth using BlueZ and the Airoha vendor BLE protocol. If no USB dongle is plugged in, or if the USB dongle reports disconnected while the headset is connected over Bluetooth, HyperHeadset automatically falls back to Bluetooth to monitor battery levels and status.
 
 ## Contributing / TODOs
 
