@@ -1,5 +1,3 @@
-use hidapi::HidError;
-
 use crate::{
     debug_println,
     devices::{ChargingStatus, Color, Device, DeviceEvent, DeviceState},
@@ -124,16 +122,19 @@ impl CloudIIISWireless {
 }
 
 impl Device for CloudIIISWireless {
-    fn write_hid_report(&mut self, packet: &[u8]) -> Result<(), HidError> {
-        self.get_device_state_mut()
-            .hid_device
-            .send_feature_report(packet)
-    }
+    // NOTE: no write_hid_report override — the default (Output report 0x020c
+    // via write(), Feature fallback on Windows) is correct. NGENUITY uses
+    // SET_REPORT Output; send_feature_report fails on Windows
+    // (HidD_SetFeature Incorrect function) and yields no answers on Linux.
+    // See issue #36.
 
+    // Cloud III S GET queries verified against NGENUITY init burst
+    // (03_ngenuity_restart.pcap): color 0x4d, battery 0x06 (answers
+    // 0c..06 <0-100>), sidetone 0x16, auto-shutdown 0x4b all answer via
+    // interrupt IN endpoint 0x84. Mute/voice-prompt/charging have no observed
+    // host query (mute arrives as 0x0D notification type 3), so they stay None.
     fn get_charging_packet(&self) -> Option<Vec<u8>> {
-        let mut packet = BASE_PACKET.to_vec();
-        packet[5] = CHARGE_STATE_COMMAND_ID;
-        Some(packet)
+        None
     }
 
     fn get_battery_packet(&self) -> Option<Vec<u8>> {
@@ -155,9 +156,7 @@ impl Device for CloudIIISWireless {
     }
 
     fn get_mute_packet(&self) -> Option<Vec<u8>> {
-        let mut packet = BASE_PACKET.to_vec();
-        packet[5] = GET_MIC_MUTE_COMMAND_ID;
-        Some(packet)
+        None
     }
 
     fn set_mute_packet(&self, mute: bool) -> Option<Vec<u8>> {
@@ -213,9 +212,7 @@ impl Device for CloudIIISWireless {
     }
 
     fn get_voice_prompt_packet(&self) -> Option<Vec<u8>> {
-        let mut packet = BASE_PACKET.to_vec();
-        packet[5] = GET_VOICE_PROMPT_COMMAND_ID;
-        Some(packet)
+        None
     }
 
     fn set_voice_prompt_packet(&self, enable: bool) -> Option<Vec<u8>> {
