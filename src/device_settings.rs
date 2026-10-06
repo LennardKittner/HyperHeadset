@@ -29,6 +29,11 @@ pub struct DeviceSettings {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub last_battery_level: Option<u8>,
+    #[cfg_attr(
+        feature = "eq-support",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub muted: Option<bool>,
 }
 
 pub fn settings_path() -> PathBuf {
@@ -88,15 +93,16 @@ pub fn update_setting(update: impl FnOnce(&mut DeviceSettings)) {
 
 /// For headsets that do not support reading state over their wireless connection
 /// (such as the Cloud III S 2.4 GHz USB dongle), sync saved user preferences
-/// (sidetone, voice prompt, auto-shutdown) to the headset upon connect.
+/// (voice prompt, auto-shutdown) to the headset upon connect.
+///
+/// NOTE: We deliberately do NOT sync sidetone here because sending a sidetone
+/// command causes the headset firmware to audibly announce "side tone activated"
+/// or "side tone deactivated" every time the application starts or reconnects.
+/// Instead, the last known sidetone state is restored into `DeviceProperties`
+/// in `init_capabilities()`.
 pub fn sync_headset_settings_if_needed(device: &mut Headset) {
     let settings = load_device_settings();
     if let Some(dev) = device.hid_mut() {
-        if dev.get_side_tone_packet().is_none() && dev.can_set_side_tone() {
-            if let Some(st) = settings.side_tone {
-                let _ = dev.try_apply(DeviceEvent::SideToneOn(st));
-            }
-        }
         if dev.get_voice_prompt_packet().is_none() && dev.can_set_voice_prompt() {
             if let Some(vp) = settings.voice_prompt {
                 let _ = dev.try_apply(DeviceEvent::VoicePrompt(vp));

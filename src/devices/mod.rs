@@ -429,9 +429,15 @@ impl DeviceState {
 
     fn update_self_with_event(&mut self, event: &DeviceEvent) {
         match event {
-            DeviceEvent::BatterLevel(level) => self.device_properties.battery_level = Some(*level),
+            DeviceEvent::BatterLevel(level) => {
+                self.device_properties.battery_level = Some(*level);
+                crate::device_settings::update_setting(|s| s.last_battery_level = Some(*level));
+            }
             DeviceEvent::Charging(status) => self.device_properties.charging = Some(*status),
-            DeviceEvent::Muted(status) => self.device_properties.muted = Some(*status),
+            DeviceEvent::Muted(status) => {
+                self.device_properties.muted = Some(*status);
+                crate::device_settings::update_setting(|s| s.muted = Some(*status));
+            }
             DeviceEvent::MicConnected(status) => {
                 self.device_properties.mic_connected = Some(*status)
             }
@@ -1084,6 +1090,7 @@ pub trait Device {
         let has_no_voice_prompt_query = self.get_voice_prompt_packet().is_none();
         let has_no_auto_shutdown_query = self.get_automatic_shut_down_packet().is_none();
         let has_no_battery_query = self.get_battery_packet().is_none();
+        let has_no_mute_query = self.get_mute_packet().is_none();
 
         let state = self.get_device_state_mut();
         if has_no_sidetone_query && can_set_side_tone {
@@ -1106,6 +1113,9 @@ pub trait Device {
             if let Some(battery) = settings.last_battery_level {
                 state.device_properties.battery_level = Some(battery);
             }
+        }
+        if has_no_mute_query && can_set_mute {
+            state.device_properties.muted = Some(settings.muted.unwrap_or(false));
         }
     }
 
@@ -1260,6 +1270,7 @@ pub trait Device {
                     if let Err(err) = self.write_hid_report(&packet) {
                         Err(format!("Failed to mute with error: {:?}", err))?;
                     }
+                    crate::device_settings::update_setting(|s| s.muted = Some(mute));
                 } else {
                     Err("ERROR: Microphone mute control is not supported on this device (hardware button only)")?;
                 }
