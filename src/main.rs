@@ -211,7 +211,9 @@ async fn main() {
     use status_tray::{StatusTray, TrayHandler};
 
     use hyper_headset::prompt_user_for_udev_rule;
-    use hyper_headset::{act_as_askpass_handler, VERBOSE};
+    use hyper_headset::{
+        act_as_askpass_handler, debug_println, is_default_microphone_muted, VERBOSE,
+    };
 
     if let Ok(name) = std::env::current_exe() {
         if let Some(name) = name.to_str() {
@@ -329,10 +331,21 @@ async fn main() {
                     break; // exit tick loop to retry connection in the outer loop
                 }
             };
-            if mute_state.is_some() && mute_state != device.device_properties().muted {
-                if let Some(enigo) = &mut enigo {
-                    if let Err(e) = enigo.key(Key::MicMute, Direction::Click) {
-                        eprintln!("Failed to press key on mute: {e}");
+            if let (Some(was_muted), Some(muted)) = (mute_state, device.device_properties().muted) {
+                // MicMute toggles the system mute, and some headsets (e.g. Cloud Alpha Wireless)
+                // follow the system mute. Pressing it when the system already matches would flip
+                // the headset and they'd keep toggling each other, so only press it to fix a
+                // mismatch. The key is still used (rather than muting directly) so desktops like
+                // KDE update their own mute state, tray icon and OSD.
+                if press_mute_key
+                    && was_muted != muted
+                    && is_default_microphone_muted() != Some(muted)
+                {
+                    debug_println!("Headset mute changed to {muted}, pressing MicMute");
+                    if let Some(enigo) = &mut enigo {
+                        if let Err(e) = enigo.key(Key::MicMute, Direction::Click) {
+                            eprintln!("Failed to press key on mute: {e}");
+                        }
                     }
                 }
             }
