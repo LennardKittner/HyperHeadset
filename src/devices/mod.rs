@@ -1057,6 +1057,9 @@ pub trait Device {
         let can_set_silent_mode = self.can_set_silent_mode();
         let can_set_equalizer = self.can_set_equalizer();
         let can_set_noise_gate = self.can_set_noise_gate();
+        // Write-only detection must happen before the mutable borrow below.
+        let has_no_mute_query = self.get_mute_packet().is_none();
+        let has_no_voice_prompt_query = self.get_voice_prompt_packet().is_none();
 
         // Now set them in device state
         let state = self.get_device_state_mut();
@@ -1069,6 +1072,24 @@ pub trait Device {
         state.device_properties.can_set_silent_mode = can_set_silent_mode;
         state.device_properties.can_set_equalizer = can_set_equalizer;
         state.device_properties.can_set_noise_gate = can_set_noise_gate;
+
+        // Write-only properties (no host query, e.g. Cloud III S mute/voice
+        // prompt — see issue #36) would stay None forever, and the tray/CLI
+        // hide properties with unknown state. Assume off so the controls
+        // exist and are clickable; successful SETs then keep session truth
+        // via the optimistic update in try_apply, and live device events
+        // (e.g. 0x0D mute notifications) overwrite it.
+        // NOTE: the physical button state is untracked until the device
+        // reports it — the label reflects software state.
+        if has_no_mute_query && can_set_mute && state.device_properties.muted.is_none() {
+            state.device_properties.muted = Some(false);
+        }
+        if has_no_voice_prompt_query
+            && can_set_voice_prompt
+            && state.device_properties.voice_prompt_on.is_none()
+        {
+            state.device_properties.voice_prompt_on = Some(false);
+        }
     }
 
     fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
@@ -1345,6 +1366,11 @@ pub trait Device {
             }
             _ => (),
         }
+        // Optimistic session truth: write-only properties (e.g. Cloud III S
+        // mute, which has no host query — see issue #36) would otherwise never
+        // update the UI after a successful SET. Refresh paths overwrite this
+        // with real answers whenever a query exists.
+        self.get_device_state_mut().update_self_with_event(&command);
         Ok(())
     }
 
