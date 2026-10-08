@@ -1090,6 +1090,32 @@ pub trait Device {
         self.get_event_from_device_response(&buf)
     }
 
+    /// Like `wait_for_updates`, but after the first report also reads every report already
+    /// queued. Reading only one report per tick lets a backlog build up, and acting on stale
+    /// mute reports flips the system mute back and forth.
+    fn drain_updates(&mut self, duration: Duration) -> Vec<DeviceEvent> {
+        // Upper bound so a device that never stops sending can't stall the tick loop.
+        const MAX_REPORTS: usize = 64;
+        let mut events = Vec::new();
+        let mut timeout = duration.as_millis() as i32;
+        for _ in 0..MAX_REPORTS {
+            let mut buf = self.get_response_buffer();
+            match self
+                .get_device_state()
+                .hid_device
+                .read_timeout(&mut buf[..], timeout)
+            {
+                Ok(res) if res > 0 => events.extend(
+                    self.get_event_from_device_response(&buf)
+                        .unwrap_or_default(),
+                ),
+                _ => break,
+            }
+            timeout = 0;
+        }
+        events
+    }
+
     fn get_query_packets(&self) -> Vec<Vec<u8>> {
         vec![
             self.get_wireless_connected_status_packet(),
@@ -1165,30 +1191,26 @@ pub trait Device {
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
         let mut request_active_refresh = false;
         if self.allow_passive_refresh() {
-            if let Some(events) = self.wait_for_updates(PASSIVE_REFRESH_TIME_OUT) {
-                for event in events {
-                    // Some headsets send this if they just turned on so we should refresh the
-                    // state
-                    if matches!(event, DeviceEvent::WirelessConnected(true)) {
-                        request_active_refresh = true;
-                    }
-                    self.get_device_state_mut().update_self_with_event(&event);
+            for event in self.drain_updates(PASSIVE_REFRESH_TIME_OUT) {
+                // Some headsets send this if they just turned on so we should refresh the
+                // state
+                if matches!(event, DeviceEvent::WirelessConnected(true)) {
+                    request_active_refresh = true;
                 }
+                self.get_device_state_mut().update_self_with_event(&event);
             }
         }
         if let Some(batter_packet) = self.get_battery_packet() {
             self.prepare_write();
             self.write_hid_report(&batter_packet)?;
             std::thread::sleep(RESPONSE_DELAY);
-            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
-                for event in events {
-                    // Some headsets send this if they just turned on so we should refresh the
-                    // state
-                    if matches!(event, DeviceEvent::WirelessConnected(true)) {
-                        request_active_refresh = true;
-                    }
-                    self.get_device_state_mut().update_self_with_event(&event);
+            for event in self.drain_updates(Duration::from_secs(1)) {
+                // Some headsets send this if they just turned on so we should refresh the
+                // state
+                if matches!(event, DeviceEvent::WirelessConnected(true)) {
+                    request_active_refresh = true;
                 }
+                self.get_device_state_mut().update_self_with_event(&event);
             }
         }
         if request_active_refresh {
