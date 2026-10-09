@@ -155,9 +155,16 @@ impl Headset {
     }
 }
 
-/// Connect to a compatible headset: a USB HID dongle if present, otherwise
-/// (on Linux) fall back to a Bluetooth-connected HyperX headset.
+/// Connect to a compatible headset: (on Linux) check for an active Bluetooth
+/// connection first, then USB HID dongle if present, otherwise fall back to
+/// Bluetooth.
 pub fn connect_compatible_device() -> Result<Headset, DeviceError> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(Some(bt)) = crate::bluetooth::BluetoothHeadset::find() {
+            return Ok(Headset::Bluetooth(bt));
+        }
+    }
     match connect_hid_device() {
         Ok(device) => Ok(Headset::Hid(device)),
         Err(error) => {
@@ -422,9 +429,15 @@ impl DeviceState {
 
     fn update_self_with_event(&mut self, event: &DeviceEvent) {
         match event {
-            DeviceEvent::BatterLevel(level) => self.device_properties.battery_level = Some(*level),
+            DeviceEvent::BatterLevel(level) => {
+                self.device_properties.battery_level = Some(*level);
+                crate::device_settings::update_setting(|s| s.last_battery_level = Some(*level));
+            }
             DeviceEvent::Charging(status) => self.device_properties.charging = Some(*status),
-            DeviceEvent::Muted(status) => self.device_properties.muted = Some(*status),
+            DeviceEvent::Muted(status) => {
+                self.device_properties.muted = Some(*status);
+                crate::device_settings::update_setting(|s| s.muted = Some(*status));
+            }
             DeviceEvent::MicConnected(status) => {
                 self.device_properties.mic_connected = Some(*status)
             }
@@ -584,7 +597,7 @@ impl DeviceProperties {
                         .automatic_shutdown_after
                         .map(|t| (t.as_secs() / 60) as u8),
                     suffix: "min",
-                    property_type: if self.can_set_mute {
+                    property_type: if self.can_set_automatic_shutdown {
                         PropertyType::ReadWrite
                     } else {
                         PropertyType::ReadOnly
@@ -1069,6 +1082,41 @@ pub trait Device {
         state.device_properties.can_set_silent_mode = can_set_silent_mode;
         state.device_properties.can_set_equalizer = can_set_equalizer;
         state.device_properties.can_set_noise_gate = can_set_noise_gate;
+
+        // If device has write-only capabilities (cannot query state over HID),
+        // restore last known preferences from disk so UI and CLI have the correct values.
+        let settings = crate::device_settings::load_device_settings();
+        let has_no_sidetone_query = self.get_side_tone_packet().is_none();
+        let has_no_voice_prompt_query = self.get_voice_prompt_packet().is_none();
+        let has_no_auto_shutdown_query = self.get_automatic_shut_down_packet().is_none();
+        let has_no_battery_query = self.get_battery_packet().is_none();
+        let has_no_mute_query = self.get_mute_packet().is_none();
+
+        let state = self.get_device_state_mut();
+        if has_no_sidetone_query && can_set_side_tone {
+            if let Some(st) = settings.side_tone {
+                state.device_properties.side_tone_on = Some(st);
+            }
+        }
+        if has_no_voice_prompt_query && can_set_voice_prompt {
+            if let Some(vp) = settings.voice_prompt {
+                state.device_properties.voice_prompt_on = Some(vp);
+            }
+        }
+        if has_no_auto_shutdown_query && can_set_automatic_shutdown {
+            if let Some(mins) = settings.automatic_shutdown_minutes {
+                state.device_properties.automatic_shutdown_after =
+                    Some(Duration::from_secs(mins * 60));
+            }
+        }
+        if has_no_battery_query {
+            if let Some(battery) = settings.last_battery_level {
+                state.device_properties.battery_level = Some(battery);
+            }
+        }
+        if has_no_mute_query && can_set_mute {
+            state.device_properties.muted = Some(settings.muted.unwrap_or(false));
+        }
     }
 
     fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
@@ -1209,6 +1257,9 @@ pub trait Device {
                             err
                         ))?;
                     }
+                    crate::device_settings::update_setting(|s| {
+                        s.automatic_shutdown_minutes = Some(delay.as_secs() / 60)
+                    });
                 } else {
                     Err("ERROR: Automatic shutdown is not supported on this device".to_string())?;
                 }
@@ -1219,6 +1270,7 @@ pub trait Device {
                     if let Err(err) = self.write_hid_report(&packet) {
                         Err(format!("Failed to mute with error: {:?}", err))?;
                     }
+                    crate::device_settings::update_setting(|s| s.muted = Some(mute));
                 } else {
                     Err("ERROR: Microphone mute control is not supported on this device (hardware button only)")?;
                 }
@@ -1229,6 +1281,7 @@ pub trait Device {
                     if let Err(err) = self.write_hid_report(&packet) {
                         Err(format!("Failed to enable side tone with error: {:?}", err))?;
                     }
+                    crate::device_settings::update_setting(|s| s.side_tone = Some(enable));
                 } else {
                     Err("ERROR: Side tone control is not supported on this device".to_string())?;
                 }
@@ -1258,6 +1311,7 @@ pub trait Device {
                             err
                         ))?;
                     }
+                    crate::device_settings::update_setting(|s| s.voice_prompt = Some(enable));
                 } else {
                     Err("ERROR: Voice prompt control is not supported on this device")?;
                 }
@@ -1314,8 +1368,8 @@ pub trait Device {
                     }
                 };
 
-                let connected = self.get_device_state().device_properties.connected == Some(true);
-                if !connected {
+                let is_disconnected = self.get_device_state().device_properties.connected == Some(false);
+                if is_disconnected {
                     record_eq(self, false);
                     return Ok(());
                 }
@@ -1345,6 +1399,7 @@ pub trait Device {
             }
             _ => (),
         }
+        self.get_device_state_mut().update_self_with_event(&command);
         Ok(())
     }
 

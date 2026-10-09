@@ -122,6 +122,8 @@ fn main() {
                     eq.bind_device(&mut **dev);
                 }
             }
+            #[cfg(feature = "eq-support")]
+            hyper_headset::device_settings::sync_headset_settings_if_needed(&mut device);
             #[cfg(not(feature = "eq-support"))]
             warn_eq_unavailable_once(device.device_properties().can_set_equalizer);
 
@@ -310,6 +312,8 @@ async fn main() {
                 eq.bind_device(&mut **dev);
             }
         }
+        #[cfg(feature = "eq-support")]
+        hyper_headset::device_settings::sync_headset_settings_if_needed(&mut device);
         #[cfg(not(feature = "eq-support"))]
         warn_eq_unavailable_once(device.device_properties().can_set_equalizer);
 
@@ -329,6 +333,15 @@ async fn main() {
                     break; // exit tick loop to retry connection in the outer loop
                 }
             };
+            if matches!(device, hyper_headset::devices::Headset::Hid(_))
+                && device.device_properties().connected == Some(false)
+            {
+                if let Ok(Some(_)) = hyper_headset::bluetooth::BluetoothHeadset::find() {
+                    eprintln!("Headset switched to Bluetooth, reconnecting...");
+                    tray_handler.update(&device.device_properties()).await;
+                    break;
+                }
+            }
             if mute_state.is_some() && mute_state != device.device_properties().muted {
                 if let Some(enigo) = &mut enigo {
                     if let Err(e) = enigo.key(Key::MicMute, Direction::Click) {

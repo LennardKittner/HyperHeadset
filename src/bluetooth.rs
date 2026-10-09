@@ -80,9 +80,20 @@ impl BluetoothHeadset {
             return;
         };
         self.battery_level = read_race_battery(&client);
+        if let Some(level) = self.battery_level {
+            crate::device_settings::update_setting(|s| s.last_battery_level = Some(level));
+        }
         if self.airoha.is_empty() {
             let snap = read_airoha_via(&client);
             if !snap.is_empty() {
+                if let Some(vp) = snap.voice_prompt_on {
+                    crate::device_settings::update_setting(|s| s.voice_prompt = Some(vp));
+                }
+                if let Some(mins) = snap.auto_power_off_minutes {
+                    crate::device_settings::update_setting(|s| {
+                        s.automatic_shutdown_minutes = Some(u64::from(mins))
+                    });
+                }
                 self.airoha = snap;
             }
         }
@@ -117,9 +128,18 @@ impl BluetoothHeadset {
         match read_race_battery(client) {
             Some(level) => {
                 self.battery_level = Some(level);
+                crate::device_settings::update_setting(|s| s.last_battery_level = Some(level));
                 if self.airoha.is_empty() {
                     let snap = read_airoha_via(client);
                     if !snap.is_empty() {
+                        if let Some(vp) = snap.voice_prompt_on {
+                            crate::device_settings::update_setting(|s| s.voice_prompt = Some(vp));
+                        }
+                        if let Some(mins) = snap.auto_power_off_minutes {
+                            crate::device_settings::update_setting(|s| {
+                                s.automatic_shutdown_minutes = Some(u64::from(mins))
+                            });
+                        }
                         self.airoha = snap;
                     }
                 }

@@ -130,16 +130,15 @@ impl Device for CloudIIISWireless {
             .send_feature_report(packet)
     }
 
+    // Cloud III S 2.4 GHz dongle does not respond to GET queries for battery,
+    // charging, mute, auto-shutdown, sidetone, color, or voice prompt (they time
+    // out). Only the dongle wireless connection status query (0x02) is answered.
     fn get_charging_packet(&self) -> Option<Vec<u8>> {
-        let mut packet = BASE_PACKET.to_vec();
-        packet[5] = CHARGE_STATE_COMMAND_ID;
-        Some(packet)
+        None
     }
 
     fn get_battery_packet(&self) -> Option<Vec<u8>> {
-        let mut packet = BASE_PACKET.to_vec();
-        packet[5] = BATTERY_COMMAND_ID;
-        Some(packet)
+        None
     }
 
     // Cloud III S: Auto shutdown via SET_REPORT (report ID 0x0c)
@@ -149,15 +148,11 @@ impl Device for CloudIIISWireless {
     }
 
     fn get_automatic_shut_down_packet(&self) -> Option<Vec<u8>> {
-        let mut packet = BASE_PACKET.to_vec();
-        packet[5] = GET_AUTO_POWER_OFF_COMMAND_ID;
-        Some(packet)
+        None
     }
 
     fn get_mute_packet(&self) -> Option<Vec<u8>> {
-        let mut packet = BASE_PACKET.to_vec();
-        packet[5] = GET_MIC_MUTE_COMMAND_ID;
-        Some(packet)
+        None
     }
 
     fn set_mute_packet(&self, mute: bool) -> Option<Vec<u8>> {
@@ -185,15 +180,11 @@ impl Device for CloudIIISWireless {
     }
 
     fn get_product_color_packet(&self) -> Option<Vec<u8>> {
-        let mut packet = BASE_PACKET.to_vec();
-        packet[5] = COLOR_COMMAND_ID;
-        Some(packet)
+        None
     }
 
     fn get_side_tone_packet(&self) -> Option<Vec<u8>> {
-        let mut packet = BASE_PACKET.to_vec();
-        packet[5] = GET_SIDE_TONE_COMMAND_ID;
-        Some(packet)
+        None
     }
 
     fn set_side_tone_packet(&self, side_tone_on: bool) -> Option<Vec<u8>> {
@@ -213,9 +204,7 @@ impl Device for CloudIIISWireless {
     }
 
     fn get_voice_prompt_packet(&self) -> Option<Vec<u8>> {
-        let mut packet = BASE_PACKET.to_vec();
-        packet[5] = GET_VOICE_PROMPT_COMMAND_ID;
-        Some(packet)
+        None
     }
 
     fn set_voice_prompt_packet(&self, enable: bool) -> Option<Vec<u8>> {

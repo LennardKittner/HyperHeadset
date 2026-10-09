@@ -484,15 +484,22 @@ impl TrayApp {
                     let _ = menu.append(&menu_item);
                 }
                 hyper_headset::devices::PropertyDescriptorWrapper::Int(property, items) => {
-                    let Some(current_value) = property.data else {
+                    if property.data.is_none()
+                        && property.property_type != PropertyType::ReadWrite
+                    {
                         continue;
-                    };
-                    let submenu = Submenu::new(
+                    }
+                    let label = if let Some(current_value) = property.data {
                         format!(
                             "{}: {}",
                             property.pretty_name,
                             format_int_value(current_value, property.suffix),
-                        ),
+                        )
+                    } else {
+                        format!("{}: Unknown", property.pretty_name)
+                    };
+                    let submenu = Submenu::new(
+                        label,
                         property.property_type == PropertyType::ReadWrite,
                     );
 
@@ -520,30 +527,62 @@ impl TrayApp {
                     menu.append(&submenu).unwrap();
                 }
                 hyper_headset::devices::PropertyDescriptorWrapper::Bool(property) => {
-                    let Some(current_value) = property.data else {
-                        continue;
-                    };
                     let create_event = property.create_event;
-                    let update_sender = self.sender.clone();
-                    let menu_item = MenuItem::new(
-                        format!(
-                            "{}: {}{}",
-                            property.pretty_name, current_value, property.suffix
-                        ),
-                        property.property_type == PropertyType::ReadWrite
-                            && property.data.is_some(),
-                        None,
-                    );
-                    let _ = menu.append(&menu_item);
-                    let menu_itme_id = menu_item.id().clone();
-                    new_callbacks.insert(
-                        menu_itme_id,
-                        Box::new(move || {
-                            if let Some(command) = (create_event)(!current_value) {
-                                let _ = update_sender.send(command);
-                            }
-                        }),
-                    );
+                    if let Some(current_value) = property.data {
+                        let update_sender = self.sender.clone();
+                        let menu_item = MenuItem::new(
+                            format!(
+                                "{}: {}{}",
+                                property.pretty_name, current_value, property.suffix
+                            ),
+                            property.property_type == PropertyType::ReadWrite,
+                            None,
+                        );
+                        let _ = menu.append(&menu_item);
+                        let menu_item_id = menu_item.id().clone();
+                        new_callbacks.insert(
+                            menu_item_id,
+                            Box::new(move || {
+                                if let Some(command) = (create_event)(!current_value) {
+                                    let _ = update_sender.send(command);
+                                }
+                            }),
+                        );
+                    } else if property.property_type == PropertyType::ReadWrite {
+                        let submenu = Submenu::new(
+                            format!("{}: Unknown", property.pretty_name),
+                            true,
+                        );
+
+                        let enable_entry = MenuItem::new("Enable", true, None);
+                        let disable_entry = MenuItem::new("Disable", true, None);
+                        submenu.append(&enable_entry).unwrap();
+                        submenu.append(&disable_entry).unwrap();
+
+                        let tx1 = self.sender.clone();
+                        let id1 = enable_entry.id().clone();
+                        new_callbacks.insert(
+                            id1,
+                            Box::new(move || {
+                                if let Some(command) = (create_event)(true) {
+                                    let _ = tx1.send(command);
+                                }
+                            }),
+                        );
+
+                        let tx2 = self.sender.clone();
+                        let id2 = disable_entry.id().clone();
+                        new_callbacks.insert(
+                            id2,
+                            Box::new(move || {
+                                if let Some(command) = (create_event)(false) {
+                                    let _ = tx2.send(command);
+                                }
+                            }),
+                        );
+
+                        menu.append(&submenu).unwrap();
+                    }
                 }
                 hyper_headset::devices::PropertyDescriptorWrapper::String(property) => {
                     let Some(current_value) = property.data else {
