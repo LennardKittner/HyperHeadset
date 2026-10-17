@@ -1161,26 +1161,11 @@ pub trait Device {
     }
 
     /// Refreshes the state by listening for events
-    /// Only the battery level is actively queried because it is not communicated by the device on its own
+    /// Also does an active refresh on new connections
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
         let mut request_active_refresh = false;
         if self.allow_passive_refresh() {
             if let Some(events) = self.wait_for_updates(PASSIVE_REFRESH_TIME_OUT) {
-                for event in events {
-                    // Some headsets send this if they just turned on so we should refresh the
-                    // state
-                    if matches!(event, DeviceEvent::WirelessConnected(true)) {
-                        request_active_refresh = true;
-                    }
-                    self.get_device_state_mut().update_self_with_event(&event);
-                }
-            }
-        }
-        if let Some(batter_packet) = self.get_battery_packet() {
-            self.prepare_write();
-            self.write_hid_report(&batter_packet)?;
-            std::thread::sleep(RESPONSE_DELAY);
-            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
                     // Some headsets send this if they just turned on so we should refresh the
                     // state
