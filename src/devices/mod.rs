@@ -1091,7 +1091,7 @@ pub trait Device {
     }
 
     fn get_query_packets(&self) -> Vec<Vec<u8>> {
-        vec![
+        let mut packets = vec![
             self.get_wireless_connected_status_packet(),
             self.get_charging_packet(),
             self.get_battery_packet(),
@@ -1100,17 +1100,25 @@ pub trait Device {
             self.get_surround_sound_packet(),
             self.get_mic_connected_packet(),
             self.get_pairing_info_packet(),
-            self.get_product_color_packet(),
+        ];
+        // Product color is static and only needs to be queried once
+        if self
+            .get_device_state()
+            .device_properties
+            .product_color
+            .is_none()
+        {
+            packets.push(self.get_product_color_packet());
+        }
+        packets.extend(vec![
             self.get_side_tone_packet(),
             self.get_side_tone_volume_packet(),
             self.get_voice_prompt_packet(),
             self.get_sirk_packet(),
             self.get_silent_mode_packet(),
             self.get_noise_gate_packet(),
-        ]
-        .into_iter()
-        .flatten()
-        .collect()
+        ]);
+        packets.into_iter().flatten().collect()
     }
 
     /// Refreshes the state by querying all available information
@@ -1126,11 +1134,18 @@ pub trait Device {
         self.execute_headset_specific_functionality()?;
 
         let mut responded = false;
+        let mut last_err = None;
         for (i, packet) in packets.into_iter().enumerate() {
             self.prepare_write();
             debug_println!("Write packet: {packet:?}");
-            self.write_hid_report(&packet)?;
-            std::thread::sleep(RESPONSE_DELAY);
+            // If writing a specific query packet fails (e.g. packet unsupported by this firmware
+            // or dongle momentarily busy), log and continue trying remaining queries instead of
+            // aborting the entire refresh immediately.
+            if let Err(err) = self.write_hid_report(&packet) {
+                debug_println!("Failed to write packet {packet:?}: {err:?}");
+                last_err = Some(err);
+                continue;
+            }
             if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
                     self.get_device_state_mut().update_self_with_event(&event);
@@ -1150,11 +1165,17 @@ pub trait Device {
             ) {
                 break;
             }
+            // Delay between queries to give the dongle MCU and 2.4 GHz RF link time to settle
+            std::thread::sleep(RESPONSE_DELAY);
         }
         self.get_device_state_mut().active_refresh_attempted = true;
 
+        // If at least one packet succeeded in receiving a response, consider the refresh
+        // successful. Otherwise surface the write error if one occurred.
         if responded {
             Ok(())
+        } else if let Some(err) = last_err {
+            Err(DeviceError::HidError(err))
         } else {
             Err(DeviceError::NoResponse())
         }
@@ -1164,31 +1185,43 @@ pub trait Device {
     /// Only the battery level is actively queried because it is not communicated by the device on its own
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
         let mut request_active_refresh = false;
+        let was_connected = self.get_device_state().device_properties.connected;
         if self.allow_passive_refresh() {
             if let Some(events) = self.wait_for_updates(PASSIVE_REFRESH_TIME_OUT) {
                 for event in events {
                     // Some headsets send this if they just turned on so we should refresh the
-                    // state
-                    if matches!(event, DeviceEvent::WirelessConnected(true)) {
+                    // state, but only if they were not already known to be connected
+                    if matches!(event, DeviceEvent::WirelessConnected(true))
+                        && was_connected != Some(true)
+                    {
                         request_active_refresh = true;
                     }
                     self.get_device_state_mut().update_self_with_event(&event);
                 }
             }
         }
-        if let Some(batter_packet) = self.get_battery_packet() {
-            self.prepare_write();
-            self.write_hid_report(&batter_packet)?;
-            std::thread::sleep(RESPONSE_DELAY);
-            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
-                for event in events {
-                    // Some headsets send this if they just turned on so we should refresh the
-                    // state
-                    if matches!(event, DeviceEvent::WirelessConnected(true)) {
-                        request_active_refresh = true;
+        // Only actively query battery if the headset is not known to be disconnected
+        if !matches!(
+            self.get_device_state().device_properties.connected,
+            Some(false)
+        ) {
+            if let Some(batter_packet) = self.get_battery_packet() {
+                self.prepare_write();
+                // Don't fail the passive refresh loop if writing the battery query fails;
+                // log the error and wait for the next refresh cycle instead.
+                if let Err(err) = self.write_hid_report(&batter_packet) {
+                    debug_println!("Failed to write battery packet: {err:?}");
+                } else if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+                    for event in events {
+                        if matches!(event, DeviceEvent::WirelessConnected(true))
+                            && was_connected != Some(true)
+                        {
+                            request_active_refresh = true;
+                        }
+                        self.get_device_state_mut().update_self_with_event(&event);
                     }
-                    self.get_device_state_mut().update_self_with_event(&event);
                 }
+                std::thread::sleep(RESPONSE_DELAY);
             }
         }
         if request_active_refresh {
