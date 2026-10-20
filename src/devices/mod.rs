@@ -961,28 +961,72 @@ pub trait Device {
     fn get_response_buffer(&self) -> Vec<u8> {
         [0u8; RESPONSE_BUFFER_SIZE].to_vec()
     }
-    fn get_charging_packet(&self) -> Option<Vec<u8>>;
-    fn get_battery_packet(&self) -> Option<Vec<u8>>;
-    fn set_automatic_shut_down_packet(&self, shutdown_after: Duration) -> Option<Vec<u8>>;
-    fn get_automatic_shut_down_packet(&self) -> Option<Vec<u8>>;
-    fn get_mute_packet(&self) -> Option<Vec<u8>>;
-    fn set_mute_packet(&self, mute: bool) -> Option<Vec<u8>>;
-    fn get_surround_sound_packet(&self) -> Option<Vec<u8>>;
-    fn set_surround_sound_packet(&self, surround_sound: bool) -> Option<Vec<u8>>;
-    fn get_mic_connected_packet(&self) -> Option<Vec<u8>>;
-    fn get_pairing_info_packet(&self) -> Option<Vec<u8>>;
-    fn get_product_color_packet(&self) -> Option<Vec<u8>>;
-    fn get_side_tone_packet(&self) -> Option<Vec<u8>>;
-    fn set_side_tone_packet(&self, side_tone_on: bool) -> Option<Vec<u8>>;
-    fn get_side_tone_volume_packet(&self) -> Option<Vec<u8>>;
-    fn set_side_tone_volume_packet(&self, volume: u8) -> Option<Vec<u8>>;
-    fn get_voice_prompt_packet(&self) -> Option<Vec<u8>>;
-    fn set_voice_prompt_packet(&self, enable: bool) -> Option<Vec<u8>>;
-    fn get_wireless_connected_status_packet(&self) -> Option<Vec<u8>>;
-    fn get_sirk_packet(&self) -> Option<Vec<u8>>;
-    fn reset_sirk_packet(&self) -> Option<Vec<u8>>;
-    fn get_silent_mode_packet(&self) -> Option<Vec<u8>>;
-    fn set_silent_mode_packet(&self, silence: bool) -> Option<Vec<u8>>;
+    fn get_charging_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_battery_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn set_automatic_shut_down_packet(&self, _shutdown_after: Duration) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_automatic_shut_down_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_mute_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn set_mute_packet(&self, _mute: bool) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_surround_sound_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn set_surround_sound_packet(&self, _surround_sound: bool) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_mic_connected_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_pairing_info_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_product_color_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_side_tone_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn set_side_tone_packet(&self, _side_tone_on: bool) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_side_tone_volume_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn set_side_tone_volume_packet(&self, _volume: u8) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_voice_prompt_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn set_voice_prompt_packet(&self, _enable: bool) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_wireless_connected_status_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_sirk_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn reset_sirk_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn get_silent_mode_packet(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn set_silent_mode_packet(&self, _silence: bool) -> Option<Vec<u8>> {
+        None
+    }
     /// Build EQ packets — one packet per band (firmware only accepts one band per write).
     /// Bands: 0=32Hz, 1=64Hz, 2=125Hz, 3=250Hz, 4=500Hz, 5=1kHz, 6=2kHz, 7=4kHz, 8=8kHz, 9=16kHz
     /// dB values: -12.0 to +12.0
