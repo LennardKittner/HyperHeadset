@@ -1,10 +1,10 @@
 use crate::{
     debug_println,
     devices::{ChargingStatus, Device, DeviceEvent, DeviceState},
+    HP,
 };
 use std::time::Duration;
 
-const HP: u16 = 0x03F0;
 pub const VENDOR_IDS: [u16; 1] = [HP];
 pub const PRODUCT_IDS: [u16; 2] = [0x069F, 0x0995];
 

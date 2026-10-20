@@ -1,11 +1,10 @@
 use crate::{
     debug_println,
     devices::{ChargingStatus, Device, DeviceEvent, DeviceState},
+    HP, HYPERX,
 };
 use std::time::Duration;
 
-const HP: u16 = 0x03F0;
-const HYPERX: u16 = 0x0951;
 pub const VENDOR_IDS: [u16; 2] = [HP, HYPERX];
 pub const PRODUCT_IDS: [u16; 4] = [0x0e90, 0x1749, 0x16c4, 0x1723];
 

@@ -1,10 +1,10 @@
 use crate::{
     debug_println,
     devices::{ChargingStatus, Color, Device, DeviceEvent, DeviceState},
+    HP,
 };
 use std::time::Duration;
 
-const HP: u16 = 0x03F0;
 pub const VENDOR_IDS: [u16; 1] = [HP];
 // Possible Cloud Alpha Wireless product IDs
 pub const PRODUCT_IDS: [u16; 3] = [0x1743, 0x1765, 0x098D];
