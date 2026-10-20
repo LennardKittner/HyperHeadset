@@ -3,6 +3,7 @@ pub mod cloud_flight_wireless;
 pub mod cloud_ii_core_wireless;
 pub mod cloud_ii_wireless;
 pub mod cloud_ii_wireless_dts;
+pub mod cloud_iii;
 pub mod cloud_iii_s_wireless;
 pub mod cloud_iii_wireless;
 
@@ -11,8 +12,8 @@ use crate::{
     devices::{
         cloud_alpha_wireless::CloudAlphaWireless, cloud_flight_wireless::CloudFlightWireless,
         cloud_ii_core_wireless::CloudIICoreWireless, cloud_ii_wireless::CloudIIWireless,
-        cloud_ii_wireless_dts::CloudIIWirelessDTS, cloud_iii_s_wireless::CloudIIISWireless,
-        cloud_iii_wireless::CloudIIIWireless,
+        cloud_ii_wireless_dts::CloudIIWirelessDTS, cloud_iii::CloudIII,
+        cloud_iii_s_wireless::CloudIIISWireless, cloud_iii_wireless::CloudIIIWireless,
     },
 };
 use hidapi::{HidApi, HidDevice, HidError};
@@ -76,6 +77,11 @@ const DEVICE_REGISTER: &[DeviceEntry] = &[
         vendor_ids: &cloud_flight_wireless::VENDOR_IDS,
         product_ids: &cloud_flight_wireless::PRODUCT_IDS,
         factory: |s| Box::new(CloudFlightWireless::new_from_state(s)),
+    },
+    DeviceEntry {
+        vendor_ids: &cloud_iii::VENDOR_IDS,
+        product_ids: &cloud_iii::PRODUCT_IDS,
+        factory: |s| Box::new(CloudIII::new_from_state(s)),
     },
 ];
 
@@ -1050,6 +1056,9 @@ pub trait Device {
         None
     }
     fn set_noise_gate_packet(&self, _enable: bool) -> Option<Vec<u8>> {
+        None
+    }
+    fn persist_settings_to_the_device_packet(&self, _enabled: bool) -> Option<Vec<u8>> {
         None
     }
     fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
