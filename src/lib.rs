@@ -18,6 +18,9 @@ mod airoha_race;
 
 pub static VERBOSE: OnceLock<bool> = OnceLock::new();
 
+pub const HP: u16 = 0x03F0;
+pub const HYPERX: u16 = 0x0951;
+
 #[macro_export]
 macro_rules! debug_println {
     ($($args:tt)*) => {
