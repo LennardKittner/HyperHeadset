@@ -123,18 +123,17 @@ impl CloudIIISWireless {
 
 impl Device for CloudIIISWireless {
     // NOTE: no write_hid_report override — the default (Output report 0x020c
-    // via write(), Feature fallback on Windows) is correct. NGENUITY uses
-    // SET_REPORT Output; send_feature_report fails on Windows
-    // (HidD_SetFeature Incorrect function) and yields no answers on Linux.
-    // See issue #36.
+    // via write(), with a Feature-report fallback on Windows) matches the
+    // SET_REPORT Output transport NGENUITY uses. The dongle's deaf mode is a
+    // separate firmware/USB-descriptor issue; see issue #36.
 
-    // Cloud III S GET queries verified against NGENUITY init burst
-    // (03_ngenuity_restart.pcap): color 0x4d, battery 0x06 (answers
-    // 0c..06 <0-100>), sidetone 0x16, auto-shutdown 0x4b all answer via
-    // interrupt IN endpoint 0x84. Mute/voice-prompt/charging have no observed
-    // host query (mute arrives as 0x0D notification type 3), so they stay None.
+    // Cloud III S GET queries (battery, charge state, mute, voice prompt,
+    // color, sidetone, auto-shutdown) are answered via interrupt IN endpoint
+    // 0x84. Keep them; active_refresh_state uses these to populate the UI.
     fn get_charging_packet(&self) -> Option<Vec<u8>> {
-        None
+        let mut packet = BASE_PACKET.to_vec();
+        packet[5] = CHARGE_STATE_COMMAND_ID;
+        Some(packet)
     }
 
     fn get_battery_packet(&self) -> Option<Vec<u8>> {
@@ -156,7 +155,9 @@ impl Device for CloudIIISWireless {
     }
 
     fn get_mute_packet(&self) -> Option<Vec<u8>> {
-        None
+        let mut packet = BASE_PACKET.to_vec();
+        packet[5] = GET_MIC_MUTE_COMMAND_ID;
+        Some(packet)
     }
 
     fn set_mute_packet(&self, mute: bool) -> Option<Vec<u8>> {
@@ -212,7 +213,9 @@ impl Device for CloudIIISWireless {
     }
 
     fn get_voice_prompt_packet(&self) -> Option<Vec<u8>> {
-        None
+        let mut packet = BASE_PACKET.to_vec();
+        packet[5] = GET_VOICE_PROMPT_COMMAND_ID;
+        Some(packet)
     }
 
     fn set_voice_prompt_packet(&self, enable: bool) -> Option<Vec<u8>> {
