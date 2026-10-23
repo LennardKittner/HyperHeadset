@@ -484,16 +484,17 @@ impl TrayApp {
                     let _ = menu.append(&menu_item);
                 }
                 hyper_headset::devices::PropertyDescriptorWrapper::Int(property, items) => {
-                    let Some(current_value) = property.data else {
+                    let writable = property.property_type == PropertyType::ReadWrite;
+                    if property.data.is_none() && !writable {
                         continue;
-                    };
+                    }
+                    let current_value = property
+                        .data
+                        .map(|value| format_int_value(value, property.suffix))
+                        .unwrap_or_else(|| "Unknown".to_string());
                     let submenu = Submenu::new(
-                        format!(
-                            "{}: {}",
-                            property.pretty_name,
-                            format_int_value(current_value, property.suffix),
-                        ),
-                        property.property_type == PropertyType::ReadWrite,
+                        format!("{}: {}", property.pretty_name, current_value),
+                        writable,
                     );
 
                     for item_value in items {
@@ -520,18 +521,38 @@ impl TrayApp {
                     menu.append(&submenu).unwrap();
                 }
                 hyper_headset::devices::PropertyDescriptorWrapper::Bool(property) => {
+                    let writable = property.property_type == PropertyType::ReadWrite;
+                    let create_event = property.create_event;
                     let Some(current_value) = property.data else {
+                        if !writable {
+                            continue;
+                        }
+                        let submenu =
+                            Submenu::new(format!("{}: Unknown", property.pretty_name), true);
+                        for (label, value) in [("On", true), ("Off", false)] {
+                            let entry = MenuItem::new(label, true, None);
+                            let tx = self.sender.clone();
+                            let entry_id = entry.id().clone();
+                            new_callbacks.insert(
+                                entry_id,
+                                Box::new(move || {
+                                    if let Some(command) = (create_event)(value) {
+                                        let _ = tx.send(command);
+                                    }
+                                }),
+                            );
+                            submenu.append(&entry).unwrap();
+                        }
+                        let _ = menu.append(&submenu);
                         continue;
                     };
-                    let create_event = property.create_event;
                     let update_sender = self.sender.clone();
                     let menu_item = MenuItem::new(
                         format!(
                             "{}: {}{}",
                             property.pretty_name, current_value, property.suffix
                         ),
-                        property.property_type == PropertyType::ReadWrite
-                            && property.data.is_some(),
+                        writable,
                         None,
                     );
                     let _ = menu.append(&menu_item);

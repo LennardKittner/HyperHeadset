@@ -229,9 +229,10 @@ impl Tray for StatusTray {
                     );
                 }
                 hyper_headset::devices::PropertyDescriptorWrapper::Int(property, options) => {
-                    let Some(current_value) = property.data else {
+                    let writable = property.property_type == PropertyType::ReadWrite;
+                    if property.data.is_none() && !writable {
                         continue;
-                    };
+                    }
                     let create_event = property.create_event;
                     let sub_menu = options
                         .iter()
@@ -239,8 +240,7 @@ impl Tray for StatusTray {
                             let update_sender = self.update_sender.clone();
                             StandardItem {
                                 label: format_int_value(*val, property.suffix),
-                                enabled: property.property_type == PropertyType::ReadWrite
-                                    && property.data.is_some(),
+                                enabled: writable,
                                 activate: Box::new(move |_| {
                                     if let Some(command) = (create_event)(*val) {
                                         let _ = update_sender.send(command);
@@ -251,15 +251,14 @@ impl Tray for StatusTray {
                             .into()
                         })
                         .collect();
+                    let current_value = property
+                        .data
+                        .map(|value| format_int_value(value, property.suffix))
+                        .unwrap_or_else(|| "Unknown".to_string());
                     menu_items.push(
                         SubMenu {
-                            label: format!(
-                                "{}: {}",
-                                property.pretty_name,
-                                format_int_value(current_value, property.suffix)
-                            ),
-                            enabled: property.property_type == PropertyType::ReadWrite
-                                && property.data.is_some(),
+                            label: format!("{}: {}", property.pretty_name, current_value),
+                            enabled: writable,
                             submenu: sub_menu,
                             ..Default::default()
                         }
@@ -267,10 +266,40 @@ impl Tray for StatusTray {
                     );
                 }
                 hyper_headset::devices::PropertyDescriptorWrapper::Bool(property) => {
+                    let writable = property.property_type == PropertyType::ReadWrite;
+                    let create_event = property.create_event;
                     let Some(current_value) = property.data else {
+                        if !writable {
+                            continue;
+                        }
+                        let sub_menu = [true, false]
+                            .into_iter()
+                            .map(|value| {
+                                let update_sender = self.update_sender.clone();
+                                StandardItem {
+                                    label: if value { "On" } else { "Off" }.to_string(),
+                                    enabled: true,
+                                    activate: Box::new(move |_| {
+                                        if let Some(command) = (create_event)(value) {
+                                            let _ = update_sender.send(command);
+                                        }
+                                    }),
+                                    ..Default::default()
+                                }
+                                .into()
+                            })
+                            .collect();
+                        menu_items.push(
+                            SubMenu {
+                                label: format!("{}: Unknown", property.pretty_name),
+                                enabled: true,
+                                submenu: sub_menu,
+                                ..Default::default()
+                            }
+                            .into(),
+                        );
                         continue;
                     };
-                    let create_event = property.create_event;
                     let update_sender = self.update_sender.clone();
                     menu_items.push(
                         StandardItem {
@@ -278,8 +307,7 @@ impl Tray for StatusTray {
                                 "{}: {}{}",
                                 property.pretty_name, current_value, property.suffix
                             ),
-                            enabled: property.property_type == PropertyType::ReadWrite
-                                && property.data.is_some(),
+                            enabled: writable,
                             activate: Box::new(move |_| {
                                 if let Some(command) = (create_event)(!current_value) {
                                     let _ = update_sender.send(command);
