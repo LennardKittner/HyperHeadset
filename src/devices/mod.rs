@@ -463,6 +463,9 @@ impl DeviceState {
 pub enum PropertyType {
     ReadOnly,
     AlwaysReadOnly,
+    /// The property has a setter. `data` may still be `None` for write-only
+    /// properties (no getter) or when the device has not answered yet; frontends
+    /// should keep showing the control with an unknown current value.
     ReadWrite,
 }
 
@@ -1345,6 +1348,11 @@ pub trait Device {
             }
             _ => (),
         }
+        // Optimistic session truth: write-only properties (e.g. Cloud III S
+        // mute, which has no host query — see issue #36) would otherwise never
+        // update the UI after a successful SET. Refresh paths overwrite this
+        // with real answers whenever a query exists.
+        self.get_device_state_mut().update_self_with_event(&command);
         Ok(())
     }
 
