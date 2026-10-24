@@ -198,12 +198,101 @@ fn main() {
         .unwrap();
 }
 
+/// How long each listen for headset reports blocks while waiting for tray commands, which
+/// bounds how long a tray command can wait.
+#[cfg(target_os = "linux")]
+const LISTEN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Makes the system mute follow the headset's after it changed from `was_muted` to `muted`.
+/// `enigo` is `None` when `--press-mute-key` is off, so then nothing is pressed.
+#[cfg(target_os = "linux")]
+fn sync_system_mute(
+    was_muted: Option<bool>,
+    muted: Option<bool>,
+    enigo: Option<&mut enigo::Enigo>,
+) {
+    use enigo::{Direction, Key, Keyboard};
+    use hyper_headset::{debug_println, is_default_microphone_muted};
+
+    let (Some(was_muted), Some(muted), Some(enigo)) = (was_muted, muted, enigo) else {
+        return;
+    };
+    // MicMute toggles the system mute, and some headsets (e.g. Cloud Alpha Wireless) follow the
+    // system mute. Pressing it when the system already matches would flip the headset and they'd
+    // keep toggling each other, so only press it to fix a mismatch. The key is still used (rather
+    // than muting directly) so desktops like KDE update their own mute state, tray icon and OSD.
+    if was_muted != muted && is_default_microphone_muted() != Some(muted) {
+        debug_println!("Headset mute changed to {muted}, pressing MicMute");
+        if let Err(e) = enigo.key(Key::MicMute, Direction::Click) {
+            eprintln!("Failed to press key on mute: {e}");
+        }
+    }
+}
+
+/// What [`wait_for_command`] stopped waiting for.
+#[cfg(target_os = "linux")]
+enum Waited {
+    /// A tray command arrived.
+    Command(hyper_headset::devices::DeviceEvent),
+    /// The wait ran out.
+    TimedOut,
+    /// The headset reported it just connected, so its state needs an active refresh now.
+    HeadsetConnected,
+}
+
+/// Waits up to `timeout` for a tray command. For headsets that allow passive refresh it keeps
+/// listening meanwhile, so changes they report on their own (e.g. the mute button) reach the
+/// system mute and tray right away instead of at the next tick. Listening doesn't query the
+/// headset, so it doesn't add to the tick's load.
+#[cfg(target_os = "linux")]
+async fn wait_for_command(
+    device: &mut hyper_headset::devices::Headset,
+    rx: &std::sync::mpsc::Receiver<hyper_headset::devices::DeviceEvent>,
+    timeout: std::time::Duration,
+    mut enigo: Option<&mut enigo::Enigo>,
+    tray_handler: &status_tray::TrayHandler,
+) -> Result<Waited, hyper_headset::devices::DeviceError> {
+    use hyper_headset::debug_println;
+    use hyper_headset::devices::ListenOutcome;
+    use std::time::Instant;
+
+    if !device.allow_passive_refresh() {
+        return Ok(rx
+            .recv_timeout(timeout)
+            .map_or(Waited::TimedOut, Waited::Command));
+    }
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Ok(command) = rx.try_recv() {
+            return Ok(Waited::Command(command));
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(Waited::TimedOut);
+        }
+        let was_muted = device.device_properties().muted;
+        let outcome = device.listen(remaining.min(LISTEN_INTERVAL))?;
+        if outcome != ListenOutcome::Nothing {
+            sync_system_mute(
+                was_muted,
+                device.device_properties().muted,
+                enigo.as_deref_mut(),
+            );
+            tray_handler.update(&device.device_properties()).await;
+        }
+        if outcome == ListenOutcome::Connected {
+            debug_println!("Headset connected while listening, refreshing its state");
+            return Ok(Waited::HeadsetConnected);
+        }
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() {
     use clap::ArgAction;
     use clap::{Arg, Command};
-    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+    use enigo::{Enigo, Settings};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -315,9 +404,14 @@ async fn main() {
 
         // Run tick loop while connected
         let mut run_counter = 0;
-        loop {
+        // Set when the headset reports it just connected while listening, so the next tick
+        // refreshes its whole state.
+        let mut active_refresh_due = false;
+        'tick: loop {
             let mute_state = device.device_properties().muted;
-            match if run_counter % 30 == 0 {
+            let active = active_refresh_due || run_counter % 30 == 0;
+            active_refresh_due = false;
+            match if active {
                 device.active_refresh_state()
             } else {
                 device.passive_refresh_state()
@@ -326,21 +420,36 @@ async fn main() {
                 Err(error) => {
                     eprintln!("{error}");
                     tray_handler.update(&device.device_properties()).await;
-                    break; // exit tick loop to retry connection in the outer loop
+                    break 'tick; // exit tick loop to retry connection in the outer loop
                 }
             };
-            if mute_state.is_some() && mute_state != device.device_properties().muted {
-                if let Some(enigo) = &mut enigo {
-                    if let Err(e) = enigo.key(Key::MicMute, Direction::Click) {
-                        eprintln!("Failed to press key on mute: {e}");
-                    }
-                }
-            }
+            sync_system_mute(mute_state, device.device_properties().muted, enigo.as_mut());
 
             // Process tray device commands
             // with the default refresh_interval the state is only actively queried every 3min
             // querying the device too frequently can lead to instability
-            let first = rx.recv_timeout(refresh_interval);
+            let first = match wait_for_command(
+                &mut device,
+                &rx,
+                refresh_interval,
+                enigo.as_mut(),
+                &tray_handler,
+            )
+            .await
+            {
+                Ok(Waited::Command(command)) => Some(command),
+                Ok(Waited::TimedOut) => None,
+                Ok(Waited::HeadsetConnected) => {
+                    // The next tick, which starts right away, refreshes the whole state.
+                    active_refresh_due = true;
+                    None
+                }
+                Err(error) => {
+                    eprintln!("{error}");
+                    tray_handler.update(&device.device_properties()).await;
+                    break 'tick; // retry connection in the outer loop
+                }
+            };
             // Spam-selecting EQ presets queues one event per click, but only the last
             // selection matters, so defer EQ commands and only apply the latest one.
             let mut pending_eq = None;

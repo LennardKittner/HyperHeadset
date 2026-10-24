@@ -128,6 +128,16 @@ impl Headset {
         }
     }
 
+    /// Waits up to `timeout` for reports the headset sends on its own and applies them, without
+    /// querying it. Only call this when `allow_passive_refresh` is true.
+    pub fn listen(&mut self, timeout: Duration) -> Result<ListenOutcome, DeviceError> {
+        match self {
+            Headset::Hid(device) => device.listen_for_updates(timeout),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(_) => Ok(ListenOutcome::Nothing),
+        }
+    }
+
     pub fn allow_passive_refresh(&mut self) -> bool {
         match self {
             Headset::Hid(device) => device.allow_passive_refresh(),
@@ -828,6 +838,18 @@ pub enum DeviceError {
     UnknownResponse([u8; 8], usize),
 }
 
+/// What a listen for reports the headset sends on its own picked up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListenOutcome {
+    /// No reports arrived.
+    Nothing,
+    /// Reports arrived and were applied.
+    Updated,
+    /// Reports arrived and were applied, and one said the headset just connected, so the state
+    /// should be actively refreshed.
+    Connected,
+}
+
 #[derive(Debug, Clone)]
 pub enum DeviceEvent {
     BatterLevel(u8),
@@ -1090,6 +1112,36 @@ pub trait Device {
         self.get_event_from_device_response(&buf)
     }
 
+    /// Like `wait_for_updates`, but after the first report also reads every report already
+    /// queued. Reading only one report per tick lets a backlog build up, and acting on stale
+    /// mute reports flips the system mute back and forth.
+    ///
+    /// Fails only if the first read fails (e.g. the dongle was unplugged). A failure after that
+    /// returns the reports read so far; the next call reports the error.
+    fn drain_updates(&mut self, duration: Duration) -> Result<Vec<DeviceEvent>, DeviceError> {
+        // Upper bound so a device that never stops sending can't stall the tick loop.
+        const MAX_REPORTS: usize = 64;
+        let mut events = Vec::new();
+        let mut timeout = duration.as_millis() as i32;
+        for _ in 0..MAX_REPORTS {
+            let mut buf = self.get_response_buffer();
+            match self
+                .get_device_state()
+                .hid_device
+                .read_timeout(&mut buf[..], timeout)
+            {
+                Ok(res) if res > 0 => events.extend(
+                    self.get_event_from_device_response(&buf)
+                        .unwrap_or_default(),
+                ),
+                Err(error) if events.is_empty() => return Err(error.into()),
+                _ => break,
+            }
+            timeout = 0;
+        }
+        Ok(events)
+    }
+
     fn get_query_packets(&self) -> Vec<Vec<u8>> {
         vec![
             self.get_wireless_connected_status_packet(),
@@ -1165,37 +1217,55 @@ pub trait Device {
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
         let mut request_active_refresh = false;
         if self.allow_passive_refresh() {
-            if let Some(events) = self.wait_for_updates(PASSIVE_REFRESH_TIME_OUT) {
-                for event in events {
-                    // Some headsets send this if they just turned on so we should refresh the
-                    // state
-                    if matches!(event, DeviceEvent::WirelessConnected(true)) {
-                        request_active_refresh = true;
-                    }
-                    self.get_device_state_mut().update_self_with_event(&event);
-                }
-            }
+            let events = self
+                .drain_updates(PASSIVE_REFRESH_TIME_OUT)
+                .unwrap_or_default();
+            request_active_refresh |= self.apply_events(&events);
         }
         if let Some(batter_packet) = self.get_battery_packet() {
             self.prepare_write();
             self.write_hid_report(&batter_packet)?;
             std::thread::sleep(RESPONSE_DELAY);
-            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
-                for event in events {
-                    // Some headsets send this if they just turned on so we should refresh the
-                    // state
-                    if matches!(event, DeviceEvent::WirelessConnected(true)) {
-                        request_active_refresh = true;
-                    }
-                    self.get_device_state_mut().update_self_with_event(&event);
-                }
-            }
+            let events = self
+                .drain_updates(Duration::from_secs(1))
+                .unwrap_or_default();
+            request_active_refresh |= self.apply_events(&events);
         }
         if request_active_refresh {
             self.active_refresh_state()?;
         }
 
         Ok(())
+    }
+
+    /// Waits up to `timeout` for reports the device sends on its own (e.g. when the mute button
+    /// is pressed) and applies them, without querying the device. If a report says the device
+    /// just connected, it returns `ListenOutcome::Connected` and leaves the active refresh to
+    /// the caller.
+    /// Read errors are returned rather than treated as "no reports": a failed read returns
+    /// immediately, so the caller's listen loop would otherwise spin once the device is gone.
+    fn listen_for_updates(&mut self, timeout: Duration) -> Result<ListenOutcome, DeviceError> {
+        let events = self.drain_updates(timeout)?;
+        Ok(if self.apply_events(&events) {
+            ListenOutcome::Connected
+        } else if events.is_empty() {
+            ListenOutcome::Nothing
+        } else {
+            ListenOutcome::Updated
+        })
+    }
+
+    /// Applies `events` to the state. Returns whether the state should be actively refreshed.
+    fn apply_events(&mut self, events: &[DeviceEvent]) -> bool {
+        let mut request_active_refresh = false;
+        for event in events {
+            // Some headsets send this if they just turned on so we should refresh the state
+            if matches!(event, DeviceEvent::WirelessConnected(true)) {
+                request_active_refresh = true;
+            }
+            self.get_device_state_mut().update_self_with_event(event);
+        }
+        request_active_refresh
     }
 
     fn try_apply(&mut self, command: DeviceEvent) -> Result<(), String> {

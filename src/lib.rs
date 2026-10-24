@@ -248,6 +248,29 @@ pub fn prompt_user_for_udev_rule() {
     }
 }
 
+/// Returns whether the default microphone is muted, or `None` if `pactl` is unavailable or
+/// fails.
+#[cfg(target_os = "linux")]
+pub fn is_default_microphone_muted() -> Option<bool> {
+    let output = Command::new("pactl")
+        .args(["get-source-mute", "@DEFAULT_SOURCE@"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // Output looks like "Mute: yes"; the value isn't translated.
+    match String::from_utf8_lossy(&output.stdout)
+        .split(':')
+        .nth(1)?
+        .trim()
+    {
+        "yes" => Some(true),
+        "no" => Some(false),
+        _ => None,
+    }
+}
+
 #[cfg(feature = "eq-editor")]
 pub fn launch_eq_editor() {
     let mut exe_path = match std::env::current_exe() {
