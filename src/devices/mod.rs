@@ -128,6 +128,16 @@ impl Headset {
         }
     }
 
+    /// Waits up to `timeout` for reports the headset sends on its own and applies them, without
+    /// querying it. Only call this when `allow_passive_refresh` is true.
+    pub fn listen(&mut self, timeout: Duration) -> Result<ListenOutcome, DeviceError> {
+        match self {
+            Headset::Hid(device) => device.listen_for_updates(timeout),
+            #[cfg(target_os = "linux")]
+            Headset::Bluetooth(_) => Ok(ListenOutcome::Nothing),
+        }
+    }
+
     pub fn allow_passive_refresh(&mut self) -> bool {
         match self {
             Headset::Hid(device) => device.allow_passive_refresh(),
@@ -828,6 +838,18 @@ pub enum DeviceError {
     UnknownResponse([u8; 8], usize),
 }
 
+/// What a listen for reports the headset sends on its own picked up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListenOutcome {
+    /// No reports arrived.
+    Nothing,
+    /// Reports arrived and were applied.
+    Updated,
+    /// Reports arrived and were applied, and one said the headset just connected, so the state
+    /// should be actively refreshed.
+    Connected,
+}
+
 #[derive(Debug, Clone)]
 pub enum DeviceEvent {
     BatterLevel(u8),
@@ -1214,6 +1236,23 @@ pub trait Device {
         }
 
         Ok(())
+    }
+
+    /// Waits up to `timeout` for reports the device sends on its own (e.g. when the mute button
+    /// is pressed) and applies them, without querying the device. If a report says the device
+    /// just connected, it returns `ListenOutcome::Connected` and leaves the active refresh to
+    /// the caller.
+    /// Read errors are returned rather than treated as "no reports": a failed read returns
+    /// immediately, so the caller's listen loop would otherwise spin once the device is gone.
+    fn listen_for_updates(&mut self, timeout: Duration) -> Result<ListenOutcome, DeviceError> {
+        let events = self.drain_updates(timeout)?;
+        Ok(if self.apply_events(&events) {
+            ListenOutcome::Connected
+        } else if events.is_empty() {
+            ListenOutcome::Nothing
+        } else {
+            ListenOutcome::Updated
+        })
     }
 
     /// Applies `events` to the state. Returns whether the state should be actively refreshed.
