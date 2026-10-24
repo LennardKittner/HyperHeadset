@@ -204,11 +204,12 @@ fn main() {
 const LISTEN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Makes the system mute follow the headset's after it changed from `was_muted` to `muted`.
+/// `enigo` is `None` when `--press-mute-key` is off, so then nothing is pressed.
 #[cfg(target_os = "linux")]
 fn sync_system_mute(
     was_muted: Option<bool>,
     muted: Option<bool>,
-    enigo: &mut Option<enigo::Enigo>,
+    enigo: Option<&mut enigo::Enigo>,
 ) {
     use enigo::{Direction, Key, Keyboard};
     use hyper_headset::{debug_println, is_default_microphone_muted};
@@ -364,7 +365,7 @@ async fn main() {
                     break 'tick; // exit tick loop to retry connection in the outer loop
                 }
             };
-            sync_system_mute(mute_state, device.device_properties().muted, &mut enigo);
+            sync_system_mute(mute_state, device.device_properties().muted, enigo.as_mut());
 
             // Process tray device commands
             // with the default refresh_interval the state is only actively queried every 3min
@@ -389,7 +390,7 @@ async fn main() {
                             sync_system_mute(
                                 mute_state,
                                 device.device_properties().muted,
-                                &mut enigo,
+                                enigo.as_mut(),
                             );
                             tray_handler.update(&device.device_properties()).await;
                             if outcome == ListenOutcome::Connected {
