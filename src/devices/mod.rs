@@ -1093,7 +1093,10 @@ pub trait Device {
     /// Like `wait_for_updates`, but after the first report also reads every report already
     /// queued. Reading only one report per tick lets a backlog build up, and acting on stale
     /// mute reports flips the system mute back and forth.
-    fn drain_updates(&mut self, duration: Duration) -> Vec<DeviceEvent> {
+    ///
+    /// Fails only if the first read fails (e.g. the dongle was unplugged). A failure after that
+    /// returns the reports read so far; the next call reports the error.
+    fn drain_updates(&mut self, duration: Duration) -> Result<Vec<DeviceEvent>, DeviceError> {
         // Upper bound so a device that never stops sending can't stall the tick loop.
         const MAX_REPORTS: usize = 64;
         let mut events = Vec::new();
@@ -1109,11 +1112,12 @@ pub trait Device {
                     self.get_event_from_device_response(&buf)
                         .unwrap_or_default(),
                 ),
+                Err(error) if events.is_empty() => return Err(error.into()),
                 _ => break,
             }
             timeout = 0;
         }
-        events
+        Ok(events)
     }
 
     fn get_query_packets(&self) -> Vec<Vec<u8>> {
@@ -1191,7 +1195,10 @@ pub trait Device {
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
         let mut request_active_refresh = false;
         if self.allow_passive_refresh() {
-            for event in self.drain_updates(PASSIVE_REFRESH_TIME_OUT) {
+            for event in self
+                .drain_updates(PASSIVE_REFRESH_TIME_OUT)
+                .unwrap_or_default()
+            {
                 // Some headsets send this if they just turned on so we should refresh the
                 // state
                 if matches!(event, DeviceEvent::WirelessConnected(true)) {
@@ -1204,7 +1211,10 @@ pub trait Device {
             self.prepare_write();
             self.write_hid_report(&batter_packet)?;
             std::thread::sleep(RESPONSE_DELAY);
-            for event in self.drain_updates(Duration::from_secs(1)) {
+            for event in self
+                .drain_updates(Duration::from_secs(1))
+                .unwrap_or_default()
+            {
                 // Some headsets send this if they just turned on so we should refresh the
                 // state
                 if matches!(event, DeviceEvent::WirelessConnected(true)) {
