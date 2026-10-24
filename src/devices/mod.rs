@@ -1195,39 +1195,38 @@ pub trait Device {
     fn passive_refresh_state(&mut self) -> Result<(), DeviceError> {
         let mut request_active_refresh = false;
         if self.allow_passive_refresh() {
-            for event in self
+            let events = self
                 .drain_updates(PASSIVE_REFRESH_TIME_OUT)
-                .unwrap_or_default()
-            {
-                // Some headsets send this if they just turned on so we should refresh the
-                // state
-                if matches!(event, DeviceEvent::WirelessConnected(true)) {
-                    request_active_refresh = true;
-                }
-                self.get_device_state_mut().update_self_with_event(&event);
-            }
+                .unwrap_or_default();
+            request_active_refresh |= self.apply_events(&events);
         }
         if let Some(batter_packet) = self.get_battery_packet() {
             self.prepare_write();
             self.write_hid_report(&batter_packet)?;
             std::thread::sleep(RESPONSE_DELAY);
-            for event in self
+            let events = self
                 .drain_updates(Duration::from_secs(1))
-                .unwrap_or_default()
-            {
-                // Some headsets send this if they just turned on so we should refresh the
-                // state
-                if matches!(event, DeviceEvent::WirelessConnected(true)) {
-                    request_active_refresh = true;
-                }
-                self.get_device_state_mut().update_self_with_event(&event);
-            }
+                .unwrap_or_default();
+            request_active_refresh |= self.apply_events(&events);
         }
         if request_active_refresh {
             self.active_refresh_state()?;
         }
 
         Ok(())
+    }
+
+    /// Applies `events` to the state. Returns whether the state should be actively refreshed.
+    fn apply_events(&mut self, events: &[DeviceEvent]) -> bool {
+        let mut request_active_refresh = false;
+        for event in events {
+            // Some headsets send this if they just turned on so we should refresh the state
+            if matches!(event, DeviceEvent::WirelessConnected(true)) {
+                request_active_refresh = true;
+            }
+            self.get_device_state_mut().update_self_with_event(event);
+        }
+        request_active_refresh
     }
 
     fn try_apply(&mut self, command: DeviceEvent) -> Result<(), String> {
