@@ -229,6 +229,64 @@ fn sync_system_mute(
     }
 }
 
+/// What [`wait_for_command`] stopped waiting for.
+#[cfg(target_os = "linux")]
+enum Waited {
+    /// A tray command arrived.
+    Command(hyper_headset::devices::DeviceEvent),
+    /// The wait ran out.
+    TimedOut,
+    /// The headset reported it just connected, so its state needs an active refresh now.
+    HeadsetConnected,
+}
+
+/// Waits up to `timeout` for a tray command. For headsets that allow passive refresh it keeps
+/// listening meanwhile, so changes they report on their own (e.g. the mute button) reach the
+/// system mute and tray right away instead of at the next tick. Listening doesn't query the
+/// headset, so it doesn't add to the tick's load.
+#[cfg(target_os = "linux")]
+async fn wait_for_command(
+    device: &mut hyper_headset::devices::Headset,
+    rx: &std::sync::mpsc::Receiver<hyper_headset::devices::DeviceEvent>,
+    timeout: std::time::Duration,
+    mut enigo: Option<&mut enigo::Enigo>,
+    tray_handler: &status_tray::TrayHandler,
+) -> Result<Waited, hyper_headset::devices::DeviceError> {
+    use hyper_headset::debug_println;
+    use hyper_headset::devices::ListenOutcome;
+    use std::time::Instant;
+
+    if !device.allow_passive_refresh() {
+        return Ok(rx
+            .recv_timeout(timeout)
+            .map_or(Waited::TimedOut, Waited::Command));
+    }
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Ok(command) = rx.try_recv() {
+            return Ok(Waited::Command(command));
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(Waited::TimedOut);
+        }
+        let was_muted = device.device_properties().muted;
+        let outcome = device.listen(remaining.min(LISTEN_INTERVAL))?;
+        if outcome != ListenOutcome::Nothing {
+            sync_system_mute(
+                was_muted,
+                device.device_properties().muted,
+                enigo.as_deref_mut(),
+            );
+            tray_handler.update(&device.device_properties()).await;
+        }
+        if outcome == ListenOutcome::Connected {
+            debug_println!("Headset connected while listening, refreshing its state");
+            return Ok(Waited::HeadsetConnected);
+        }
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() {
@@ -236,13 +294,13 @@ async fn main() {
     use clap::{Arg, Command};
     use enigo::{Enigo, Settings};
     use std::sync::mpsc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
-    use hyper_headset::devices::{connect_compatible_device, DeviceEvent, ListenOutcome};
+    use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
     use status_tray::{StatusTray, TrayHandler};
 
     use hyper_headset::prompt_user_for_udev_rule;
-    use hyper_headset::{act_as_askpass_handler, debug_println, VERBOSE};
+    use hyper_headset::{act_as_askpass_handler, VERBOSE};
 
     if let Ok(name) = std::env::current_exe() {
         if let Some(name) = name.to_str() {
@@ -370,47 +428,27 @@ async fn main() {
             // Process tray device commands
             // with the default refresh_interval the state is only actively queried every 3min
             // querying the device too frequently can lead to instability
-            let first = if device.allow_passive_refresh() {
-                // Keep listening to the headset while waiting, so changes it reports on its own
-                // (e.g. the mute button) are handled right away instead of at the next tick.
-                // Listening doesn't query the device, so it doesn't add to the load above.
-                let deadline = Instant::now() + refresh_interval;
-                loop {
-                    if let Ok(command) = rx.try_recv() {
-                        break Some(command);
-                    }
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-                    if remaining.is_zero() {
-                        break None;
-                    }
-                    let mute_state = device.device_properties().muted;
-                    match device.listen(remaining.min(LISTEN_INTERVAL)) {
-                        Ok(ListenOutcome::Nothing) => (),
-                        Ok(outcome) => {
-                            sync_system_mute(
-                                mute_state,
-                                device.device_properties().muted,
-                                enigo.as_mut(),
-                            );
-                            tray_handler.update(&device.device_properties()).await;
-                            if outcome == ListenOutcome::Connected {
-                                debug_println!(
-                                    "Headset connected while listening, refreshing its state"
-                                );
-                                // Stop waiting so the next tick refreshes the state right away.
-                                active_refresh_due = true;
-                                break None;
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("{error}");
-                            tray_handler.update(&device.device_properties()).await;
-                            break 'tick; // retry connection in the outer loop
-                        }
-                    }
+            let first = match wait_for_command(
+                &mut device,
+                &rx,
+                refresh_interval,
+                enigo.as_mut(),
+                &tray_handler,
+            )
+            .await
+            {
+                Ok(Waited::Command(command)) => Some(command),
+                Ok(Waited::TimedOut) => None,
+                Ok(Waited::HeadsetConnected) => {
+                    // The next tick, which starts right away, refreshes the whole state.
+                    active_refresh_due = true;
+                    None
                 }
-            } else {
-                rx.recv_timeout(refresh_interval).ok()
+                Err(error) => {
+                    eprintln!("{error}");
+                    tray_handler.update(&device.device_properties()).await;
+                    break 'tick; // retry connection in the outer loop
+                }
             };
             // Spam-selecting EQ presets queues one event per click, but only the last
             // selection matters, so defer EQ commands and only apply the latest one.
