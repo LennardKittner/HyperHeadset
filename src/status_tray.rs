@@ -267,39 +267,11 @@ impl Tray for StatusTray {
                 }
                 hyper_headset::devices::PropertyDescriptorWrapper::Bool(property) => {
                     let writable = property.property_type == PropertyType::ReadWrite;
-                    let create_event = property.create_event;
-                    let Some(current_value) = property.data else {
-                        if !writable {
-                            continue;
-                        }
-                        let sub_menu = [true, false]
-                            .into_iter()
-                            .map(|value| {
-                                let update_sender = self.update_sender.clone();
-                                StandardItem {
-                                    label: if value { "On" } else { "Off" }.to_string(),
-                                    enabled: true,
-                                    activate: Box::new(move |_| {
-                                        if let Some(command) = (create_event)(value) {
-                                            let _ = update_sender.send(command);
-                                        }
-                                    }),
-                                    ..Default::default()
-                                }
-                                .into()
-                            })
-                            .collect();
-                        menu_items.push(
-                            SubMenu {
-                                label: format!("{}: Unknown", property.pretty_name),
-                                enabled: true,
-                                submenu: sub_menu,
-                                ..Default::default()
-                            }
-                            .into(),
-                        );
+                    if property.data.is_none() && !writable {
                         continue;
-                    };
+                    }
+                    let current_value = property.data.unwrap_or(false);
+                    let create_event = property.create_event;
                     let update_sender = self.update_sender.clone();
                     menu_items.push(
                         StandardItem {
