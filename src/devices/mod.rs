@@ -316,6 +316,7 @@ pub struct DeviceProperties {
     pub active_eq_preset: Option<String>,
     pub eq_synced: Option<bool>,
     pub eq_preset_options: Vec<String>,
+    pub persistent_settings: Option<bool>,
     // Capability flags - set once during device initialization
     pub can_set_mute: bool,
     pub can_set_surround_sound: bool,
@@ -326,6 +327,7 @@ pub struct DeviceProperties {
     pub can_set_silent_mode: bool,
     pub can_set_equalizer: bool,
     pub can_set_noise_gate: bool,
+    pub can_persist_settings: bool,
 }
 
 impl Display for DeviceProperties {
@@ -461,6 +463,9 @@ impl DeviceState {
                 self.device_properties.active_eq_preset = Some(name.clone());
                 self.device_properties.eq_synced = Some(true);
             }
+            DeviceEvent::PersistSettings(enabled) => {
+                self.device_properties.persistent_settings = Some(*enabled);
+            }
         };
     }
 }
@@ -526,6 +531,7 @@ impl DeviceProperties {
             connected: None,
             silent: None,
             noise_gate_active: None,
+            persistent_settings: None,
             can_set_mute: false,
             can_set_surround_sound: false,
             can_set_side_tone: false,
@@ -535,6 +541,7 @@ impl DeviceProperties {
             can_set_silent_mode: false,
             can_set_equalizer: false,
             can_set_noise_gate: false,
+            can_persist_settings: false,
             active_eq_preset: None,
             eq_synced: None,
             eq_preset_options: Vec::new(),
@@ -698,6 +705,18 @@ impl DeviceProperties {
                 create_event: &move |enable| Some(DeviceEvent::NoiseGateActive(enable)),
             }),
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
+                name: "persistent_settings",
+                pretty_name: "Persistent settings",
+                data: self.persistent_settings,
+                suffix: "",
+                property_type: if self.can_persist_settings {
+                    PropertyType::ReadWrite
+                } else {
+                    PropertyType::ReadOnly
+                },
+                create_event: &move |enable| Some(DeviceEvent::PersistSettings(enable)),
+            }),
+            PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 name: "connected",
                 pretty_name: "Connected",
                 data: self.connected,
@@ -852,6 +871,7 @@ pub enum DeviceEvent {
     RequireSIRKReset(bool),
     NoiseGateActive(bool),
     EqualizerPreset(String),
+    PersistSettings(bool),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -1097,6 +1117,9 @@ pub trait Device {
     fn can_set_noise_gate(&self) -> bool {
         self.set_noise_gate_packet(true).is_some()
     }
+    fn can_persist_settings(&self) -> bool {
+        self.persist_settings_to_the_device_packet(true).is_some()
+    }
 
     // Initialize capability flags in device state
     fn init_capabilities(&mut self) {
@@ -1110,6 +1133,7 @@ pub trait Device {
         let can_set_silent_mode = self.can_set_silent_mode();
         let can_set_equalizer = self.can_set_equalizer();
         let can_set_noise_gate = self.can_set_noise_gate();
+        let can_persist_settings = self.can_persist_settings();
 
         // Now set them in device state
         let state = self.get_device_state_mut();
@@ -1122,6 +1146,7 @@ pub trait Device {
         state.device_properties.can_set_silent_mode = can_set_silent_mode;
         state.device_properties.can_set_equalizer = can_set_equalizer;
         state.device_properties.can_set_noise_gate = can_set_noise_gate;
+        state.device_properties.can_persist_settings = can_persist_settings;
     }
 
     fn execute_headset_specific_functionality(&mut self) -> Result<(), DeviceError> {
@@ -1334,6 +1359,23 @@ pub trait Device {
                     }
                 } else {
                     Err("ERROR: Activating noise gate is not supported on this device")?;
+                }
+            }
+            DeviceEvent::PersistSettings(enable) => {
+                if let Some(packet) = self.persist_settings_to_the_device_packet(enable) {
+                    self.prepare_write();
+                    if let Err(err) = self.write_hid_report(&packet) {
+                        Err(format!(
+                            "Failed to persist setting to device with error: {:?}",
+                            err
+                        ))?;
+                    } else {
+                        self.get_device_state_mut()
+                            .device_properties
+                            .persistent_settings = Some(enable);
+                    }
+                } else {
+                    Err("ERROR: Enabling or disabling the persisting of setting to the device is not supported on this device")?;
                 }
             }
             #[cfg(feature = "eq-support")]

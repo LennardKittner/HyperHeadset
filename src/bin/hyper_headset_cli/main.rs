@@ -139,7 +139,7 @@ where
 
 fn create_command(device: &Result<Headset, DeviceError>) -> Command {
     #[allow(unused_mut)]
-    let mut cmd = Command::new(env!("CARGO_PKG_NAME"))
+    let mut cmd = Command::new("hyper_headset_cli")
         .version(env!("CARGO_PKG_VERSION"))
         .disable_version_flag(false)
         .disable_help_flag(true)
@@ -220,6 +220,30 @@ fn create_command(device: &Result<Headset, DeviceError>) -> Command {
                 .value_parser(clap::value_parser!(bool)),
         )
         .arg(
+            Arg::new("persistent-settings")
+                .long("persistent-settings")
+                .alias("persistent_settings")
+                .required(false)
+                .help("Persists setting to the device.")
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_noise_gate))
+                .value_parser(clap::value_parser!(bool)),
+        );
+
+    // Feature-gated TUI editor arg
+    #[cfg(feature = "eq-editor")]
+    {
+        cmd = cmd.arg(
+            Arg::new("eq")
+                .long("eq")
+                .action(ArgAction::SetTrue)
+                .help(
+                    "Open interactive EQ editor (TUI).\nThis may not be supported on your device.",
+                )
+                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_equalizer)),
+        );
+    }
+
+    cmd = cmd.arg(
             Arg::new("eq-profile")
                 .long("eq-profile")
                 .required(false)
@@ -256,34 +280,19 @@ fn create_command(device: &Result<Headset, DeviceError>) -> Command {
                 .help("Use verbose output"),
         )
         .arg(
-            Arg::new("help")
-                .long("help")
-                .short('h')
-                .action(ArgAction::SetTrue)
-                .help("Print help"),
-        )
-        .arg(
             Arg::new("json")
                 .long("json")
                 .default_value("false")
                 .action(ArgAction::SetTrue)
                 .required(false)
                 .help("Use JSON output. Time is in seconds."),
-        );
-
-    // Feature-gated TUI editor arg
-    #[cfg(feature = "eq-editor")]
-    {
-        cmd = cmd.arg(
-            Arg::new("eq")
-                .long("eq")
+        ).arg(
+            Arg::new("help")
+                .long("help")
+                .short('h')
                 .action(ArgAction::SetTrue)
-                .help(
-                    "Open interactive EQ editor (TUI).\nThis may not be supported on your device.",
-                )
-                .hide(!SHOW_ALL_OPTIONS && !device_supports(device, |d| d.can_set_equalizer)),
-        );
-    }
+                .help("Print help"),
+            );
 
     cmd
 }
@@ -436,6 +445,9 @@ fn main() {
     }
     if let Some(activate) = matches.get_one::<bool>("activate-noise-gate") {
         commands.push(DeviceEvent::NoiseGateActive(*activate));
+    }
+    if let Some(enable) = matches.get_one::<bool>("persistent-settings") {
+        commands.push(DeviceEvent::PersistSettings(*enable));
     }
 
     for command in commands {
