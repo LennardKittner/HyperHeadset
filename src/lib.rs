@@ -271,6 +271,24 @@ pub fn is_default_microphone_muted() -> Option<bool> {
     }
 }
 
+/// Mutes or unmutes the default microphone with `pactl`.
+#[cfg(target_os = "linux")]
+pub fn set_default_microphone_mute(muted: bool) -> io::Result<()> {
+    let status = Command::new("pactl")
+        .args([
+            "set-source-mute",
+            "@DEFAULT_SOURCE@",
+            if muted { "1" } else { "0" },
+        ])
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::other(format!(
+            "pactl set-source-mute exited with {status}"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(feature = "eq-editor")]
 pub fn launch_eq_editor() {
     let mut exe_path = match std::env::current_exe() {

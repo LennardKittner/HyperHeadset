@@ -203,29 +203,105 @@ fn main() {
 #[cfg(target_os = "linux")]
 const LISTEN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
-/// Makes the system mute follow the headset's after it changed from `was_muted` to `muted`.
-/// `enigo` is `None` when `--press-mute-key` is off, so then nothing is pressed.
+/// How long to wait for the system mute to follow the first MicMute press before deciding that
+/// nothing handles the key.
 #[cfg(target_os = "linux")]
-fn sync_system_mute(
-    was_muted: Option<bool>,
-    muted: Option<bool>,
-    enigo: Option<&mut enigo::Enigo>,
-) {
-    use enigo::{Direction, Key, Keyboard};
-    use hyper_headset::{debug_println, is_default_microphone_muted};
+const MIC_MUTE_KEY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
-    let (Some(was_muted), Some(muted), Some(enigo)) = (was_muted, muted, enigo) else {
-        return;
-    };
-    // MicMute toggles the system mute, and some headsets (e.g. Cloud Alpha Wireless) follow the
-    // system mute. Pressing it when the system already matches would flip the headset and they'd
-    // keep toggling each other, so only press it to fix a mismatch. The key is still used (rather
-    // than muting directly) so desktops like KDE update their own mute state, tray icon and OSD.
-    if was_muted != muted && is_default_microphone_muted() != Some(muted) {
+/// Makes the system mute follow the headset's by pressing MicMute, for `--press-mute-key`.
+#[cfg(target_os = "linux")]
+struct SystemMute {
+    enigo: enigo::Enigo,
+    /// Whether pressing MicMute changes the system mute, found out on the first press. It
+    /// doesn't where nothing handles the key (e.g. Hyprland without a bind for it).
+    key_sets_mute: Option<bool>,
+}
+
+#[cfg(target_os = "linux")]
+impl SystemMute {
+    fn new(enigo: enigo::Enigo) -> Self {
+        Self {
+            enigo,
+            key_sets_mute: None,
+        }
+    }
+
+    /// Makes the system mute follow the headset's after it changed from `was_muted` to `muted`.
+    fn sync(&mut self, was_muted: Option<bool>, muted: Option<bool>) {
+        use hyper_headset::{debug_println, is_default_microphone_muted};
+
+        let (Some(was_muted), Some(muted)) = (was_muted, muted) else {
+            return;
+        };
+        if was_muted == muted {
+            return;
+        }
+        if self.key_sets_mute == Some(false) {
+            // The key can't flip the system mute here, so pressing it is always safe, and apps
+            // bound to it (e.g. Discord) still see every change. Set the system mute directly.
+            debug_println!(
+                "Headset mute changed to {muted}, pressing MicMute and setting the system mute"
+            );
+            self.press_key();
+            set_system_mute(muted);
+            return;
+        }
+        // MicMute toggles the system mute, and some headsets (e.g. Cloud Alpha Wireless) follow
+        // the system mute. Pressing it when the system already matches would flip the headset and
+        // they'd keep toggling each other, so only press it to fix a mismatch. The key is still
+        // used (rather than muting directly) so desktops like KDE update their own mute state,
+        // tray icon and OSD.
+        if is_default_microphone_muted() == Some(muted) {
+            return;
+        }
         debug_println!("Headset mute changed to {muted}, pressing MicMute");
-        if let Err(e) = enigo.key(Key::MicMute, Direction::Click) {
+        self.press_key();
+        if self.key_sets_mute.is_none() {
+            self.key_sets_mute = system_mute_follows(muted);
+            if self.key_sets_mute == Some(false) {
+                debug_println!(
+                    "MicMute didn't change the system mute, setting it directly from now on"
+                );
+                set_system_mute(muted);
+            }
+        }
+    }
+
+    fn press_key(&mut self) {
+        use enigo::{Direction, Key, Keyboard};
+
+        if let Err(e) = self.enigo.key(Key::MicMute, Direction::Click) {
             eprintln!("Failed to press key on mute: {e}");
         }
+    }
+}
+
+/// Waits up to [`MIC_MUTE_KEY_TIMEOUT`] for the system mute to become `muted`. Returns `None` if
+/// `pactl` couldn't tell.
+#[cfg(target_os = "linux")]
+fn system_mute_follows(muted: bool) -> Option<bool> {
+    use hyper_headset::is_default_microphone_muted;
+    use std::time::{Duration, Instant};
+
+    let deadline = Instant::now() + MIC_MUTE_KEY_TIMEOUT;
+    let mut answered = false;
+    loop {
+        match is_default_microphone_muted() {
+            Some(system_muted) if system_muted == muted => return Some(true),
+            Some(_) => answered = true,
+            None => (),
+        }
+        if Instant::now() >= deadline {
+            return answered.then_some(false);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn set_system_mute(muted: bool) {
+    if let Err(e) = hyper_headset::set_default_microphone_mute(muted) {
+        eprintln!("Failed to set the system mute: {e}");
     }
 }
 
@@ -249,7 +325,7 @@ async fn wait_for_command(
     device: &mut hyper_headset::devices::Headset,
     rx: &std::sync::mpsc::Receiver<hyper_headset::devices::DeviceEvent>,
     timeout: std::time::Duration,
-    mut enigo: Option<&mut enigo::Enigo>,
+    mut system_mute: Option<&mut SystemMute>,
     tray_handler: &status_tray::TrayHandler,
 ) -> Result<Waited, hyper_headset::devices::DeviceError> {
     use hyper_headset::debug_println;
@@ -273,11 +349,9 @@ async fn wait_for_command(
         let was_muted = device.device_properties().muted;
         let outcome = device.listen(remaining.min(LISTEN_INTERVAL))?;
         if outcome != ListenOutcome::Nothing {
-            sync_system_mute(
-                was_muted,
-                device.device_properties().muted,
-                enigo.as_deref_mut(),
-            );
+            if let Some(system_mute) = system_mute.as_deref_mut() {
+                system_mute.sync(was_muted, device.device_properties().muted);
+            }
             tray_handler.update(&device.device_properties()).await;
         }
         if outcome == ListenOutcome::Connected {
@@ -351,9 +425,9 @@ async fn main() {
         .get_matches();
 
     let press_mute_key = *matches.get_one::<bool>("press-mute-key").unwrap_or(&true);
-    let mut enigo = if press_mute_key {
+    let mut system_mute = if press_mute_key {
         match Enigo::new(&Settings::default()) {
-            Ok(enigo) => Some(enigo),
+            Ok(enigo) => Some(SystemMute::new(enigo)),
             Err(e) => {
                 eprintln!("Virtual mute key failed to initialize: {e}");
                 None
@@ -423,7 +497,9 @@ async fn main() {
                     break 'tick; // exit tick loop to retry connection in the outer loop
                 }
             };
-            sync_system_mute(mute_state, device.device_properties().muted, enigo.as_mut());
+            if let Some(system_mute) = &mut system_mute {
+                system_mute.sync(mute_state, device.device_properties().muted);
+            }
 
             // Process tray device commands
             // with the default refresh_interval the state is only actively queried every 3min
@@ -432,7 +508,7 @@ async fn main() {
                 &mut device,
                 &rx,
                 refresh_interval,
-                enigo.as_mut(),
+                system_mute.as_mut(),
                 &tray_handler,
             )
             .await
