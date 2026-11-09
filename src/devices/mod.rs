@@ -195,7 +195,7 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
     // every supported device. Probing every interface (as Windows does) sends
     // a burst of HID writes per connect attempt, which has been observed to
     // destabilise the Cloud III S wireless dongle.
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(false)]
     {
         let state = states
             .into_iter()
@@ -223,7 +223,7 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
     }
     // On Windows we have to probe each HID interface to find the one that
     // accepts control writes.
-    #[cfg(target_os = "windows")]
+    #[cfg(true)]
     {
         let mut device = None;
         let total = states.len();
@@ -252,7 +252,7 @@ fn connect_hid_device() -> Result<Box<dyn Device>, DeviceError> {
             let probe_packet = test_device
                 .get_query_packets()
                 .into_iter()
-                .nth(2)
+                .next()
                 .expect("Why is there a device without packets ???");
 
             test_device.prepare_write();
