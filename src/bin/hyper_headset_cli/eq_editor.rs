@@ -1,5 +1,5 @@
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -204,6 +204,11 @@ impl EqEditor {
             terminal.draw(|frame| self.draw(frame))?;
 
             if let Event::Key(key) = event::read()? {
+                // Only handle actual key presses.
+                // Ignore key releases and auto-repeat events.
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
                 // Ctrl+C: save current state as TUI and exit
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     return Ok(EditorResult::Saved {
