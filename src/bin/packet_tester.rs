@@ -1,295 +1,49 @@
-use std::time::Duration;
-
-use hidapi::{DeviceInfo, HidApi};
-use rusb::{Context, DeviceHandle, UsbContext};
-
-const VENDOR_IDS: [u16; 2] = [0x0951, 0x03F0];
-const PRODUCT_IDS: [u16; 4] = [0x1718, 0x018B, 0x0b92, 0x03C0];
-
-const BASE_PACKET: [u8; 62] = {
-    let mut tmp = [0u8; 62];
-    tmp[0] = 0x06;
-    tmp[1] = 0x00;
-    tmp[2] = 0x02;
-    tmp[3] = 0x00;
-    tmp[4] = 0x9A;
-    tmp[5] = 0x00;
-    tmp[6] = 0x00;
-    tmp[7] = 0x68;
-    tmp[8] = 0x4A;
-    tmp[9] = 0x8E;
-    tmp[10] = 0x0A;
-    tmp[11] = 0x00;
-    tmp[12] = 0x00;
-    tmp[13] = 0x00;
-    tmp[14] = 0xBB;
-    tmp[15] = 0x01;
-    tmp[16] = 0x00;
-    tmp[17] = 0x00;
-    tmp[18] = 0x00;
-    tmp[19] = 0x00;
-    tmp[20] = 0x00;
-    tmp[21] = 0x00;
-    tmp[22] = 0x00;
-    tmp[23] = 0x00;
-    tmp[24] = 0x00;
-    tmp[25] = 0x00;
-    tmp[26] = 0x00;
-    tmp[27] = 0x00;
-    tmp[28] = 0x00;
-    tmp[29] = 0x00;
-    tmp[30] = 0x00;
-    tmp[31] = 0x00;
-    tmp[32] = 0x00;
-    tmp[33] = 0x00;
-    tmp[34] = 0x00;
-    tmp[35] = 0x00;
-    tmp[36] = 0x00;
-    tmp[37] = 0x00;
-    tmp[38] = 0x00;
-    tmp[39] = 0x00;
-    tmp[40] = 0x00;
-    tmp[41] = 0x00;
-    tmp[42] = 0x00;
-    tmp[43] = 0x00;
-    tmp[44] = 0x00;
-    tmp[45] = 0x00;
-    tmp[46] = 0x00;
-    tmp[47] = 0x00;
-    tmp[48] = 0x00;
-    tmp[49] = 0x00;
-    tmp[50] = 0x00;
-    tmp[51] = 0x00;
-    tmp[52] = 0x00;
-    tmp[53] = 0x00;
-    tmp[54] = 0x00;
-    tmp[55] = 0x00;
-    tmp[56] = 0x00;
-    tmp[57] = 0x00;
-    tmp[58] = 0x00;
-    tmp[59] = 0x00;
-    tmp[60] = 0x00;
-    tmp[61] = 0x00;
-    tmp
-};
-
-const PACKET1: [u8; 62] = {
-    let mut tmp = BASE_PACKET;
-    tmp[2] = 0;
-    tmp[4] = 0xFF;
-    tmp[10] = 0x00;
-    tmp[14] = 0x00;
-    tmp[15] = 0x00;
-    tmp
-};
-const PACKET2: [u8; 62] = {
-    let mut tmp = BASE_PACKET;
-    tmp[15] = 0x11;
-    tmp
-};
-const PACKET3: [u8; 62] = {
-    let mut tmp = BASE_PACKET;
-    tmp[15] = 0x1D;
-    tmp
-};
-const PACKET4: [u8; 62] = {
-    let mut tmp = BASE_PACKET;
-    tmp[15] = 0x09;
-    tmp
-};
-const PACKET5: [u8; 62] = {
-    let mut tmp = BASE_PACKET;
-    tmp[15] = 0x02;
-    tmp
-};
-const PACKET6: [u8; 62] = {
-    let mut tmp = BASE_PACKET;
-    tmp[15] = 0x03;
-    tmp
-};
-const PACKET7: [u8; 62] = {
-    let mut tmp = BASE_PACKET;
-    tmp[15] = 0x1A;
-    tmp
-};
-const PACKET8: [u8; 62] = PACKET5;
-const PACKET9: [u8; 62] = PACKET6;
-const PACKET10: [u8; 62] = PACKET5;
-const PACKET11: [u8; 62] = PACKET6;
-
-const PACKETS: [&[u8]; 12] = [
-    &BASE_PACKET,
-    &PACKET1,
-    &PACKET2,
-    &PACKET3,
-    &PACKET4,
-    &PACKET5,
-    &PACKET6,
-    &PACKET7,
-    &PACKET8,
-    &PACKET9,
-    &PACKET10,
-    &PACKET11,
-];
+use hidapi::HidApi;
 
 fn main() {
-    test_non_hid();
+    let api = HidApi::new().unwrap();
 
-    let hidapi = HidApi::new().unwrap();
-    for device in hidapi.device_list() {
-        if VENDOR_IDS.contains(&device.vendor_id()) && PRODUCT_IDS.contains(&device.product_id()) {
-            test_device(device);
+    for info in api.device_list() {
+        if info.vendor_id() != 0x03F0 || info.product_id() != 0x03C0 {
+            continue;
         }
-    }
-}
-const ENDPOINT_OUT: u8 = 0x01; // Bulk OUT
-const ENDPOINT_IN: u8 = 0x82; // Bulk IN (endpoint 2, IN flag set)
-const INTERFACE: u8 = 0x00;
-const TIMEOUT: Duration = Duration::from_secs(2);
+        println!(
+            "path={:?} usage_page={:#06x} usage={:#06x}",
+            info.path(),
+            info.usage_page(),
+            info.usage()
+        );
 
-fn build_cbw() -> [u8; 31] {
-    let mut cbw = [0u8; 31];
-
-    // Signature: "USBC"
-    cbw[0..4].copy_from_slice(&[0x55, 0x53, 0x42, 0x43]);
-    // Tag (arbitrary, must match CSW response)
-    cbw[4..8].copy_from_slice(&[0x00, 0x00, 0x00, 0x00]);
-    // Transfer length: 16 bytes (little-endian)
-    cbw[8..12].copy_from_slice(&[0x10, 0x00, 0x00, 0x00]);
-    // Flags: 0x80 = Data-In (device → host)
-    cbw[12] = 0x80;
-    // LUN: 0
-    cbw[13] = 0x00;
-    // Command block length: 6
-    cbw[14] = 0x06;
-    // Command block: vendor command 0xF0, sub-param 0x09
-    cbw[15] = 0xF0;
-    cbw[16] = 0x09;
-    // Remaining command bytes are already 0x00
-
-    cbw
-}
-
-fn dump_interfaces<T: UsbContext>(device: &rusb::Device<T>) {
-    let config = match device.active_config_descriptor() {
-        Ok(c) => c,
-        Err(e) => {
-            println!("  (could not read config descriptor: {e})");
-            return;
-        }
-    };
-    for interface in config.interfaces() {
-        for desc in interface.descriptors() {
-            println!(
-                "  interface {} alt {}: class={:#04x} sub={:#04x} proto={:#04x}",
-                interface.number(),
-                desc.setting_number(),
-                desc.class_code(),
-                desc.sub_class_code(),
-                desc.protocol_code()
-            );
-            for ep in desc.endpoint_descriptors() {
-                println!(
-                    "    endpoint {:#04x} dir={:?} kind={:?}",
-                    ep.address(),
-                    ep.direction(),
-                    ep.transfer_type()
-                );
-            }
-        }
-    }
-}
-
-fn parse_battery(data: &[u8]) -> Option<u8> {
-    if data.len() >= 4 {
-        Some(data[3])
-    } else {
-        None
-    }
-}
-
-fn read_battery(handle: &DeviceHandle<impl UsbContext>) -> u8 {
-    let cbw = build_cbw();
-    let written = handle.write_bulk(ENDPOINT_OUT, &cbw, TIMEOUT).unwrap();
-    println!("CBW sent: {} bytes", written);
-
-    let mut data = [0u8; 16];
-    let read = handle.read_bulk(ENDPOINT_IN, &mut data, TIMEOUT).unwrap();
-    println!("Data received ({} bytes): {:02x?}", read, &data[..read]);
-
-    let mut csw = [0u8; 13];
-    let csw_read = handle.read_bulk(ENDPOINT_IN, &mut csw, TIMEOUT).unwrap();
-    println!(
-        "CSW received ({} bytes): {:02x?}",
-        csw_read,
-        &csw[..csw_read]
-    );
-
-    if &csw[0..4] != b"USBS" {
-        eprintln!("Invalid CSW signature!");
-        return 0;
-    }
-    if csw[12] != 0x00 {
-        eprintln!("CSW status error: 0x{:02x}", csw[12]);
-        return 0;
-    }
-
-    parse_battery(&data).unwrap()
-}
-
-fn test_non_hid() {
-    let context = Context::new().unwrap();
-
-    for device in context.devices().unwrap().iter() {
-        if device
-            .device_descriptor()
-            .map(|desc| {
-                VENDOR_IDS.contains(&desc.vendor_id()) && PRODUCT_IDS.contains(&desc.product_id())
-            })
-            .unwrap_or(false)
-        {
-            let handle = device.open().unwrap();
-            #[cfg(target_os = "linux")]
-            if handle.kernel_driver_active(INTERFACE).unwrap() {
-                handle.detach_kernel_driver(INTERFACE).unwrap();
-                println!("Kernel driver detached");
-            }
-            dump_interfaces(&device);
-            if let Err(e) = handle.claim_interface(INTERFACE) {
-                println!("  claim_interface({INTERFACE}) failed: {e}");
+        let dev = match info.open_device(&api) {
+            Ok(d) => d,
+            Err(e) => {
+                println!("  open failed: {e}");
                 continue;
             }
+        };
 
-            println!("Battery level: {:?}", read_battery(&handle));
-            handle.release_interface(INTERFACE).unwrap();
+        // Feature report IDs valid for this collection
+        let feature_ids: &[u8] = match info.usage_page() {
+            0xFF00 => &[0x24],
+            0xFF0B => &[0x2A, 0x2B],
+            _ => &[],
+        };
 
-            #[cfg(target_os = "linux")]
-            handle.attach_kernel_driver(INTERFACE).unwrap();
+        for &id in feature_ids {
+            let mut buf = [0u8; 61];
+            buf[0] = id;
+            match dev.get_feature_report(&mut buf) {
+                Ok(n) => println!("  feature {id:#04x} ({n} bytes): {:02x?}", &buf[..n]),
+                Err(e) => println!("  feature {id:#04x} failed: {e}"),
+            }
         }
-    }
-}
 
-fn test_device(device_info: &DeviceInfo) {
-    println!(
-        "Testing device: {}:{}:{}",
-        device_info.vendor_id(),
-        device_info.product_id(),
-        device_info.interface_number()
-    );
-    let hidapi = HidApi::new().unwrap();
-    let device = device_info.open_device(&hidapi).unwrap();
-
-    for packet in PACKETS {
-        let mut response_buffer = [0u8; 20];
-        let mut input_report_buffer = [0u8; 64];
-        input_report_buffer[0] = 6;
-        println!("  packet: {:?}", packet);
-        device.get_input_report(&mut input_report_buffer).unwrap();
-        let _ = device.write(packet).map_err(|err| println!("{err}"));
-        match device.read_timeout(&mut response_buffer, 1000) {
-            Err(err) => println!("{err}"),
-            Ok(len) => {
-                println!("  response: {:?}\n", &response_buffer[..len]);
+        for _ in 0..10 {
+            let mut inbuf = [0u8; 65];
+            match dev.read_timeout(&mut inbuf, 500) {
+                Ok(0) => {}
+                Ok(n) => println!("  input ({n} bytes): {:02x?}", &inbuf[..n]),
+                Err(e) => println!("  read failed: {e}"),
             }
         }
     }
