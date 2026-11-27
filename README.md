@@ -174,7 +174,9 @@ echo 03f0:06be:r | sudo tee /sys/module/usbcore/parameters/quirks
 
 Either way, then unplug the dongle, wait 5 s and plug it back in.
 
-The setting is lost on reboot. To keep it, add `usbcore.quirks=03f0:06be:r` (with your product ID) to your kernel command line; how depends on your bootloader, so see your distribution's documentation.
+The setting is lost on reboot. Once `--fix-usb-quirk` has confirmed that replies come through, it offers to keep the quirk with GRUB. This is available where GRUB reads `/etc/default/grub.d` and has `update-grub`, as on Debian and Ubuntu: it writes `/etc/default/grub.d/hyper-headset-usb-quirk.cfg` and runs `update-grub`. To undo, delete that file and run `sudo update-grub`. It changes nothing if your GRUB config already sets USB quirks. If you already applied the fix, run it again to get the offer.
+
+Otherwise, add `usbcore.quirks=03f0:06be:r` (with your product ID) to your kernel command line; how depends on your bootloader, so see your distribution's documentation.
 
 ## Usage
 

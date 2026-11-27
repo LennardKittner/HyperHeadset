@@ -12,6 +12,8 @@ use std::{
     process::{Command, Stdio},
 };
 
+mod grub;
+
 use crate::devices::{
     cloud_iii_s_wireless::{PRODUCT_IDS, VENDOR_IDS},
     connect_compatible_device, DeviceProperties,
@@ -135,24 +137,24 @@ fn plugged_in_affected_devices(usb_devices: &Path) -> io::Result<Vec<(u16, u16)>
     Ok(devices)
 }
 
-/// Writes the quirks parameter with `sudo tee`, which prompts on the terminal if needed.
-fn write_quirks_with_sudo(quirks: &str) -> Result<(), String> {
+/// Writes a root-owned file with `sudo tee`, which prompts on the terminal if needed.
+fn sudo_write(path: &str, content: &str) -> Result<(), String> {
     let mut child = Command::new("sudo")
-        .args(["tee", QUIRKS_PARAM_PATH])
+        .args(["tee", path])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .spawn()
         .map_err(|e| format!("Failed to run sudo: {e}"))?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin
-            .write_all(quirks.as_bytes())
+            .write_all(content.as_bytes())
             .map_err(|e| format!("Failed to pass the value to sudo: {e}"))?;
     }
     let status = child
         .wait()
         .map_err(|e| format!("Failed to wait for sudo: {e}"))?;
     if !status.success() {
-        return Err(format!("Writing {QUIRKS_PARAM_PATH} failed: {status}"));
+        return Err(format!("Writing {path} failed: {status}"));
     }
     Ok(())
 }
@@ -280,16 +282,80 @@ fn wait_for_key() -> Result<Key, String> {
     }
 }
 
+/// Asks a yes/no question on the terminal, defaulting to no.
+fn ask(question: &str) -> Result<bool, String> {
+    print!("{question} (y/N): ");
+    io::stdout().flush().map_err(|e| e.to_string())?;
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|e| e.to_string())?;
+    Ok(matches!(answer.trim(), "y" | "Y"))
+}
+
+fn print_manual_persistence(quirks: &str) {
+    println!("To keep it across reboots, add this to your kernel command line");
+    println!("(how depends on your bootloader, see your distribution's documentation):");
+    println!("  usbcore.quirks={quirks}");
+}
+
+/// Once the quirk is known to work, offers to keep it across reboots.
+fn offer_persistence(devices: &[(u16, u16)], quirks: &str) -> Result<(), String> {
+    let cmdline = fs::read_to_string(CMDLINE_PATH).unwrap_or_default();
+    if devices
+        .iter()
+        .all(|&(vendor_id, product_id)| cmdline_has_quirk(&cmdline, vendor_id, product_id))
+    {
+        return Ok(());
+    }
+    println!();
+    match grub::current_plan(devices, &cmdline) {
+        grub::Plan::AlreadyConfigured(path) => {
+            println!("{} already sets the quirk for GRUB.", path.display());
+            println!("If you haven't regenerated the GRUB config since it changed, do that");
+            println!("(on Debian and Ubuntu: sudo update-grub).");
+        }
+        grub::Plan::OtherQuirks(path) => {
+            println!("{} sets other USB quirks, so nothing", path.display());
+            println!("is changed automatically. Merge this into that setting:");
+            println!("  usbcore.quirks={quirks}");
+        }
+        grub::Plan::Unsupported => print_manual_persistence(quirks),
+        grub::Plan::Install(value) => {
+            println!("The quirk is lost on reboot. If you boot with GRUB, it can be kept by");
+            println!("writing usbcore.quirks={value} to {}", grub::drop_in_path());
+            println!("and running update-grub. This needs root.");
+            if !io::stdin().is_terminal() {
+                println!("Not asking to install it, because input isn't a terminal. Run");
+                println!("hyper_headset_cli {FIX_FLAG} in a terminal to be asked,");
+                println!("or add usbcore.quirks={value} to your kernel command line yourself.");
+                return Ok(());
+            }
+            if !ask("Do you want to install it to GRUB now?")? {
+                println!("GRUB is unchanged.");
+                print_manual_persistence(&value);
+                return Ok(());
+            }
+            grub::install(&value)?;
+            println!(
+                "Installed. To undo, delete {} and run sudo update-grub.",
+                grub::drop_in_path()
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Asks for a replug and checks the headset's replies on request, until they come through or
-/// the user quits.
-fn confirm_after_replug(numbers_before: &[String]) -> Result<(), String> {
+/// the user quits. Returns whether they came through.
+fn confirm_after_replug(numbers_before: &[String]) -> Result<bool, String> {
     loop {
         println!();
         println!("Unplug the dongle, wait 5 s and plug it back in, with the headset on.");
         println!("Then press Enter or Space to check (Esc or q to quit).");
         if wait_for_key()? == Key::Quit {
             println!("Quit before the fix was confirmed.");
-            return Ok(());
+            return Ok(false);
         }
         let numbers = affected_device_numbers(Path::new(USB_DEVICES_PATH));
         if numbers.is_empty() {
@@ -301,7 +367,7 @@ fn confirm_after_replug(numbers_before: &[String]) -> Result<(), String> {
             match probe_replies() {
                 Probe::Working => {
                     println!("Fixed: the headset's replies are coming through.");
-                    return Ok(());
+                    return Ok(true);
                 }
                 Probe::HeadsetOff => {
                     println!("The headset isn't connected yet. Turn it on and wait a few seconds.");
@@ -348,44 +414,32 @@ pub fn run_interactive_fix() -> Result<(), String> {
                 "Run {FIX_FLAG} in a terminal to confirm the change."
             ));
         }
-        print!("Apply it? (y/N): ");
-        io::stdout().flush().map_err(|e| e.to_string())?;
-        let mut answer = String::new();
-        io::stdin()
-            .read_line(&mut answer)
-            .map_err(|e| e.to_string())?;
-        if !matches!(answer.trim(), "y" | "Y") {
+        if !ask("Apply it?")? {
             println!("Nothing changed.");
             return Ok(());
         }
-        write_quirks_with_sudo(&updated)?;
+        sudo_write(QUIRKS_PARAM_PATH, &updated)?;
         println!("USB quirk set.");
-    }
-
-    let cmdline = fs::read_to_string(CMDLINE_PATH).unwrap_or_default();
-    let persistent = devices
-        .iter()
-        .all(|&(vendor_id, product_id)| cmdline_has_quirk(&cmdline, vendor_id, product_id));
-    if !persistent {
-        println!();
-        println!("This boot's kernel command line doesn't set the quirk. Unless you've added it");
-        println!("since booting, it's lost on reboot. To keep it, add this to the command line");
-        println!("(how depends on your bootloader, see your distribution's documentation):");
-        println!("  usbcore.quirks={updated}");
     }
 
     // With the quirk set before this run, the dongle may need nothing.
     if updated == current && matches!(probe_replies(), Probe::Working) {
         println!();
-        println!("The headset's replies are coming through. Nothing else to do.");
-        return Ok(());
+        println!("The headset's replies are coming through.");
+        return offer_persistence(&devices, &updated);
     }
     if !io::stdin().is_terminal() {
         println!();
         println!("If replies are missing, unplug the dongle, wait 5 s and plug it back in.");
+        print_manual_persistence(&updated);
         return Ok(());
     }
-    confirm_after_replug(&numbers_before)
+    if confirm_after_replug(&numbers_before)? {
+        offer_persistence(&devices, &updated)
+    } else {
+        println!("The quirk is lost on reboot. Run this again to confirm it and keep it.");
+        Ok(())
+    }
 }
 
 /// Whether the kernel command line sets the quirk, i.e. it survives a reboot.
