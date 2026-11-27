@@ -476,7 +476,9 @@ fn cmdline_has_quirk(cmdline: &str, vendor_id: u16, product_id: u16) -> bool {
     cmdline
         .split_whitespace()
         .filter_map(|parameter| parameter.strip_prefix("usbcore.quirks="))
-        .any(|quirks| has_quirk(quirks, vendor_id, product_id))
+        // Only the last setting counts.
+        .next_back()
+        .is_some_and(|quirks| has_quirk(quirks, vendor_id, product_id))
 }
 
 #[cfg(test)]
@@ -542,6 +544,11 @@ mod tests {
             PID
         ));
         assert!(!cmdline_has_quirk("ro quiet", VID, PID));
+        assert!(!cmdline_has_quirk(
+            "usbcore.quirks=03f0:06be:r usbcore.quirks=1234:5678:k",
+            VID,
+            PID
+        ));
     }
 
     #[test]
