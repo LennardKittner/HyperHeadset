@@ -271,6 +271,26 @@ fn create_command(device: &Result<Headset, DeviceError>) -> Command {
                 .help("Use JSON output. Time is in seconds."),
         );
 
+    #[cfg(target_os = "linux")]
+    {
+        cmd = cmd.arg(
+            Arg::new("fix-usb-quirk")
+                .long("fix-usb-quirk")
+                .action(ArgAction::SetTrue)
+                .help(
+                    "Apply the USB quirk the Cloud III S dongle needs to pass on replies.\n\
+                     Offers to keep it across reboots with GRUB, or to uninstall it from GRUB.\n\
+                     Asks before changing anything and uses sudo.",
+                )
+                .hide(
+                    !SHOW_ALL_OPTIONS
+                        && !device_supports(device, |d| {
+                            hyper_headset::usb_quirk::is_affected_device(d.vendor_id, d.product_id)
+                        }),
+                ),
+        );
+    }
+
     // Feature-gated TUI editor arg
     #[cfg(feature = "eq-editor")]
     {
@@ -312,6 +332,16 @@ fn main() {
     let command = create_command(&device);
     let matches = command.get_matches();
     VERBOSE.set(matches.get_flag("verbose")).unwrap();
+
+    // Handled before connecting: it only needs the dongle to be plugged in.
+    #[cfg(target_os = "linux")]
+    if matches.get_flag("fix-usb-quirk") {
+        if let Err(e) = hyper_headset::usb_quirk::run_interactive_fix() {
+            eprintln!("{e}");
+            exit(1);
+        }
+        exit(0);
+    }
 
     let device = connect_compatible_device();
 
@@ -599,4 +629,28 @@ fn main() {
     } else {
         println!("{}", props);
     }
+
+    #[cfg(target_os = "linux")]
+    if let Some(issue) = props.usb_quirk_issue {
+        warn_usb_quirk(issue);
+    }
+}
+
+/// Prints the warning to stderr, so it stays out of the JSON output. Yellow on a terminal.
+#[cfg(target_os = "linux")]
+fn warn_usb_quirk(issue: hyper_headset::usb_quirk::QuirkIssue) {
+    use hyper_headset::usb_quirk::{QuirkIssue, FIX_FLAG};
+    use std::io::IsTerminal;
+
+    let color = std::io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    let (start, end) = if color {
+        ("\x1b[1;33m", "\x1b[0m")
+    } else {
+        ("", "")
+    };
+    let mut message = format!("WARNING: {}", issue.explanation().join("\n"));
+    if issue == QuirkIssue::Missing {
+        message += &format!("\nRun: hyper_headset_cli {FIX_FLAG}");
+    }
+    eprintln!("\n{start}{message}{end}");
 }
