@@ -24,6 +24,9 @@ use std::{
 use thistermination::TerminationFull;
 
 const PASSIVE_REFRESH_TIME_OUT: Duration = Duration::from_secs(2);
+const LATE_REPLY_TIME_OUT: Duration = Duration::from_millis(200);
+// Upper bound so a device that never stops sending can't stall an active refresh.
+const MAX_LATE_READS: usize = 8;
 
 pub fn format_int_value(value: u8, suffix: &str) -> String {
     if value == 0 && suffix == "min" {
@@ -1165,6 +1168,30 @@ pub trait Device {
         .collect()
     }
 
+    /// Applies every report that has arrived during an active refresh and returns whether
+    /// there were any. A report needn't answer the latest query: replies can be late, and
+    /// reports caused by another process using the headset arrive here too.
+    fn read_query_replies(
+        &mut self,
+        timeout: Duration,
+        connected_status_packet_present: bool,
+    ) -> bool {
+        let events = self.drain_updates(timeout).unwrap_or_default();
+        for event in &events {
+            self.get_device_state_mut().update_self_with_event(event);
+        }
+        // Anything beyond a connected-status reply (if the device is queried for one) is
+        // evidence this connection gets real responses to the rest, so refreshes stay
+        // worthwhile after an EQ write.
+        if events.iter().any(|event| {
+            !connected_status_packet_present || !matches!(event, DeviceEvent::WirelessConnected(_))
+        }) {
+            self.get_device_state_mut()
+                .non_connected_query_ever_answered = true;
+        }
+        !events.is_empty()
+    }
+
     /// Refreshes the state by querying all available information
     fn active_refresh_state(&mut self) -> Result<(), DeviceError> {
         let packets = self.get_query_packets();
@@ -1178,29 +1205,31 @@ pub trait Device {
         self.execute_headset_specific_functionality()?;
 
         let mut responded = false;
-        for (i, packet) in packets.into_iter().enumerate() {
+        for packet in packets {
             self.prepare_write();
             debug_println!("Write packet: {packet:?}");
             self.write_hid_report(&packet)?;
             std::thread::sleep(RESPONSE_DELAY);
-            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
-                for event in events {
-                    self.get_device_state_mut().update_self_with_event(&event);
-                }
-                responded = true;
-                // Anything answering beyond the connected-status query (if any) is
-                // evidence this connection gets real responses to the rest, so refreshes
-                // stay worthwhile after an EQ write.
-                if i > 0 || !connected_status_packet_present {
-                    self.get_device_state_mut()
-                        .non_connected_query_ever_answered = true;
-                }
-            }
+            responded |=
+                self.read_query_replies(Duration::from_secs(1), connected_status_packet_present);
             if !matches!(
                 self.get_device_state().device_properties.connected,
                 Some(true)
             ) {
                 break;
+            }
+        }
+        // Replies still on their way when the loop ends, e.g. the last query's when
+        // another report was queued ahead of it: read until the headset goes quiet.
+        if matches!(
+            self.get_device_state().device_properties.connected,
+            Some(true)
+        ) {
+            for _ in 0..MAX_LATE_READS {
+                if !self.read_query_replies(LATE_REPLY_TIME_OUT, connected_status_packet_present) {
+                    break;
+                }
+                responded = true;
             }
         }
         self.get_device_state_mut().active_refresh_attempted = true;
