@@ -302,18 +302,23 @@ fn print_manual_persistence(quirks: &str) {
 /// Once the quirk is known to work, offers to keep it across reboots.
 fn offer_persistence(devices: &[(u16, u16)], quirks: &str) -> Result<(), String> {
     let cmdline = fs::read_to_string(CMDLINE_PATH).unwrap_or_default();
-    if devices
-        .iter()
-        .all(|&(vendor_id, product_id)| cmdline_has_quirk(&cmdline, vendor_id, product_id))
+    // With our drop-in there, still check it covers every plugged in device.
+    if !grub::is_installed()
+        && devices
+            .iter()
+            .all(|&(vendor_id, product_id)| cmdline_has_quirk(&cmdline, vendor_id, product_id))
     {
         return Ok(());
     }
     println!();
     match grub::current_plan(devices, &cmdline) {
+        grub::Plan::AlreadyConfigured(path) if path == Path::new(grub::drop_in_path()) => {
+            println!("GRUB keeps the quirk across reboots ({}).", path.display());
+        }
         grub::Plan::AlreadyConfigured(path) => {
             println!("{} already sets the quirk for GRUB.", path.display());
-            println!("If you haven't regenerated the GRUB config since it changed, do that");
-            println!("(on Debian and Ubuntu: sudo update-grub).");
+            println!("It wasn't written by this tool, so it can't tell whether GRUB's config");
+            println!("was regenerated since. If unsure, run: sudo update-grub");
         }
         grub::Plan::OtherQuirks(path) => {
             println!("{} sets other USB quirks, so nothing", path.display());
@@ -337,13 +342,33 @@ fn offer_persistence(devices: &[(u16, u16)], quirks: &str) -> Result<(), String>
                 return Ok(());
             }
             grub::install(&value)?;
-            println!(
-                "Installed. To undo, delete {} and run sudo update-grub.",
-                grub::drop_in_path()
-            );
+            println!("Installed. To uninstall, run hyper_headset_cli {FIX_FLAG} again.");
         }
     }
     Ok(())
+}
+
+/// If the quirk is installed in GRUB, offers to uninstall it. Returns whether it did.
+fn offer_uninstall() -> Result<bool, String> {
+    if !grub::is_installed() {
+        return Ok(false);
+    }
+    println!(
+        "The USB quirk is installed in GRUB ({}).",
+        grub::drop_in_path()
+    );
+    if !io::stdin().is_terminal() {
+        println!("Run {FIX_FLAG} in a terminal to be asked about uninstalling it.");
+        return Ok(false);
+    }
+    if !ask("Do you want to uninstall it from GRUB?")? {
+        println!("Keeping it.");
+        println!();
+        return Ok(false);
+    }
+    grub::uninstall()?;
+    println!("Uninstalled. The running system keeps the quirk until you reboot.");
+    Ok(true)
 }
 
 /// Asks for a replug and checks the headset's replies on request, until they come through or
@@ -384,8 +409,12 @@ fn confirm_after_replug(numbers_before: &[String]) -> Result<bool, String> {
 }
 
 /// Asks the user, adds the quirk for every plugged in affected device, then guides them
-/// through the replug.
+/// through the replug. If the quirk is installed in GRUB, first offers to uninstall it.
 pub fn run_interactive_fix() -> Result<(), String> {
+    // Uninstalling doesn't need the dongle.
+    if offer_uninstall()? {
+        return Ok(());
+    }
     let devices = plugged_in_affected_devices(Path::new(USB_DEVICES_PATH))
         .map_err(|e| format!("Failed to list USB devices: {e}"))?;
     if devices.is_empty() {

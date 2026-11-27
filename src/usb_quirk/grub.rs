@@ -147,23 +147,48 @@ pub(super) fn current_plan(devices: &[(u16, u16)], cmdline: &str) -> Plan {
 }
 
 /// Writes the drop-in and regenerates the GRUB configuration, both with `sudo`.
+/// A failed `update-grub` is rolled back, so the drop-in only stays if it took effect.
 pub(super) fn install(value: &str) -> Result<(), String> {
     let content = drop_in_content(value)?;
-    let run = |args: &[&str]| {
-        let status = Command::new("sudo")
-            .args(args)
-            .status()
-            .map_err(|e| format!("Failed to run sudo: {e}"))?;
-        if !status.success() {
-            return Err(format!("sudo {} failed: {status}", args.join(" ")));
-        }
-        Ok(())
-    };
-    run(&["mkdir", "-p", DROP_IN_DIR])?;
+    let previous = fs::read_to_string(DROP_IN_PATH).ok();
+    sudo(&["mkdir", "-p", DROP_IN_DIR])?;
     sudo_write(DROP_IN_PATH, &content)?;
-    run(&["update-grub"]).map_err(|e| {
-        format!("{e}\n{DROP_IN_PATH} was written but isn't active until update-grub succeeds.")
+    sudo(&["update-grub"]).map_err(|e| {
+        let restored = match &previous {
+            Some(previous) => sudo_write(DROP_IN_PATH, previous),
+            None => sudo(&["rm", DROP_IN_PATH]),
+        };
+        match restored {
+            Ok(()) => format!("{e}\nGRUB wasn't changed."),
+            Err(restore) => format!("{e}\n{restore}\nCheck {DROP_IN_PATH}."),
+        }
     })
+}
+
+/// Whether the drop-in written by `install` is there.
+pub(super) fn is_installed() -> bool {
+    Path::new(DROP_IN_PATH).exists()
+}
+
+pub(super) fn uninstall() -> Result<(), String> {
+    sudo(&["rm", DROP_IN_PATH])?;
+    sudo(&["update-grub"]).map_err(|e| {
+        format!(
+            "{e}\n{DROP_IN_PATH} is deleted, but the quirk stays in GRUB until\n\
+             sudo update-grub succeeds."
+        )
+    })
+}
+
+fn sudo(args: &[&str]) -> Result<(), String> {
+    let status = Command::new("sudo")
+        .args(args)
+        .status()
+        .map_err(|e| format!("Failed to run sudo: {e}"))?;
+    if !status.success() {
+        return Err(format!("sudo {} failed: {status}", args.join(" ")));
+    }
+    Ok(())
 }
 
 pub(super) fn drop_in_path() -> &'static str {
