@@ -106,7 +106,15 @@ impl Headset {
 
     pub fn device_properties(&self) -> DeviceProperties {
         match self {
+            #[cfg(not(target_os = "linux"))]
             Headset::Hid(device) => device.get_device_state().device_properties.clone(),
+            #[cfg(target_os = "linux")]
+            Headset::Hid(device) => {
+                let state = device.get_device_state();
+                let mut properties = state.device_properties.clone();
+                properties.usb_quirk_issue = state.usb_quirk_issue();
+                properties
+            }
             #[cfg(target_os = "linux")]
             Headset::Bluetooth(bt) => bt.device_properties(),
         }
@@ -330,6 +338,10 @@ pub struct DeviceProperties {
     pub can_set_silent_mode: bool,
     pub can_set_equalizer: bool,
     pub can_set_noise_gate: bool,
+    /// Set when the dongle appears to need its Linux USB quirk. Filled in by
+    /// `Headset::device_properties`.
+    #[cfg(target_os = "linux")]
+    pub usb_quirk_issue: Option<crate::usb_quirk::QuirkIssue>,
 }
 
 impl Display for DeviceProperties {
@@ -428,6 +440,14 @@ impl DeviceState {
                 }
             })
             .collect())
+    }
+
+    /// The Linux USB quirk issue, once a full refresh has had the chance to get replies.
+    #[cfg(target_os = "linux")]
+    fn usb_quirk_issue(&self) -> Option<crate::usb_quirk::QuirkIssue> {
+        let properties = &self.device_properties;
+        (self.active_refresh_attempted && crate::usb_quirk::replies_blocked(properties))
+            .then(|| crate::usb_quirk::diagnose(properties.vendor_id, properties.product_id))
     }
 
     fn update_self_with_event(&mut self, event: &DeviceEvent) {
@@ -542,6 +562,8 @@ impl DeviceProperties {
             active_eq_preset: None,
             eq_synced: None,
             eq_preset_options: Vec::new(),
+            #[cfg(target_os = "linux")]
+            usb_quirk_issue: None,
         }
     }
 

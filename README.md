@@ -26,7 +26,7 @@ Both the CLI and tray applications are compatible with Linux, MacOS, and Windows
 - HyperX Cloud II Wireless HyperX vendor ID
 - HyperX Cloud II Core Wireless
 - HyperX Cloud III Wireless
-- HyperX Cloud III S Wireless (known issue: may not respond correctly to some queries, see: [#36](https://github.com/LennardKittner/HyperHeadset/issues/36))
+- HyperX Cloud III S Wireless (Linux may need a [USB quirk](#cloud-iii-s-wireless-usb-quirk-linux-only))
 - HyperX Cloud Stinger 2 Wireless
 - HyperX Cloud Flight S
 - HyperX Cloud Flight Wireless
@@ -152,6 +152,29 @@ KERNEL=="hidraw*", ATTRS{idProduct}=="1723", ATTRS{idVendor}=="0951", MODE="0666
 ```
 
 Once created, replug the wireless dongle or run `sudo udevadm control --reload-rules && sudo udevadm trigger`.
+
+### Cloud III S Wireless USB quirk (Linux only)
+
+If the app only shows `Connected: true`, with no battery level or other states, the dongle is not passing on the headset's replies.
+After power-up it checks the size of the first USB configuration descriptor request: Windows asks for 255 bytes, Linux for 9, which leaves the dongle in this state until it loses power. Audio, the microphone and changing settings still work. See [#36](https://github.com/LennardKittner/HyperHeadset/issues/36#issuecomment-6097161753).
+
+A USB quirk makes Linux ask for 255 bytes. It needs kernel 7.1.9, 7.2 or newer, or a distribution kernel with the change backported; other kernels silently ignore it.
+
+The app warns you when it detects this. To apply the quirk, run the following (also available from the tray warning). It keeps quirks you already have, asks before using `sudo`, then asks you to replug the dongle and checks that the replies come through:
+
+```sh
+hyper_headset_cli --fix-usb-quirk
+```
+
+Or set it by hand, using your product ID from `lsusb` (`06be` or `02cc`). Note that this replaces any other USB quirks you have set:
+
+```sh
+echo 03f0:06be:r | sudo tee /sys/module/usbcore/parameters/quirks
+```
+
+Either way, then unplug the dongle, wait 5 s and plug it back in.
+
+The setting is lost on reboot. To keep it, add `usbcore.quirks=03f0:06be:r` (with your product ID) to your kernel command line; how depends on your bootloader, so see your distribution's documentation.
 
 ## Usage
 

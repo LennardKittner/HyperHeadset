@@ -16,6 +16,9 @@ pub mod bluetooth;
 #[cfg(target_os = "linux")]
 mod airoha_race;
 
+#[cfg(target_os = "linux")]
+pub mod usb_quirk;
+
 pub static VERBOSE: OnceLock<bool> = OnceLock::new();
 
 #[macro_export]
@@ -289,78 +292,96 @@ pub fn set_default_microphone_mute(muted: bool) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "eq-editor")]
-pub fn launch_eq_editor() {
-    let mut exe_path = match std::env::current_exe() {
-        Ok(path) => path,
-        Err(_) => return,
-    };
+/// Path of the CLI next to the running binary, or its bare name to be found on `PATH`.
+#[cfg(any(target_os = "linux", feature = "eq-editor"))]
+fn cli_path() -> Option<std::path::PathBuf> {
+    let mut exe_path = std::env::current_exe().ok()?;
     #[cfg(target_os = "windows")]
     exe_path.set_file_name("hyper_headset_cli.exe");
     #[cfg(not(target_os = "windows"))]
     exe_path.set_file_name("hyper_headset_cli");
-    let cli_path = if exe_path.exists() {
+    Some(if exe_path.exists() {
         exe_path
     } else {
         std::path::PathBuf::from("hyper_headset_cli")
+    })
+}
+
+/// Runs `hyper_headset_cli <flag>` in a terminal emulator that stays open until Enter is
+/// pressed. If none can be started, offers to copy the command instead.
+#[cfg(target_os = "linux")]
+fn run_cli_in_terminal(flag: &str, title: &str) {
+    let Some(cli_path) = cli_path() else {
+        return;
     };
+    let shell_cmd = format!(
+        "\"{}\" {flag}; echo; echo 'Press Enter to close...'; read _",
+        cli_path.to_string_lossy().replace('"', "\\\"")
+    );
+    let command_args = ["/bin/sh", "-c", &shell_cmd];
 
-    let cli_str = cli_path.to_string_lossy();
+    let terminals = [
+        ("xdg-terminal-exec", vec![]),
+        ("x-terminal-emulator", vec!["-e"]),
+        ("gnome-terminal", vec!["--"]),
+        ("konsole", vec!["-e"]),
+        ("xfce4-terminal", vec!["-x"]),
+        ("mate-terminal", vec!["-e"]),
+        ("lxterminal", vec!["-e"]),
+        ("alacritty", vec!["-e"]),
+        ("kitty", vec![]),
+        ("xterm", vec!["-e"]),
+    ];
 
-    #[cfg(target_os = "linux")]
-    {
-        let shell_cmd = format!(
-            "\"{}\" --eq; echo; echo 'Press Enter to close...'; read _",
-            cli_str.replace('"', "\\\"")
-        );
-        let command_args = ["/bin/sh", "-c", &shell_cmd];
-
-        let terminals = [
-            ("xdg-terminal-exec", vec![]),
-            ("x-terminal-emulator", vec!["-e"]),
-            ("gnome-terminal", vec!["--"]),
-            ("konsole", vec!["-e"]),
-            ("xfce4-terminal", vec!["-x"]),
-            ("mate-terminal", vec!["-e"]),
-            ("lxterminal", vec!["-e"]),
-            ("alacritty", vec!["-e"]),
-            ("kitty", vec![]),
-            ("xterm", vec!["-e"]),
-        ];
-
-        for (term, term_args) in terminals {
-            let mut cmd = std::process::Command::new(term);
-            cmd.args(&term_args);
-            cmd.args(&command_args);
-            if cmd.spawn().is_ok() {
-                return;
-            }
-        }
-
-        let error_msg = "Could not open the terminal emulator.\n\n\
-                         Would you like to copy the command to your clipboard?\n\n\
-                         hyper_headset_cli --eq";
-        let choice = dialog::Question::new(error_msg)
-            .title("HyperX Equalizer Editor")
-            .show();
-
-        if let Ok(Choice::Yes) = choice {
-            if !copy_to_clipboard("hyper_headset_cli --eq") {
-                let _ = dialog::Message::new(
-                    "Failed to copy to clipboard. Please run manually:\n\nhyper_headset_cli --eq",
-                )
-                .title("HyperX Equalizer Editor")
-                .show();
-            }
+    for (term, term_args) in terminals {
+        let mut cmd = std::process::Command::new(term);
+        cmd.args(&term_args);
+        cmd.args(command_args);
+        if cmd.spawn().is_ok() {
+            return;
         }
     }
 
+    let command = format!("hyper_headset_cli {flag}");
+    let error_msg = format!(
+        "Could not open the terminal emulator.\n\n\
+         Would you like to copy the command to your clipboard?\n\n\
+         {command}"
+    );
+    let choice = dialog::Question::new(error_msg).title(title).show();
+
+    if let Ok(Choice::Yes) = choice {
+        if !copy_to_clipboard(&command) {
+            let _ = dialog::Message::new(format!(
+                "Failed to copy to clipboard. Please run manually:\n\n{command}"
+            ))
+            .title(title)
+            .show();
+        }
+    }
+}
+
+/// Opens a terminal that explains the Cloud III S USB quirk and offers to apply it.
+#[cfg(target_os = "linux")]
+pub fn launch_usb_quirk_fix() {
+    run_cli_in_terminal(usb_quirk::FIX_FLAG, "HyperHeadset USB fix");
+}
+
+#[cfg(feature = "eq-editor")]
+pub fn launch_eq_editor() {
+    #[cfg(target_os = "linux")]
+    run_cli_in_terminal("--eq", "HyperX Equalizer Editor");
+
     #[cfg(target_os = "windows")]
     {
+        let Some(cli_path) = cli_path() else {
+            return;
+        };
         // `start` treats the first quoted argument as the window title, so an explicit empty
         // title must precede the command. The CLI binary is resolved next to the tray binary;
         // if that fails the bare name is used, which requires hyper_headset_cli to be on PATH.
         // TODO(LennardKittner): improve PATH handling / installer guidance for Windows.
+        let cli_str = cli_path.to_string_lossy();
         let mut cmd = std::process::Command::new("cmd.exe");
         cmd.args(&["/c", "start", "", "cmd", "/k", &format!("{} --eq", cli_str)]);
         let _ = cmd.spawn();

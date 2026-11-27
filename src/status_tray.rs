@@ -205,6 +205,40 @@ impl Tray for StatusTray {
             menu_items.push(make_exit().into());
             return menu_items;
         }
+        if let Some(issue) = device_properties.usb_quirk_issue {
+            let mut warning_items: Vec<MenuItem<Self>> = issue
+                .explanation()
+                .iter()
+                .map(|line| {
+                    StandardItem {
+                        label: line.to_string(),
+                        enabled: false,
+                        ..Default::default()
+                    }
+                    .into()
+                })
+                .collect();
+            warning_items.push(MenuItem::Separator);
+            warning_items.push(
+                StandardItem {
+                    label: "Fix (opens a terminal)".into(),
+                    activate: Box::new(|_| hyper_headset::launch_usb_quirk_fix()),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            // Menus can't color text, so the emoji and themed icon carry the color.
+            menu_items.push(
+                SubMenu {
+                    label: "⚠️ Headset replies blocked".into(),
+                    icon_name: "dialog-warning".into(),
+                    submenu: warning_items,
+                    ..Default::default()
+                }
+                .into(),
+            );
+            menu_items.push(MenuItem::Separator);
+        }
         for property in device_properties.get_properties() {
             match property {
                 hyper_headset::devices::PropertyDescriptorWrapper::Int(property, []) => {
