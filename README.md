@@ -195,6 +195,10 @@ Options:
           Others unchanged. Use alone or with --eq-profile (overrides on top of the profile).
           See --eq-profile for band/dB reference.
           Example: --eq-band 5=-12.0,1khz=3.0 --eq-band 1=-12.0
+      --fix-usb-quirk
+          Linux only. Apply the USB quirk the Cloud III S dongle needs to pass on replies.
+          Offers to keep it across reboots with GRUB, or to uninstall it from GRUB.
+          Asks before changing anything and uses sudo.
   -v, --verbose
           Use verbose output
       --json

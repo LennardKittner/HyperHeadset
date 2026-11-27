@@ -278,7 +278,9 @@ fn create_command(device: &Result<Headset, DeviceError>) -> Command {
                 .long("fix-usb-quirk")
                 .action(ArgAction::SetTrue)
                 .help(
-                    "Apply the USB quirk the Cloud III S dongle needs to pass on replies.\nAsks before changing anything and uses sudo.",
+                    "Apply the USB quirk the Cloud III S dongle needs to pass on replies.\n\
+                     Offers to keep it across reboots with GRUB, or to uninstall it from GRUB.\n\
+                     Asks before changing anything and uses sudo.",
                 )
                 .hide(
                     !SHOW_ALL_OPTIONS
