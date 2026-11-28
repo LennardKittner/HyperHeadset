@@ -305,6 +305,114 @@ fn set_system_mute(muted: bool) {
     }
 }
 
+/// Automatically switches the default Linux audio output sink when the headset powers on or off.
+#[cfg(target_os = "linux")]
+struct AudioSwitcher {
+    enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    fallback_sink: Option<String>,
+    previous_sink: Option<String>,
+    last_connected: Option<bool>,
+}
+
+#[cfg(target_os = "linux")]
+impl AudioSwitcher {
+    fn new(
+        enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        fallback_sink: Option<String>,
+    ) -> Self {
+        Self {
+            enabled,
+            fallback_sink,
+            previous_sink: None,
+            last_connected: None,
+        }
+    }
+
+    fn sync(&mut self, props: &hyper_headset::devices::DeviceProperties) {
+        use hyper_headset::{
+            debug_println, get_default_audio_sink, list_audio_sinks, set_default_audio_sink,
+        };
+        use std::sync::atomic::Ordering;
+
+        let Some(connected) = props.connected else {
+            return;
+        };
+        let was_connected = self.last_connected;
+        if was_connected == Some(connected) {
+            return;
+        }
+        self.last_connected = Some(connected);
+
+        if !self.enabled.load(Ordering::Relaxed) {
+            return;
+        }
+
+        let sinks = match list_audio_sinks() {
+            Ok(sinks) => sinks,
+            Err(e) => {
+                debug_println!("Auto-switch audio skipped (could not list sinks): {e}");
+                return;
+            }
+        };
+
+        let Some(headset_sink) = sinks.iter().find(|s| {
+            s.vendor_id == Some(props.vendor_id) && s.product_id == Some(props.product_id)
+        }) else {
+            debug_println!(
+                "Auto-switch audio: no sink matched USB {:04x}:{:04x}",
+                props.vendor_id,
+                props.product_id
+            );
+            return;
+        };
+
+        let current_default = get_default_audio_sink();
+
+        if connected {
+            if current_default.as_deref() != Some(headset_sink.name.as_str()) {
+                if let Some(current) = current_default {
+                    self.previous_sink = Some(current);
+                }
+                debug_println!(
+                    "Headset connected, switching audio to {}",
+                    headset_sink.name
+                );
+                if let Err(e) = set_default_audio_sink(&headset_sink.name) {
+                    eprintln!("Failed to switch audio to headset sink: {e}");
+                }
+            }
+        } else if current_default.as_deref() == Some(headset_sink.name.as_str()) {
+            let has_sink =
+                |name: &str| name != headset_sink.name && sinks.iter().any(|s| s.name == name);
+            let target = self
+                .fallback_sink
+                .as_deref()
+                .filter(|name| has_sink(name))
+                .or_else(|| self.previous_sink.as_deref().filter(|name| has_sink(name)))
+                .or_else(|| {
+                    sinks
+                        .iter()
+                        .find(|s| s.name != headset_sink.name)
+                        .map(|s| s.name.as_str())
+                });
+
+            if let Some(target) = target {
+                debug_println!("Headset disconnected, switching audio to {target}");
+                if let Err(e) = set_default_audio_sink(target) {
+                    eprintln!("Failed to switch audio to fallback sink: {e}");
+                }
+            } else {
+                debug_println!("Headset disconnected, no fallback audio sink available");
+            }
+        } else if was_connected.is_none() {
+            // Startup with headset already off: remember the current non-headset sink.
+            if let Some(current) = current_default {
+                self.previous_sink = Some(current);
+            }
+        }
+    }
+}
+
 /// What [`wait_for_command`] stopped waiting for.
 #[cfg(target_os = "linux")]
 enum Waited {
@@ -326,6 +434,7 @@ async fn wait_for_command(
     rx: &std::sync::mpsc::Receiver<hyper_headset::devices::DeviceEvent>,
     timeout: std::time::Duration,
     mut system_mute: Option<&mut SystemMute>,
+    audio_switcher: &mut AudioSwitcher,
     tray_handler: &status_tray::TrayHandler,
 ) -> Result<Waited, hyper_headset::devices::DeviceError> {
     use hyper_headset::debug_println;
@@ -349,10 +458,12 @@ async fn wait_for_command(
         let was_muted = device.device_properties().muted;
         let outcome = device.listen(remaining.min(LISTEN_INTERVAL))?;
         if outcome != ListenOutcome::Nothing {
+            let props = device.device_properties();
             if let Some(system_mute) = system_mute.as_deref_mut() {
-                system_mute.sync(was_muted, device.device_properties().muted);
+                system_mute.sync(was_muted, props.muted);
             }
-            tray_handler.update(&device.device_properties()).await;
+            audio_switcher.sync(&props);
+            tray_handler.update(&props).await;
         }
         if outcome == ListenOutcome::Connected {
             debug_println!("Headset connected while listening, refreshing its state");
@@ -367,7 +478,7 @@ async fn main() {
     use clap::ArgAction;
     use clap::{Arg, Command};
     use enigo::{Enigo, Settings};
-    use std::sync::mpsc;
+    use std::sync::{atomic::AtomicBool, mpsc, Arc};
     use std::time::Duration;
 
     use hyper_headset::devices::{connect_compatible_device, DeviceEvent};
@@ -422,6 +533,25 @@ async fn main() {
             .required(false)
             .help("Use the symbolic (monochrome) variants of the system tray icons")
         )
+        .arg(
+            Arg::new("auto-switch-audio")
+                .long("auto-switch-audio")
+                .alias("auto_switch_audio")
+                .required(false)
+                .help("Automatically switch the default audio output when the headset connects or disconnects")
+                .default_value("false")
+                .default_missing_value("true")
+                .num_args(0..=1)
+                .value_parser(clap::value_parser!(bool)),
+        )
+        .arg(
+            Arg::new("fallback-sink")
+                .long("fallback-sink")
+                .alias("fallback_sink")
+                .required(false)
+                .help("Audio output sink name to switch to when the headset disconnects (defaults to the previously active sink)")
+                .value_name("SINK"),
+        )
         .get_matches();
 
     let press_mute_key = *matches.get_one::<bool>("press-mute-key").unwrap_or(&true);
@@ -438,12 +568,25 @@ async fn main() {
     };
     VERBOSE.set(matches.get_flag("verbose")).unwrap();
     let monochrome_icons = matches.get_flag("monochrome_icons");
+    let auto_switch_enabled = Arc::new(AtomicBool::new(
+        *matches
+            .get_one::<bool>("auto-switch-audio")
+            .unwrap_or(&false),
+    ));
+    let fallback_sink = matches.get_one::<String>("fallback-sink").cloned();
+    let mut audio_switcher = AudioSwitcher::new(Arc::clone(&auto_switch_enabled), fallback_sink);
 
     let refresh_interval = *matches.get_one::<u64>("refresh-interval").unwrap_or(&3);
     let refresh_interval = Duration::from_secs(refresh_interval);
 
     let (tx, rx) = mpsc::channel();
-    let tray_handler = match TrayHandler::new(StatusTray::new(tx, monochrome_icons)).await {
+    let tray_handler = match TrayHandler::new(StatusTray::new(
+        tx,
+        monochrome_icons,
+        Arc::clone(&auto_switch_enabled),
+    ))
+    .await
+    {
         Ok(tray) => tray,
         Err(e) => {
             eprintln!("Failed to create the tray with error: {e:?}");
@@ -497,9 +640,11 @@ async fn main() {
                     break 'tick; // exit tick loop to retry connection in the outer loop
                 }
             };
+            let props = device.device_properties();
             if let Some(system_mute) = &mut system_mute {
-                system_mute.sync(mute_state, device.device_properties().muted);
+                system_mute.sync(mute_state, props.muted);
             }
+            audio_switcher.sync(&props);
 
             // Process tray device commands
             // with the default refresh_interval the state is only actively queried every 3min
@@ -509,6 +654,7 @@ async fn main() {
                 &rx,
                 refresh_interval,
                 system_mute.as_mut(),
+                &mut audio_switcher,
                 &tray_handler,
             )
             .await

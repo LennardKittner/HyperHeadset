@@ -1,4 +1,8 @@
-use std::sync::mpsc::Sender;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::Sender,
+    Arc,
+};
 
 use hyper_headset::devices::{format_int_value, DeviceEvent, DeviceProperties, PropertyType};
 use ksni::{
@@ -63,6 +67,7 @@ pub struct StatusTray {
     device_properties: Option<DeviceProperties>,
     update_sender: Sender<DeviceEvent>,
     monochrome_icons: bool,
+    auto_switch_audio: Arc<AtomicBool>,
     /// Target preset of an in-flight EQ switch, so the menu gives instant visual
     /// feedback before the main loop confirms the HID writes finished. Cleared once
     /// the target is confirmed active and synced.
@@ -71,13 +76,18 @@ pub struct StatusTray {
 }
 
 impl StatusTray {
-    pub fn new(update_sender: Sender<DeviceEvent>, monochrome_icons: bool) -> Self {
+    pub fn new(
+        update_sender: Sender<DeviceEvent>,
+        monochrome_icons: bool,
+        auto_switch_audio: Arc<AtomicBool>,
+    ) -> Self {
         let theme_name = linicon::get_system_theme();
         StatusTray {
             theme_name,
             device_properties: None,
             update_sender,
             monochrome_icons,
+            auto_switch_audio,
             #[cfg(feature = "eq-support")]
             pending_eq_transition: None,
         }
@@ -174,6 +184,17 @@ impl Tray for StatusTray {
                 ..Default::default()
             }
         };
+        let make_auto_switch = || {
+            let enabled = self.auto_switch_audio.load(Ordering::Relaxed);
+            StandardItem {
+                label: format!("Auto-switch audio: {}", if enabled { "on" } else { "off" }),
+                enabled: true,
+                activate: Box::new(|this: &mut StatusTray| {
+                    this.auto_switch_audio.fetch_xor(true, Ordering::Relaxed);
+                }),
+                ..Default::default()
+            }
+        };
         let mut menu_items: Vec<MenuItem<Self>> = Vec::new();
 
         let Some(device_properties) = self.device_properties.as_ref() else {
@@ -186,6 +207,7 @@ impl Tray for StatusTray {
                 .into(),
             );
             menu_items.push(MenuItem::Separator);
+            menu_items.push(make_auto_switch().into());
             menu_items.push(make_about().into());
             menu_items.push(make_exit().into());
             return menu_items;
@@ -201,6 +223,7 @@ impl Tray for StatusTray {
                 .into(),
             );
             menu_items.push(MenuItem::Separator);
+            menu_items.push(make_auto_switch().into());
             menu_items.push(make_about().into());
             menu_items.push(make_exit().into());
             return menu_items;
@@ -418,6 +441,7 @@ impl Tray for StatusTray {
         }
 
         menu_items.push(MenuItem::Separator);
+        menu_items.push(make_auto_switch().into());
         menu_items.push(make_about().into());
         menu_items.push(make_exit().into());
         menu_items
