@@ -289,6 +289,147 @@ pub fn set_default_microphone_mute(muted: bool) -> io::Result<()> {
     Ok(())
 }
 
+/// An audio output sink reported by PulseAudio / PipeWire (`pactl list sinks`).
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioSink {
+    pub name: String,
+    pub vendor_id: Option<u16>,
+    pub product_id: Option<u16>,
+}
+
+#[cfg(target_os = "linux")]
+fn parse_hex_u16(raw: &str) -> Option<u16> {
+    let trimmed = raw.trim().trim_matches('"');
+    let hex = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .unwrap_or(trimmed);
+    u16::from_str_radix(hex, 16).ok()
+}
+
+/// Parses the plain-text output of `LC_ALL=C pactl list sinks`.
+#[cfg(target_os = "linux")]
+pub fn parse_pactl_sinks(output: &str) -> Vec<AudioSink> {
+    let mut sinks = Vec::new();
+    let mut current_name: Option<String> = None;
+    let mut current_vid: Option<u16> = None;
+    let mut current_pid: Option<u16> = None;
+
+    let flush = |sinks: &mut Vec<AudioSink>,
+                 name: &mut Option<String>,
+                 vid: &mut Option<u16>,
+                 pid: &mut Option<u16>| {
+        if let Some(name) = name.take() {
+            sinks.push(AudioSink {
+                name,
+                vendor_id: vid.take(),
+                product_id: pid.take(),
+            });
+        } else {
+            *vid = None;
+            *pid = None;
+        }
+    };
+
+    for line in output.lines() {
+        if line.starts_with("Sink #") {
+            flush(
+                &mut sinks,
+                &mut current_name,
+                &mut current_vid,
+                &mut current_pid,
+            );
+            continue;
+        }
+        let trimmed = line.trim();
+        if let Some(name) = trimmed.strip_prefix("Name:") {
+            current_name = Some(name.trim().to_string());
+        } else if let Some(val) = trimmed.strip_prefix("device.vendor.id =") {
+            current_vid = parse_hex_u16(val);
+        } else if let Some(val) = trimmed.strip_prefix("device.product.id =") {
+            current_pid = parse_hex_u16(val);
+        } else if (current_vid.is_none() || current_pid.is_none())
+            && trimmed.starts_with("alsa.components =")
+        {
+            if let Some(val) = trimmed.strip_prefix("alsa.components =") {
+                if let Some(usb) = val.trim().trim_matches('"').strip_prefix("USB") {
+                    if let Some((v, p)) = usb.split_once(':') {
+                        current_vid = current_vid.or_else(|| parse_hex_u16(v));
+                        current_pid = current_pid.or_else(|| parse_hex_u16(p));
+                    }
+                }
+            }
+        }
+    }
+    flush(
+        &mut sinks,
+        &mut current_name,
+        &mut current_vid,
+        &mut current_pid,
+    );
+    sinks
+}
+
+/// Lists available PulseAudio / PipeWire audio output sinks via `pactl`.
+#[cfg(target_os = "linux")]
+pub fn list_audio_sinks() -> io::Result<Vec<AudioSink>> {
+    let output = Command::new("pactl")
+        .env("LC_ALL", "C")
+        .args(["list", "sinks"])
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "pactl list sinks exited with {}",
+            output.status
+        )));
+    }
+    Ok(parse_pactl_sinks(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Returns the current default audio output sink name, or `None` if `pactl` is unavailable or
+/// fails.
+#[cfg(target_os = "linux")]
+pub fn get_default_audio_sink() -> Option<String> {
+    let output = Command::new("pactl")
+        .args(["get-default-sink"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+/// Sets the default audio output sink and moves active playback streams to it via `pactl`.
+#[cfg(target_os = "linux")]
+pub fn set_default_audio_sink(sink_name: &str) -> io::Result<()> {
+    let status = Command::new("pactl")
+        .args(["set-default-sink", sink_name])
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::other(format!(
+            "pactl set-default-sink exited with {status}"
+        )));
+    }
+    if let Ok(output) = Command::new("pactl")
+        .args(["list", "short", "sink-inputs"])
+        .output()
+    {
+        if output.status.success() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                if let Some(index) = line.split_whitespace().next() {
+                    let _ = Command::new("pactl")
+                        .args(["move-sink-input", index, sink_name])
+                        .status();
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(feature = "eq-editor")]
 pub fn launch_eq_editor() {
     let mut exe_path = match std::env::current_exe() {
@@ -466,5 +607,54 @@ pub fn copy_to_clipboard(text: &str) -> bool {
             }
         }
         false
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod audio_sink_tests {
+    use super::*;
+
+    #[test]
+    fn parses_pactl_sinks_with_vendor_and_product_ids() {
+        let sample = "\
+Sink #54
+\tState: SUSPENDED
+\tName: alsa_output.usb-Kingston_HyperX_Quadcast_4110-00.analog-stereo
+\tProperties:
+\t\tdevice.vendor.id = \"0x0951\"
+\t\tdevice.product.id = \"0x16df\"
+Sink #56
+\tState: RUNNING
+\tName: alsa_output.usb-HP__Inc_HyperX_Cloud_III_Wireless_0000000000000000-00.analog-stereo
+\tProperties:
+\t\tdevice.vendor.id = \"0x03f0\"
+\t\tdevice.product.id = \"0x05b7\"
+Sink #58
+\tState: IDLE
+\tName: alsa_output.usb-bestechnic_EDIFIER_M60_20160406.1-00.analog-stereo
+\tProperties:
+\t\talsa.components = \"USB2d99:a094\"
+";
+        let sinks = parse_pactl_sinks(sample);
+        assert_eq!(
+            sinks,
+            vec![
+                AudioSink {
+                    name: "alsa_output.usb-Kingston_HyperX_Quadcast_4110-00.analog-stereo".into(),
+                    vendor_id: Some(0x0951),
+                    product_id: Some(0x16df),
+                },
+                AudioSink {
+                    name: "alsa_output.usb-HP__Inc_HyperX_Cloud_III_Wireless_0000000000000000-00.analog-stereo".into(),
+                    vendor_id: Some(0x03f0),
+                    product_id: Some(0x05b7),
+                },
+                AudioSink {
+                    name: "alsa_output.usb-bestechnic_EDIFIER_M60_20160406.1-00.analog-stereo".into(),
+                    vendor_id: Some(0x2d99),
+                    product_id: Some(0xa094),
+                },
+            ]
+        );
     }
 }
